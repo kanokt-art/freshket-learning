@@ -1,6 +1,22 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app'
-import { getAuth, type Auth } from 'firebase/auth'
-import { getFirestore, type Firestore } from 'firebase/firestore'
+import {
+  getAuth,
+  onAuthStateChanged,
+  signOut,
+  GoogleAuthProvider,
+  signInWithPopup,
+  type Auth,
+} from 'firebase/auth'
+import { getFirestore, doc, getDoc, type Firestore } from 'firebase/firestore'
+
+export {
+  onAuthStateChanged,
+  signOut,
+  GoogleAuthProvider,
+  signInWithPopup,
+  doc,
+  getDoc,
+}
 
 const firebaseConfig = {
   apiKey:            process.env.NEXT_PUBLIC_FIREBASE_API_KEY,

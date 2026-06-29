@@ -12,6 +12,20 @@ const nextConfig = {
       },
     ],
   },
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            // Allow Firebase signInWithPopup to communicate back to parent window
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin-allow-popups',
+          },
+        ],
+      },
+    ]
+  },
 }
 
 export default nextConfig

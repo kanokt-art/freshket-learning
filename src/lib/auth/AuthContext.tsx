@@ -109,11 +109,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let unsub: (() => void) | undefined
 
     const initFirebase = async () => {
-      const { onAuthStateChanged } = await import('firebase/auth')
-      const { getClientAuth, getClientFirestore } = await import('@/lib/firebase/client')
-      const auth = getClientAuth()
+      const fb = await import('@/lib/firebase/client')
+      const auth = fb.getClientAuth()
 
-      unsub = onAuthStateChanged(auth, async (fbUser) => {
+      unsub = fb.onAuthStateChanged(auth, async (fbUser) => {
         setError(null)
 
         if (!fbUser) {
@@ -124,8 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const email = fbUser.email ?? ''
         if (!email.endsWith('@freshket.co')) {
-          const { signOut: fbSignOut } = await import('firebase/auth')
-          await fbSignOut(getClientAuth())
+          await fb.signOut(fb.getClientAuth())
           setError('Access Denied: อนุญาตเฉพาะอีเมล @freshket.co เท่านั้น')
           setUser(null)
           setLoading(false)
@@ -133,9 +131,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         try {
-          const { doc, getDoc } = await import('firebase/firestore')
-          const db = getClientFirestore()
-          const snap = await getDoc(doc(db, 'users', fbUser.uid))
+          const db = fb.getClientFirestore()
+          const snap = await fb.getDoc(fb.doc(db, 'users', fbUser.uid))
 
           if (snap.exists()) {
             setUser(mapDocToProfile(
@@ -192,11 +189,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
     setError(null)
-    const { GoogleAuthProvider, signInWithPopup } = await import('firebase/auth')
-    const { getClientAuth } = await import('@/lib/firebase/client')
-    const provider = new GoogleAuthProvider()
+    const fb = await import('@/lib/firebase/client')
+    const provider = new fb.GoogleAuthProvider()
     provider.setCustomParameters({ hd: 'freshket.co' })
-    await signInWithPopup(getClientAuth(), provider)
+    await fb.signInWithPopup(fb.getClientAuth(), provider)
   }
 
   async function getIdToken(): Promise<string | null> {
@@ -207,9 +203,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOutUser() {
     if (DEMO_MODE) { setUser(null); return }
-    const { signOut: fbSignOut } = await import('firebase/auth')
-    const { getClientAuth } = await import('@/lib/firebase/client')
-    await fbSignOut(getClientAuth())
+    const fb = await import('@/lib/firebase/client')
+    await fb.signOut(fb.getClientAuth())
     setUser(null)
   }
 
