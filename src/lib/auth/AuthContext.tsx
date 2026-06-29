@@ -192,11 +192,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
     setError(null)
-    const { GoogleAuthProvider, signInWithRedirect } = await import('firebase/auth')
+    const { GoogleAuthProvider, signInWithPopup } = await import('firebase/auth')
     const { getClientAuth } = await import('@/lib/firebase/client')
     const provider = new GoogleAuthProvider()
     provider.setCustomParameters({ hd: 'freshket.co' })
-    await signInWithRedirect(getClientAuth(), provider)
+    await signInWithPopup(getClientAuth(), provider)
   }
 
   async function getIdToken(): Promise<string | null> {
