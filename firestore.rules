@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function role() {
+      return getUserData().role;
+    }
+
+    function isSuperAdmin() {
+      return isAuth() && role() == 'super_admin';
+    }
+
+    function isManagerOrAbove() {
+      return isAuth() && role() in ['manager', 'super_admin'];
+    }
+
+    function isSelf(userId) {
+      return isAuth() && uid() == userId;
+    }
+
+    // Fields that only super_admin can change
+    function isSensitiveField(field) {
+      return field in ['role', 'teamId', 'managerId'];
+    }
+
+    // ── /users ─────────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      // All authenticated users can read profiles (needed for target group transfer UI)
+      allow read: if isAuth();
+
+      // First-time login: user can only create their own doc, role must default to 'sale'
+      allow create: if isSelf(userId)
+                    && request.resource.data.role == 'sale'
+                    && request.resource.data.uid == userId;
+
+      // User can update their own profile except sensitive fields
+      // super_admin can update anything
+      allow update: if isSuperAdmin()
+                    || (isSelf(userId)
+                        && !request.resource.data.diff(resource.data)
+                              .affectedKeys()
+                              .hasAny(['role', 'teamId', 'managerId']));
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── /courses ───────────────────────────────────────────────────────────────
+    match /courses/{courseId} {
+      // Authenticated users see published courses; super_admin sees all
+      allow read: if isAuth()
+                  && (isSuperAdmin() || resource.data.isPublished == true);
+
+      // Only super_admin can create / edit / delete courses
+      allow write: if isSuperAdmin();
+    }
+
+    // ── /assessments ───────────────────────────────────────────────────────────
+    match /assessments/{assessmentId} {
+      // Any authenticated user can read (needed to take assessments)
+      allow read: if isAuth();
+      allow write: if isSuperAdmin();
+    }
+
+    // ── /resources ─────────────────────────────────────────────────────────────
+    match /resources/{resourceId} {
+      allow read: if isAuth()
+                  && (isSuperAdmin() || resource.data.isPublished == true);
+      allow write: if isSuperAdmin();
+    }
+
+    // ── /trainingRecords ───────────────────────────────────────────────────────
+    match /trainingRecords/{recordId} {
+      // User reads own records; manager/super_admin reads all
+      allow read: if isAuth()
+                  && (resource.data.userId == uid() || isManagerOrAbove());
+
+      // User can create their own record
+      allow create: if isAuth()
+                    && request.resource.data.userId == uid();
+
+      // User can update their own record (no changing userId)
+      allow update: if isAuth()
+                    && resource.data.userId == uid()
+                    && request.resource.data.userId == uid();
+
+      // Super_admin can write / delete anything
+      allow write: if isSuperAdmin();
+    }
+
+    // ── /_meta (seed metadata, server-side only) ────────────────────────────────
+    match /_meta/{docId} {
+      allow read, write: if false;
+    }
+  }
+}

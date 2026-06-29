@@ -1,0 +1,245 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800;900&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+/* ── DS 2026 Design Tokens ────────────────────────────────────────────────── */
+:root {
+  /* Card */
+  --card-radius: 18px;
+  --card-bg: #FFFFFF;
+  --card-padding: 16px;
+  --card-transition: 150ms cubic-bezier(.2,.7,.2,1);
+  --card-border: 1px solid rgba(230,233,235, 0.60);
+  --card-border-tint: 1px solid rgba(200,230,224, 0.60);
+  --card-shadow-hover: 0 8px 24px rgba(38,41,44,.08);
+  /* Shadow ambient (opt-in — DS-#066) */
+  --shadow-ambient: 0 6px 20px rgba(190,190,190,.20);
+  --shadow-ambient-on-tint: 0 0 8px rgba(0,128,101,.06), 0 6px 16px rgba(0,128,101,.11);
+  --shadow-ambient-pure: 0 0 16px rgba(0,128,101,.10);
+}
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: 'Noto Sans Thai', 'Inter', sans-serif;
+    @apply bg-slate-50 antialiased;
+    color: #393d42;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-freshket-300 ring-offset-2;
+  }
+
+  /* Custom scrollbar — thin green thumb (used in QR sidebar) */
+  .scrollbar-green::-webkit-scrollbar {
+    width: 3px;
+  }
+  .scrollbar-green::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-green::-webkit-scrollbar-thumb {
+    background: #00ce7c;
+    border-radius: 99px;
+  }
+}
+
+/* ── Components ───────────────────────────────────────────────────────────── */
+@layer components {
+
+  /* Card — DS 2026 base (DS-#068: rgba border · DS-#023: no shadow at rest) */
+  .card {
+    @apply bg-white p-5;
+    border-radius: var(--card-radius);
+    border: var(--card-border);
+  }
+
+  /* Card DS — explicit DS-compliant base */
+  .card-ds {
+    @apply bg-white;
+    border-radius: var(--card-radius);
+    border: var(--card-border);
+  }
+
+  /* Card DS hover — clickable (DS-#124: shadow + lift required) */
+  .card-ds-hover {
+    @apply bg-white cursor-pointer;
+    border-radius: var(--card-radius);
+    border: var(--card-border);
+    transition: var(--card-transition);
+    transition-property: box-shadow, transform;
+  }
+  .card-ds-hover:hover {
+    box-shadow: var(--card-shadow-hover);
+    transform: translateY(-2px);
+  }
+
+  /* Card DS tint — freshket-50 bg */
+  .card-ds-tint {
+    @apply bg-freshket-100;
+    border-radius: var(--card-radius);
+    border: var(--card-border-tint);
+  }
+
+  /* Stat card */
+  .stat-card {
+    @apply card flex flex-col gap-1;
+  }
+
+  /* Badge — Light (DS-#042: no border · DS-#043: family-50 bg) */
+  .badge-fk {
+    @apply inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full
+           bg-freshket-100 text-freshket-700;
+  }
+
+  /* Badge — Vivid/solid (DS-#045: high-importance · no border) */
+  .badge-fk-solid {
+    @apply inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full
+           bg-freshket-600 text-white;
+  }
+
+  /* Legacy badge helper */
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  /* Page container */
+  .page-container {
+    @apply flex-1 overflow-y-auto p-6 space-y-6;
+  }
+
+  /* Progress bar track */
+  .progress-track {
+    @apply h-2 bg-gray-100 rounded-full overflow-hidden;
+  }
+
+  /* Progress bar fill — solid freshket-500, no gradient */
+  .progress-fill {
+    @apply h-full rounded-full transition-all duration-500;
+    background: #00ce7c;
+  }
+
+  /* Freshket spinner */
+  .spinner-fk {
+    @apply w-14 h-14 border-4 border-freshket-100 border-t-freshket-500 animate-spin rounded-full;
+  }
+
+  /* Modal backdrop */
+  .modal-backdrop {
+    @apply fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50
+           flex items-center justify-center p-4;
+  }
+
+  /* Modal card */
+  .modal-card {
+    @apply bg-white rounded-2xl max-w-sm w-full mx-auto p-6 text-center shadow-2xl
+           transition-all duration-200;
+  }
+
+  /* QR dark screen sidebar */
+  .qr-sidebar {
+    backdrop-filter: blur(28px);
+    border-left: 1px solid rgba(0,206,124,0.15);
+    background: rgba(5,5,5,0.88);
+  }
+
+  /* QR check-in item card (dark) */
+  .checkin-item {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    @apply rounded-xl;
+  }
+}
+
+/* ── Utilities ────────────────────────────────────────────────────────────── */
+@layer utilities {
+
+  /* iOS safe area — pad below iOS home indicator */
+  .pb-safe {
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+  .mb-safe {
+    margin-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+
+  /* Film grain overlay — add as ::after pseudo on the container */
+  .grain-overlay::after {
+    content: '';
+    position: fixed;
+    inset: -50%;
+    width: 200%;
+    height: 200%;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    opacity: 0.025;
+    pointer-events: none;
+    z-index: 999;
+    animation: grain 0.8s steps(1) infinite;
+  }
+
+  /* QR scan line — position: absolute inside QR card */
+  .scan-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #00ce7c, transparent);
+    animation: scan-line 2.5s linear infinite;
+  }
+
+  /* Shimmer text */
+  .text-shimmer {
+    background: linear-gradient(90deg, #00ce7c 0%, #a7f3d0 40%, #00ce7c 60%, #00a862 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 3.5s linear infinite;
+  }
+
+  /* Radial green glow bg (QR screen) */
+  .bg-green-glow {
+    background: radial-gradient(ellipse at 38% 50%, rgba(0,206,124,0.07), transparent 70%);
+  }
+
+  /* Tabular numbers */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  /* Page entrance — float up */
+  .animate-float-up {
+    animation: float-up 0.12s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
+@keyframes float-up {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-pop-in {
+  animation: pop-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
