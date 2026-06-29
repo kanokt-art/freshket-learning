@@ -7,7 +7,17 @@ import {
   signInWithPopup,
   type Auth,
 } from 'firebase/auth'
-import { getFirestore, doc, getDoc, type Firestore } from 'firebase/firestore'
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  collection,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  type Firestore,
+} from 'firebase/firestore'
 
 export {
   onAuthStateChanged,
@@ -16,6 +26,11 @@ export {
   signInWithPopup,
   doc,
   getDoc,
+  collection,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
 }
 
 const firebaseConfig = {

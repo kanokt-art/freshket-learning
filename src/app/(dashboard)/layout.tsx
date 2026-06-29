@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -14,21 +14,10 @@ const PREFETCH_ROUTES = [
   '/users', '/assessment', '/profile', '/notifications',
 ]
 
-// Retriggers the float-up animation without remounting the element.
 function AnimatedContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.classList.remove('animate-float-up')
-    void el.offsetWidth // force reflow so browser picks up the removal
-    el.classList.add('animate-float-up')
-  }, [pathname])
-
   return (
-    <div ref={ref} className="flex-1 flex flex-col overflow-hidden animate-float-up">
+    <div key={pathname} className="flex-1 flex flex-col overflow-hidden animate-float-up">
       {children}
     </div>
   )

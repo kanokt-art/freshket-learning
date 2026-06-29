@@ -130,6 +130,9 @@ function useDemoSnapshot<T>(getter: () => T[], deps: unknown[] = []): T[] {
   return data
 }
 
+// ── Snapshot cache — survives navigation, eliminates loading flash on return ───
+const snapshotCache = new Map<string, unknown[]>()
+
 // ── Generic Firestore live hook (only runs when !DEMO_MODE) ───────────────────
 interface FirestoreConstraint {
   type: 'where' | 'orderBy'
@@ -144,39 +147,39 @@ function useFirestoreList<T>(
   constraints: FirestoreConstraint[],
   enabled: boolean,
 ): UseResult<T> {
-  const [data, setData] = useState<T[]>([])
-  const [loading, setLoading] = useState(enabled)
+  const constraintsKey = JSON.stringify(constraints)
+  const cacheKey = `${collectionPath}:${constraintsKey}`
+  const cached = enabled ? (snapshotCache.get(cacheKey) as T[] | undefined) : undefined
+
+  const [data, setData] = useState<T[]>(cached ?? [])
+  const [loading, setLoading] = useState(enabled && !cached)
   const [error, setError] = useState<string | null>(null)
   const unsubRef = useRef<(() => void) | null>(null)
-  // Serialize constraints so the effect re-runs when field values (e.g. userId) change
-  const constraintsKey = JSON.stringify(constraints)
 
   useEffect(() => {
     if (!enabled) return
 
-    setLoading(true)
+    if (!cached) setLoading(true)
 
     const run = async () => {
-      const [firestoreMod, { getClientFirestore }] = await Promise.all([
-        import('firebase/firestore'),
-        import('@/lib/firebase/client'),
-      ])
-      const { collection, query, where, orderBy, onSnapshot } = firestoreMod
-      const db = getClientFirestore()
-      const ref = collection(db, collectionPath)
+      const fb = await import('@/lib/firebase/client')
+      const db = fb.getClientFirestore()
+      const ref = fb.collection(db, collectionPath)
 
       const parsed: FirestoreConstraint[] = JSON.parse(constraintsKey)
       const builtConstraints = parsed.map((c) => {
-        if (c.type === 'where') return where(c.field, c.op as never, c.value)
-        return orderBy(c.field, c.direction ?? 'asc')
+        if (c.type === 'where') return fb.where(c.field, c.op as never, c.value)
+        return fb.orderBy(c.field, c.direction ?? 'asc')
       })
 
-      const q = builtConstraints.length > 0 ? query(ref, ...builtConstraints) : query(ref)
+      const q = builtConstraints.length > 0 ? fb.query(ref, ...builtConstraints) : fb.query(ref)
 
-      unsubRef.current = onSnapshot(
+      unsubRef.current = fb.onSnapshot(
         q,
         (snap) => {
-          setData(snap.docs.map((d) => ({ id: d.id, ...d.data() })) as T[])
+          const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as T[]
+          snapshotCache.set(cacheKey, rows)
+          setData(rows)
           setLoading(false)
         },
         (err) => {
