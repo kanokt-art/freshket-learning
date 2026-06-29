@@ -101,35 +101,43 @@ export default function LoginPage() {
   // ── Real Firebase login — Split layout ──────────────────────────────────────
   return (
     <main className="min-h-screen flex">
-      {/* Left panel — dark brand */}
-      <div className="hidden lg:flex w-[480px] xl:w-[540px] shrink-0 bg-gray-900 flex-col items-center justify-center p-12 relative overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-freshket-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-freshket-500/8 rounded-full blur-3xl pointer-events-none" />
+      {/* Left panel — light brand */}
+      <div className="hidden lg:flex w-[480px] xl:w-[540px] shrink-0 bg-slate-50 flex-col items-center justify-center p-12 relative overflow-hidden">
+        {/* Glow orb — top-right */}
+        <div className="absolute -top-24 -right-24 w-[480px] h-[480px] bg-emerald-200 rounded-full blur-[128px] opacity-40 pointer-events-none" />
 
         <div className="relative w-full max-w-xs">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={FRESHKET_LOGO_URL}
             alt="Freshket"
-            className="h-9 w-auto object-contain mb-10 brightness-0 invert"
+            className="h-8 w-auto object-contain mb-10"
           />
 
-          <h1 className="text-4xl font-bold text-white leading-snug mb-4">
-            ระบบติดตาม<br />
-            <span className="text-freshket-500">การพัฒนา</span><br />
-            ทีม Sale
+          <h1 className="text-5xl font-extrabold leading-tight mb-3">
+            <span className="text-gray-900">freshket</span><br />
+            <span className="text-freshket-500">learning</span>
           </h1>
-          <p className="text-gray-400 text-sm leading-relaxed">
-            ติดตามความก้าวหน้า จัดการ Training และวิเคราะห์ Skill Gap ของทีมขายในที่เดียว
+          <p className="text-base font-semibold text-gray-700 mb-3">
+            ระบบเรียนรู้และพัฒนาศักยภาพ
+          </p>
+          <p className="text-sm text-gray-500 leading-relaxed">
+            พื้นที่เรียนรู้ เติบโต และก้าวหน้าไปด้วยกัน<br />
+            ไม่ว่าคุณจะอยู่ Head Office, Warehouse หรือเป็นฮีโร่หน้าด่านอย่าง Rider
           </p>
 
           <div className="mt-8 flex flex-wrap gap-2">
-            {['Training Tracker', 'Skill Gap', 'Team Dashboard', 'AI Analysis'].map((f) => (
+            {[
+              { emoji: '🚀', label: 'Micro-Learning' },
+              { emoji: '🏭', label: 'Warehouse Pro' },
+              { emoji: '🤝', label: 'Cross-functional' },
+              { emoji: '💡', label: 'Compassionate Leader' },
+            ].map((f) => (
               <span
-                key={f}
-                className="text-xs px-3 py-1.5 rounded-full border border-gray-700 text-gray-400 font-normal"
+                key={f.label}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border border-gray-200 bg-white text-gray-600 font-medium shadow-sm"
               >
-                {f}
+                {f.emoji} {f.label}
               </span>
             ))}
           </div>
