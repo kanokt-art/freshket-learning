@@ -1120,12 +1120,15 @@ function parseCSVLine(line: string): string[] {
   return result
 }
 
-// CSV columns: Status(0), Emp.ID(1), Name(2), Nick(3), Dept(4), Position(5), Rank(6), StartDate(7), LineManager(8), Email(9), Slack(10)
+// Freshket HR CSV export columns (16 cols):
+// ID(0), Status(1), Emp.ID(2), Title(3), Name-TH(4), Name-Eng(5),
+// Nick(6), Tel(7), Department(8), Rank(9), Position(10), Location(11),
+// Start Date(12), Last Date(13), Line Manager(14), Company Email(15)
 function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
   valid: UserProfile[]
   duplicates: string[]
 } {
-  const lines = text.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean)
+  const lines = text.replace(/^﻿/, '').replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean)
   if (lines.length < 2) return { valid: [], duplicates: [] }
 
   const existingEmpIds = new Set(existingUsers.map(u => u.employeeId).filter(Boolean))
@@ -1136,27 +1139,29 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
 
   for (const line of lines.slice(1)) {
     const cols = parseCSVLine(line)
-    const status = cols[0]?.trim() ?? ''
+    const status = cols[1]?.trim() ?? ''
     if (status !== 'Active') continue
 
-    const empId       = cols[1]?.trim() ?? ''
-    const fullName    = cols[2]?.trim() ?? ''
-    const nickname    = cols[3]?.trim() ?? ''
-    const dept        = cols[4]?.trim() ?? ''
-    const position    = cols[5]?.trim() ?? ''
-    const rank        = cols[6]?.trim() ?? ''
-    const startStr    = cols[7]?.trim() ?? ''
-    const lineManager = cols[8]?.trim() ?? ''
-    const email       = cols[9]?.trim() ?? ''
+    const empId       = cols[2]?.trim() ?? ''
+    const fullNameTH  = cols[4]?.trim() ?? ''
+    const fullNameEN  = cols[5]?.trim() ?? ''
+    const nickname    = cols[6]?.trim() ?? ''
+    const dept        = cols[8]?.trim() ?? ''
+    const rank        = cols[9]?.trim() ?? ''
+    const position    = cols[10]?.trim() ?? ''
+    const startStr    = cols[12]?.trim() ?? ''
+    const lineManager = cols[14]?.trim() ?? ''
+    const email       = cols[15]?.trim() ?? ''
 
-    if (!fullName) continue
+    const displayName = fullNameTH || fullNameEN
+    if (!displayName) continue
 
     if (empId && existingEmpIds.has(empId)) {
-      duplicates.push(`${fullName} (รหัส ${empId} ซ้ำ)`)
+      duplicates.push(`${displayName} (รหัส ${empId} ซ้ำ)`)
       continue
     }
     if (email && existingEmails.has(email.toLowerCase())) {
-      duplicates.push(`${fullName} (อีเมล ${email} ซ้ำ)`)
+      duplicates.push(`${displayName} (อีเมล ${email} ซ้ำ)`)
       continue
     }
 
@@ -1164,7 +1169,7 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
     valid.push({
       uid,
       email: email || `${empId || uid}@freshket.co`,
-      displayName: fullName,
+      displayName,
       photoURL: null,
       role: 'sale',
       nickname: nickname || undefined,
@@ -1819,10 +1824,10 @@ function AddEmployeeModal({
                   </svg>
                   <div className="text-center">
                     <p className="text-sm font-bold text-gray-700">คลิกเพื่อเลือกไฟล์ CSV</p>
-                    <p className="text-xs text-gray-400 mt-1">รองรับคอลัมน์: Status, Emp.ID, Name-Surname, ...</p>
+                    <p className="text-xs text-gray-400 mt-1">Employee Main Data Export จาก HR (16 คอลัมน์)</p>
                   </div>
                 </button>
-                <p className="text-xs text-gray-400 mt-3 text-center">นำเข้าเฉพาะพนักงานที่มี Status = &quot;Active&quot;</p>
+                <p className="text-xs text-gray-400 mt-3 text-center">นำเข้าเฉพาะพนักงานที่มี Status = &quot;Active&quot; · ข้ามแถว Resigned / No show</p>
               </div>
             ) : (
               <div className="space-y-4">
