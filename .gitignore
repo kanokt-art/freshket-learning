@@ -30,6 +30,7 @@ yarn-error.log*
 *credentials*.json
 *-key.json
 firebase-adminsdk*.json
+*firebase-adminsdk*.json
 
 # Vercel
 .vercel
@@ -44,3 +45,5 @@ next-env.d.ts
 # OS
 .DS_Store
 Thumbs.db
+
+.vercel
