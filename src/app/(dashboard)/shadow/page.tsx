@@ -1,13 +1,18 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { Header } from '@/components/layout/Header'
+import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
 import { useAuth } from '@/hooks/useAuth'
-import { useAllUsers, useTeams } from '@/hooks/useFirestore'
-import { canAccess } from '@/types/user'
+import { useAllUsers, useTeams, useAllShadowRecords, useAllShadowAcknowledgments, saveShadowRecord, saveShadowAcknowledgment } from '@/hooks/useFirestore'
+import { canAccess, getTeamManagerIds } from '@/types/user'
 import type { UserProfile } from '@/types/user'
 import type { ShadowRecord, ShadowSegment, ShadowPersona, ShadowAcknowledgment } from '@/types/shadow'
 import { pushNotification } from '@/lib/notifications/push'
+import { useModuleAccess } from '@/hooks/useModuleAccess'
+import { getDemoMode } from '@/lib/demo/demoMode'
+
+const DEMO_MODE = getDemoMode()
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -29,14 +34,27 @@ const PERSONA_STYLE: Record<ShadowPersona, string> = {
 
 type EvalKey = 'opening' | 'interestPoint' | 'customerPain' | 'diagnosticApproach' | 'closingNextStep' | 'bestPractice' | 'beyondClassroom'
 
-const EVAL_FIELDS: { key: EvalKey; label: string; placeholder: string }[] = [
-  { key: 'opening',            label: 'Opening / Hook',       placeholder: 'วิธีเปิดการสนทนา เทคนิคแนะนำตัว วิธีเริ่มต้น...' },
-  { key: 'interestPoint',      label: 'Interest Point',       placeholder: 'จุดที่ลูกค้าสนใจ สิ่งที่ดึงดูดความสนใจ...' },
-  { key: 'customerPain',       label: 'Customer Pain',        placeholder: 'ปัญหาหรือความต้องการที่ลูกค้ามี...' },
-  { key: 'diagnosticApproach', label: 'Diagnostic Approach',  placeholder: 'วิธีวิเคราะห์ปัญหาและตอบสนองต่อลูกค้า...' },
-  { key: 'closingNextStep',    label: 'Closing / Next Step',  placeholder: 'วิธีปิดการขาย ขั้นตอนต่อไป...' },
-  { key: 'bestPractice',       label: 'Best Practice',        placeholder: 'แนวปฏิบัติที่ดีที่ได้เรียนรู้จาก Shadow ครั้งนี้...' },
-  { key: 'beyondClassroom',    label: 'Beyond Classroom',     placeholder: 'สิ่งที่ได้เรียนรู้นอกห้องเรียน ที่ไม่สามารถสอนได้...' },
+// The 7 Shadow questions, split across the 3 sales stages (Open → Hook → Close).
+// `label` is the Thai question, `labelEN` the grey sub-label beside it. The wizard
+// prepends a 4th step, `info`, for the visit metadata — it carries no questions.
+type ShadowStep = 'info' | 'open' | 'hook' | 'close'
+
+const EVAL_FIELDS: { key: EvalKey; step: ShadowStep; label: string; labelEN: string; placeholder: string; required?: boolean }[] = [
+  { key: 'opening',            step: 'open',  label: 'เปิดบทสนทนา',              labelEN: 'Opening / Hook',      placeholder: 'รุ่นพี่เริ่มคุยอย่างไร...', required: true },
+  { key: 'interestPoint',      step: 'open',  label: 'จุดที่ลูกค้าสนใจ',           labelEN: 'Interest Point',      placeholder: 'สิ่งที่ลูกค้าถามถึง...' },
+  // Hook = explore: the diagnostic questions come FIRST, then the pain they surfaced.
+  { key: 'diagnosticApproach', step: 'hook',  label: 'คำถาม Diagnostic',         labelEN: 'Diagnostic Question', placeholder: 'รุ่นพี่ถามอะไรเพื่อให้ลูกค้าคลายปัญหาออกมา...' },
+  { key: 'customerPain',       step: 'hook',  label: 'ปัญหาของลูกค้า',            labelEN: 'Customer Pain',       placeholder: 'ปัญหาที่ลูกค้าเล่าออกมา...', required: true },
+  { key: 'closingNextStep',    step: 'close', label: 'ปิดการขาย / ขั้นตอนต่อไป',   labelEN: 'Closing / Next Step', placeholder: 'ปิดอย่างไร นัดอะไรต่อ...' },
+  { key: 'bestPractice',       step: 'close', label: 'แนวปฏิบัติที่ดี',            labelEN: 'Best Practice',       placeholder: 'แนวปฏิบัติที่ดีที่ได้เรียนรู้จาก Shadow ครั้งนี้...', required: true },
+  { key: 'beyondClassroom',    step: 'close', label: 'เรียนรู้นอกห้องเรียน',        labelEN: 'Beyond Classroom',    placeholder: 'สิ่งที่ได้เรียนรู้นอกห้องเรียน ที่สอนกันไม่ได้...' },
+]
+
+const STEPS: { id: ShadowStep; label: string; section: string }[] = [
+  { id: 'info',  label: 'ข้อมูล', section: 'Visit Information' },
+  { id: 'open',  label: 'Open',  section: 'Sales Conversation' },
+  { id: 'hook',  label: 'Hook',  section: 'Explore & Diagnostic' },
+  { id: 'close', label: 'Close', section: 'Closing & Learning' },
 ]
 
 // ── Demo data ─────────────────────────────────────────────────────────────────
@@ -227,15 +245,12 @@ function mentorAvatarColor(name: string): string {
 
 // ── Detail Panel ──────────────────────────────────────────────────────────────
 
-const DETAIL_LABELS: { key: EvalKey; label: string }[] = [
-  { key: 'opening',            label: 'Opening / Hook' },
-  { key: 'interestPoint',      label: 'Interest Point' },
-  { key: 'customerPain',       label: 'Customer Pain' },
-  { key: 'diagnosticApproach', label: 'Diagnostic Approach' },
-  { key: 'closingNextStep',    label: 'Closing / Next Step' },
-  { key: 'bestPractice',       label: 'Best Practice' },
-  { key: 'beyondClassroom',    label: 'Beyond Classroom' },
-]
+// Derived from the form's question list so the wording can't drift between the
+// two, and the blocks stay in the same Open → Hook → Close order as the wizard.
+const DETAIL_LABELS: { key: EvalKey; label: string }[] = EVAL_FIELDS.map(f => ({
+  key: f.key,
+  label: `${f.label} · ${f.labelEN}`,
+}))
 
 function DetailBlock({ label, value }: { label: string; value: string }) {
   if (!value) return null
@@ -657,168 +672,176 @@ function QuickAckRow({ recordId, onSave }: { recordId: string; onSave: (id: stri
   )
 }
 
-// ── Sale: My Visits List ──────────────────────────────────────────────────────
+// ── Sale: My Visits Table ─────────────────────────────────────────────────────
 
-function SaleVisitsList({
+// The learner's own visits, rendered as a table so it reads the same way as the
+// lead-facing member table. Segment / Persona / date columns collapse on narrow
+// screens; the badges then fold in under the store name so nothing is lost on
+// mobile.
+function SaleVisitsTable({
   records,
   acknowledgments,
   onView,
-  hideTitle,
+  onCreate,
 }: {
   records: ShadowRecord[]
   acknowledgments: Map<string, ShadowAcknowledgment>
   onView: (r: ShadowRecord) => void
-  hideTitle?: boolean
+  onCreate: () => void
 }) {
-  if (records.length === 0) {
-    return (
-      <div className="bg-white rounded-2xl border border-gray-100 flex flex-col items-center justify-center py-20 text-center">
-        <div className="size-16 rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
-          <svg className="size-8 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.964-7.178z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-        </div>
-        <p className="text-sm font-bold text-gray-500">ยังไม่มี Shadow Visit</p>
-        <p className="text-xs text-gray-400 mt-1">กดปุ่ม "บันทึกใหม่" เพื่อเพิ่มรายการแรก</p>
-      </div>
+  const [search, setSearch] = useState('')
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return records
+    return records.filter(r =>
+      r.storeName.toLowerCase().includes(q) ||
+      r.mentorName.toLowerCase().includes(q) ||
+      r.segment.toLowerCase().includes(q) ||
+      r.persona.toLowerCase().includes(q),
     )
-  }
+  }, [records, search])
 
   return (
-    <div className="space-y-2">
-      {!hideTitle && <p className="text-sm font-bold text-gray-700">บันทึกของฉัน ({records.length} รายการ)</p>}
-      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden divide-y divide-gray-50">
-        {records.map(r => {
-          const ack = acknowledgments.get(r.id)
-          const initial = r.mentorName.charAt(0).toUpperCase()
-          const avatarCls = mentorAvatarColor(r.mentorName)
-          return (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => onView(r)}
-              className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-gray-50 active:bg-gray-100 transition-colors duration-150 group"
-            >
-              {/* Mentor avatar */}
-              <div className={`size-11 rounded-full flex items-center justify-center shrink-0 text-white text-base font-bold ${avatarCls}`}>
-                {initial}
-              </div>
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 flex-wrap px-4 py-3 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-gray-900">บันทึกของฉัน</span>
+          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">
+            {records.length} รายการ
+          </span>
+        </div>
+        <div className="ml-auto relative">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="ค้นหาร้าน / Mentor..."
+            className="pl-8 pr-3 py-1.5 rounded-xl border border-gray-200 bg-white text-xs text-gray-900 placeholder-gray-400 outline-none focus:border-freshket-400 focus:ring-2 focus:ring-freshket-100 transition-all w-40"
+          />
+        </div>
+      </div>
 
-              {/* Middle: store + meta + badges */}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-gray-900 leading-snug truncate">{r.storeName}</p>
-                <p className="text-xs text-gray-400 mt-0.5 truncate">
-                  {r.mentorName} · {r.createdAt.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}
-                </p>
-                <div className="flex flex-wrap gap-1 mt-1.5">
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${SEGMENT_STYLE[r.segment]}`}>{r.segment}</span>
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${PERSONA_STYLE[r.persona]}`}>{r.persona}</span>
-                </div>
-              </div>
-
-              {/* Right: ack status + chevron */}
-              <div className="shrink-0 flex flex-col items-end gap-1.5">
-                {ack ? (
-                  <>
-                    <div className="flex gap-0.5">
-                      {[1,2,3,4,5].map(i => (
-                        <svg key={i} className={`size-3 ${i <= ack.rating ? 'text-amber-400' : 'text-gray-200'}`} viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" />
-                        </svg>
-                      ))}
+      {/* Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-gray-100">
+              <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 whitespace-nowrap">ร้าน</th>
+              <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 whitespace-nowrap hidden md:table-cell">Segment</th>
+              <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 whitespace-nowrap hidden md:table-cell">Persona</th>
+              <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 whitespace-nowrap">Mentor</th>
+              <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 whitespace-nowrap hidden lg:table-cell">วันที่</th>
+              <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 whitespace-nowrap">สถานะ</th>
+              <th className="w-10" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-14">
+                  <div className="flex flex-col items-center text-center">
+                    <div className="size-14 rounded-2xl bg-gray-100 flex items-center justify-center mb-3">
+                      <svg className="size-7 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.964-7.178z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
                     </div>
-                    <span className="text-xs font-bold text-freshket-600 bg-freshket-100 px-2 py-0.5 rounded-full">✓ Acked</span>
-                  </>
-                ) : (
-                  <span className="text-xs font-normal text-gray-300">รอ Ack</span>
-                )}
-              </div>
-
-              <svg className="size-4 text-gray-300 group-hover:text-freshket-400 transition-colors shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-              </svg>
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ── Sale: My Visits Grid ──────────────────────────────────────────────────────
-
-function SaleVisitsGrid({
-  records,
-  acknowledgments,
-  onView,
-}: {
-  records: ShadowRecord[]
-  acknowledgments: Map<string, ShadowAcknowledgment>
-  onView: (r: ShadowRecord) => void
-}) {
-  if (records.length === 0) {
-    return (
-      <div className="bg-white rounded-2xl border border-gray-100 flex flex-col items-center justify-center py-20 text-center">
-        <div className="size-16 rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
-          <svg className="size-8 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.964-7.178z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-        </div>
-        <p className="text-sm font-bold text-gray-500">ยังไม่มี Shadow Visit</p>
-        <p className="text-xs text-gray-400 mt-1">กดปุ่ม "บันทึกใหม่" เพื่อเพิ่มรายการแรก</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="grid grid-cols-2 gap-3">
-      {records.map(r => {
-        const ack = acknowledgments.get(r.id)
-        const initial = r.mentorName.charAt(0).toUpperCase()
-        const avatarCls = mentorAvatarColor(r.mentorName)
-        return (
-          <button
-            key={r.id}
-            type="button"
-            onClick={() => onView(r)}
-            className="bg-white rounded-2xl border border-gray-100 hover:border-freshket-200 hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 p-4 text-left group flex flex-col"
-          >
-            {/* Mentor avatar */}
-            <div className={`size-10 rounded-full flex items-center justify-center mb-3 text-white font-bold text-sm ${avatarCls}`}>
-              {initial}
-            </div>
-
-            {/* Store name */}
-            <p className="text-sm font-bold text-gray-900 leading-snug mb-1 line-clamp-2">{r.storeName}</p>
-
-            {/* Badges */}
-            <div className="flex flex-wrap gap-1 mb-2">
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${SEGMENT_STYLE[r.segment]}`}>{r.segment}</span>
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${PERSONA_STYLE[r.persona]}`}>{r.persona}</span>
-            </div>
-
-            {/* Meta */}
-            <p className="text-xs text-gray-400 truncate mt-auto">
-              {r.mentorName} · {r.createdAt.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}
-            </p>
-
-            {/* Ack status */}
-            {ack ? (
-              <div className="mt-2 flex items-center gap-0.5">
-                {[1,2,3,4,5].map(i => (
-                  <svg key={i} className={`size-3 ${i <= ack.rating ? 'text-amber-400' : 'text-gray-200'}`} viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" />
-                  </svg>
-                ))}
-              </div>
+                    <p className="text-sm font-bold text-gray-500">
+                      {records.length === 0 ? 'ยังไม่มี Shadow Visit' : 'ไม่พบรายการที่ค้นหา'}
+                    </p>
+                    {records.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={onCreate}
+                        className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-xs font-bold transition-colors"
+                      >
+                        <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                        </svg>
+                        Create
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
             ) : (
-              <p className="mt-2 text-xs font-normal text-gray-300">รอ Ack</p>
+              filtered.map(r => {
+                const ack = acknowledgments.get(r.id)
+                const initial = r.mentorName.charAt(0).toUpperCase()
+                const avatarCls = mentorAvatarColor(r.mentorName)
+                return (
+                  <tr
+                    key={r.id}
+                    onClick={() => onView(r)}
+                    className="hover:bg-freshket-50/40 cursor-pointer transition-colors group"
+                  >
+                    {/* Store — badges and date fold in here once their columns collapse */}
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-bold text-gray-900 leading-tight group-hover:text-freshket-700 transition-colors">
+                        {r.storeName}
+                      </p>
+                      <div className="flex flex-wrap gap-1 mt-1 md:hidden">
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${SEGMENT_STYLE[r.segment]}`}>{r.segment}</span>
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${PERSONA_STYLE[r.persona]}`}>{r.persona}</span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1 lg:hidden">{formatThaiDate(r.createdAt)}</p>
+                    </td>
+
+                    <td className="px-4 py-3 text-center hidden md:table-cell">
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${SEGMENT_STYLE[r.segment]}`}>{r.segment}</span>
+                    </td>
+
+                    <td className="px-4 py-3 text-center hidden md:table-cell">
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${PERSONA_STYLE[r.persona]}`}>{r.persona}</span>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className={`size-7 rounded-full flex items-center justify-center shrink-0 text-white text-xs font-bold ${avatarCls}`}>
+                          {initial}
+                        </div>
+                        <span className="text-xs text-gray-600 whitespace-nowrap">{r.mentorName}</span>
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-3 text-center hidden lg:table-cell">
+                      <span className="text-xs text-gray-500 whitespace-nowrap">{formatThaiDate(r.createdAt)}</span>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      {ack ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <div className="flex gap-0.5">
+                            {[1, 2, 3, 4, 5].map(i => (
+                              <svg key={i} className={`size-3 ${i <= ack.rating ? 'text-amber-400' : 'text-gray-200'}`} viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" />
+                              </svg>
+                            ))}
+                          </div>
+                          <span className="text-xs font-bold text-freshket-600 bg-freshket-100 px-2 py-0.5 rounded-full whitespace-nowrap">✓ Acked</span>
+                        </div>
+                      ) : (
+                        <p className="text-xs font-normal text-gray-300 text-center whitespace-nowrap">รอ Ack</p>
+                      )}
+                    </td>
+
+                    <td className="pr-4 py-3">
+                      <svg className="size-4 text-gray-300 group-hover:text-freshket-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                      </svg>
+                    </td>
+                  </tr>
+                )
+              })
             )}
-          </button>
-        )
-      })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -855,6 +878,10 @@ const EMPTY_FORM: FormState = {
   beyondClassroom: '',
 }
 
+// A 3-step wizard: Open → Hook → Close. Only the current step's fields are
+// validated on "ต่อไป", so a learner is never blocked by a question they haven't
+// reached yet. Visit info (mentor / store / segment / persona) rides along in
+// step 1 because it has to be captured before the conversation is described.
 function ShadowFormPanel({
   onClose,
   onSubmit,
@@ -868,9 +895,19 @@ function ShadowFormPanel({
 }) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({})
+  const [stepIdx, setStepIdx] = useState(0)
   const [mentorSearch, setMentorSearch] = useState('')
   const [mentorOpen, setMentorOpen] = useState(false)
   const [selectedMentorUid, setSelectedMentorUid] = useState<string | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const step = STEPS[stepIdx]
+  const isLast = stepIdx === STEPS.length - 1
+  const stepFields = useMemo(() => EVAL_FIELDS.filter(f => f.step === step.id), [step.id])
+
+  // The overlay itself is what scrolls, so a long step 1 would otherwise leave
+  // step 2 opening halfway down the page.
+  useEffect(() => { scrollRef.current?.scrollTo({ top: 0 }) }, [stepIdx])
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm(prev => ({ ...prev, [key]: value }))
@@ -908,17 +945,25 @@ function ShadowFormPanel({
 
   const selectedMentorUser = selectedMentorUid ? allUsers.find(u => u.uid === selectedMentorUid) : null
 
-  function validate(): boolean {
+  // Validates ONLY the current step — required fields further along the wizard
+  // are checked when their own step is submitted.
+  function validateStep(): boolean {
     const e: Partial<Record<keyof FormState, string>> = {}
-    if (!form.mentorName.trim()) e.mentorName = 'กรุณาเลือก Mentor'
-    if (!form.storeName.trim()) e.storeName = 'กรุณากรอกชื่อร้าน'
-    if (!form.bestPractice.trim()) e.bestPractice = 'กรุณากรอก Best Practice'
+    if (step.id === 'info') {
+      if (!form.mentorName.trim()) e.mentorName = 'กรุณาเลือก Mentor'
+      if (!form.storeName.trim()) e.storeName = 'กรุณากรอกชื่อร้าน'
+    }
+    for (const f of stepFields) {
+      if (f.required && !form[f.key].trim()) e[f.key] = `กรุณากรอก${f.label}`
+    }
     setErrors(e)
     return Object.keys(e).length === 0
   }
 
-  function handleSubmit() {
-    if (validate()) onSubmit(form)
+  function handleNext() {
+    if (!validateStep()) return
+    if (isLast) onSubmit(form)
+    else setStepIdx(i => i + 1)
   }
 
   const inputCls = (err?: string) =>
@@ -937,6 +982,7 @@ function ShadowFormPanel({
 
   return (
     <div
+      ref={scrollRef}
       className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto"
       onClick={onClose}
     >
@@ -961,12 +1007,52 @@ function ShadowFormPanel({
         </button>
       </div>
 
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+      {/* Step progress */}
+      <div className="shrink-0 px-6 pt-4 pb-4">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-bold text-gray-500">ขั้นตอน {stepIdx + 1}/{STEPS.length}</p>
+          <div className="flex items-center gap-2">
+            {STEPS.map((s, i) => (
+              <button
+                key={s.id}
+                type="button"
+                // Only steps already completed are clickable — jumping forward
+                // would skip that step's validation.
+                disabled={i > stepIdx}
+                onClick={() => setStepIdx(i)}
+                className={`text-xs transition-colors ${
+                  i === stepIdx
+                    ? 'font-bold text-freshket-600'
+                    : i < stepIdx
+                      ? 'font-normal text-gray-400 hover:text-gray-600'
+                      : 'font-normal text-gray-300 cursor-not-allowed'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${((stepIdx + 1) / STEPS.length) * 100}%`, background: '#00ce7c' }}
+          />
+        </div>
+      </div>
 
-        {/* Section 1: Visit info */}
-        <div>
-          <p className="text-xs font-bold text-gray-400 mb-3">ข้อมูลการเยี่ยมชม</p>
+      {/* Body */}
+      <div className="flex-1 px-6 pb-5 space-y-5">
+
+        {/* Section title */}
+        <div className="flex items-center gap-3">
+          <span className="h-px flex-1 bg-gray-100" />
+          <span className="text-xs font-bold text-gray-500 whitespace-nowrap">{step.section}</span>
+          <span className="h-px flex-1 bg-gray-100" />
+        </div>
+
+        {/* Step 1 — visit metadata only, no questions */}
+        {step.id === 'info' && (
           <div className="space-y-3">
 
             {/* Mentor picker */}
@@ -1126,52 +1212,62 @@ function ShadowFormPanel({
                 ))}
               </div>
             </div>
-
           </div>
-        </div>
+        )}
 
-        {/* Divider */}
-        <div className="border-t border-gray-100" />
-
-        {/* Section 2: Evaluation */}
-        <div>
-          <p className="text-xs font-bold text-gray-400 mb-3">บันทึกการประเมิน</p>
-          <div className="space-y-4">
-            {EVAL_FIELDS.map(({ key, label, placeholder }) => (
-              <div key={key}>
-                <label className="block text-xs font-normal text-gray-700 mb-1.5">
-                  {label}
-                  {key === 'bestPractice' && <span className="text-rose-400 ml-0.5">*</span>}
-                </label>
-                <textarea
-                  value={form[key]}
-                  onChange={e => set(key, e.target.value)}
-                  placeholder={placeholder}
-                  className={textareaCls(errors[key])}
-                  rows={4}
-                />
-                {errors[key] && <p className="text-xs text-rose-500 mt-1">{errors[key]}</p>}
-              </div>
-            ))}
+        {/* This step's questions — Thai label + grey English sub-label */}
+        {stepFields.map(({ key, label, labelEN, placeholder, required }) => (
+          <div key={key}>
+            <label className="block mb-1.5">
+              <span className="text-sm font-bold text-gray-900">{label}</span>
+              {required && <span className="text-rose-400 mx-1">*</span>}
+              <span className={`text-xs font-normal text-gray-400 ${required ? '' : 'ml-1.5'}`}>{labelEN}</span>
+            </label>
+            <textarea
+              value={form[key]}
+              onChange={e => set(key, e.target.value)}
+              placeholder={placeholder}
+              className={textareaCls(errors[key])}
+              rows={4}
+            />
+            {errors[key] && <p className="text-xs text-rose-500 mt-1">{errors[key]}</p>}
           </div>
-        </div>
+        ))}
       </div>
 
       {/* Footer */}
-      <div className="shrink-0 flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100 bg-gray-50">
+      <div className="shrink-0 flex items-center gap-2 px-6 py-4 border-t border-gray-100 bg-gray-50">
+        {stepIdx > 0 ? (
+          <button
+            type="button"
+            onClick={() => setStepIdx(i => i - 1)}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-normal text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+            ย้อนกลับ
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 rounded-xl text-sm font-normal text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            ยกเลิก
+          </button>
+        )}
         <button
           type="button"
-          onClick={onClose}
-          className="px-4 py-2 rounded-xl text-sm font-normal text-gray-600 hover:bg-gray-100 transition-colors"
+          onClick={handleNext}
+          className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-freshket-500 hover:bg-freshket-600 text-white transition-colors"
         >
-          ยกเลิก
-        </button>
-        <button
-          type="button"
-          onClick={handleSubmit}
-          className="px-5 py-2 rounded-xl text-sm font-bold bg-freshket-500 hover:bg-freshket-600 text-white transition-colors"
-        >
-          บันทึก Shadow Visit
+          {isLast ? 'บันทึก Shadow Visit' : 'ต่อไป'}
+          {!isLast && (
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+          )}
         </button>
       </div>
     </div>
@@ -1189,16 +1285,50 @@ const DEMO_ACKS = new Map<string, ShadowAcknowledgment>([
 
 export default function ShadowPage() {
   const { user } = useAuth()
+  // NOTE: allUsers deliberately stays UNGATED here. A plain `sale` learner needs
+  // it too — the "บันทึกใหม่" button is not role-gated, and <ShadowFormPanel>'s
+  // mentor picker searches the full roster; handleSubmit also falls back to
+  // notifying every team_lead/manager found in allUsers when the learner has no
+  // managerId. Narrowing this needs the userDirectory summary (Phase 3b), not a gate.
   const { data: allUsers } = useAllUsers()
-  const { data: teams }    = useTeams()
-  const [records, setRecords] = useState<ShadowRecord[]>(DEMO_RECORDS)
+  // teams only feeds the lead-only member table and its teamMap, so it can gate.
+  const { data: teams }    = useTeams(canAccess(user?.role ?? 'sale', 'team_lead'))
+
+  // This page previously never read shadowRecords/shadowAcknowledgments from
+  // Firestore at all — records lived only in local React state (DEMO_RECORDS,
+  // regardless of demo mode) and vanished on refresh. Now backed by the real
+  // collections; localCreated is an optimistic echo of a just-submitted record
+  // shown before the live onSnapshot listener catches up (same pattern as
+  // courses/page.tsx's localCreated) — dedup by id once it does.
+  const { data: liveRecords } = useAllShadowRecords(!DEMO_MODE)
+  const { data: liveAcks } = useAllShadowAcknowledgments(!DEMO_MODE)
+  // localCreated also carries demo-mode submissions (DEMO_RECORDS is a fixed
+  // constant, not stateful) — not just the live-mode optimistic echo.
+  const [localCreated, setLocalCreated] = useState<ShadowRecord[]>([])
+  const records = useMemo(() => {
+    const base = DEMO_MODE ? DEMO_RECORDS : liveRecords
+    const baseIds = new Set(base.map((r) => r.id))
+    return [...localCreated.filter((r) => !baseIds.has(r.id)), ...base]
+  }, [liveRecords, localCreated])
+  // Demo mode has no live listener to reflect a new ack, so it needs its own
+  // local override on top of the fixed DEMO_ACKS constant; live mode gets the
+  // update for free once useAllShadowAcknowledgments' onSnapshot catches up.
+  const [localAcks, setLocalAcks] = useState<Map<string, ShadowAcknowledgment>>(new Map())
+  const acknowledgments = useMemo(() => {
+    const base = DEMO_MODE ? DEMO_ACKS : liveAcks.reduce((m, a) => m.set(a.id, a), new Map<string, ShadowAcknowledgment>())
+    if (localAcks.size === 0) return base
+    const merged = new Map<string, ShadowAcknowledgment>(base)
+    localAcks.forEach((ack, id) => merged.set(id, ack))
+    return merged
+  }, [liveAcks, localAcks])
+
   const [showForm, setShowForm]         = useState(false)
   const [overlayMember, setOverlayMember] = useState<UserProfile | null>(null)
   const [selectedVisit, setSelectedVisit] = useState<ShadowRecord | null>(null)
   const [memberSearch, setMemberSearch] = useState('')
   const [memberSortAsc, setMemberSortAsc] = useState(true)
-  const [acknowledgments, setAcknowledgments] = useState<Map<string, ShadowAcknowledgment>>(DEMO_ACKS)
-  const [saleView, setSaleView] = useState<'list' | 'grid'>('list')
+
+  const { allowedModules, loading: moduleLoading } = useModuleAccess(user?.role, user?.department)
 
   const isLead = canAccess(user?.role ?? 'sale', 'team_lead')
 
@@ -1209,7 +1339,7 @@ export default function ShadowPage() {
       return allUsers.filter(u => u.managerId === user.uid)
     }
     // manager / super_admin: team leads + sale users in managed teams
-    const myTeamIds = new Set(teams.filter(t => t.managerId === user.uid).map(t => t.id))
+    const myTeamIds = new Set(teams.filter(t => getTeamManagerIds(t).includes(user.uid)).map(t => t.id))
     return allUsers.filter(u =>
       u.managerId === user.uid ||
       (u.teamId !== undefined && myTeamIds.has(u.teamId) && u.role === 'sale')
@@ -1278,17 +1408,24 @@ export default function ShadowPage() {
     return () => { document.body.style.overflow = '' }
   }, [overlayMember, selectedVisit, showForm])
 
-  function handleSubmit(data: FormState) {
-    const rec: ShadowRecord = {
-      id: `sh-${Date.now()}`,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+  async function handleSubmit(data: FormState) {
+    const now = new Date()
+    const base = {
+      createdAt: now,
+      updatedAt: now,
       observerUid: user?.uid ?? 'demo',
       observerEmail: user?.email ?? 'demo@freshket.co',
       observerName: user?.displayName ?? 'Demo User',
       ...data,
     }
-    setRecords(prev => [rec, ...prev])
+    // In demo mode there's no Firestore write path — keep the id scheme that
+    // was already there. In live mode, addDoc's real id is what
+    // shadowAcknowledgments will key off of, so it must come from Firestore,
+    // not be invented client-side before the write happens.
+    const rec: ShadowRecord = DEMO_MODE
+      ? { id: `sh-${Date.now()}`, ...base }
+      : { id: await saveShadowRecord(base), ...base }
+    setLocalCreated(prev => [rec, ...prev])
     setShowForm(false)
 
     // Notify the team_lead / manager who manages this sale
@@ -1316,18 +1453,19 @@ export default function ShadowPage() {
     }
   }
 
-  function handleSaveAck(recordId: string, rating: number, comment: string) {
-    setAcknowledgments(prev => {
-      const next = new Map(prev)
-      next.set(recordId, {
-        reviewerUid: user?.uid ?? '',
-        reviewerName: user?.displayName ?? '',
-        rating,
-        comment,
-        reviewedAt: new Date(),
-      })
-      return next
-    })
+  async function handleSaveAck(recordId: string, rating: number, comment: string) {
+    const ack: ShadowAcknowledgment = {
+      reviewerUid: user?.uid ?? '',
+      reviewerName: user?.displayName ?? '',
+      rating,
+      comment,
+      reviewedAt: new Date(),
+    }
+    if (DEMO_MODE) {
+      setLocalAcks(prev => new Map(prev).set(recordId, ack))
+    } else {
+      await saveShadowAcknowledgment(recordId, ack)
+    }
 
     // Notify the sale person whose record was acknowledged
     const rec = records.find(r => r.id === recordId)
@@ -1340,6 +1478,38 @@ export default function ShadowPage() {
         refPath: '/shadow',
       })
     }
+  }
+
+  if (!user) return null
+
+  if (moduleLoading) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="size-8 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      </div>
+    )
+  }
+
+  if (!allowedModules.has('shadow')) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50">
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center max-w-xs">
+            <div className="size-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
+              <svg className="size-6 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+              </svg>
+            </div>
+            <p className="text-sm font-bold text-gray-900 mb-1">Module ไม่ได้เปิดใช้งาน</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Shadow Visit ยังไม่ได้เปิดสำหรับแผนกของคุณ<br />กรุณาติดต่อ Admin
+            </p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -1356,10 +1526,11 @@ export default function ShadowPage() {
             <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
-            บันทึกใหม่
+            Create
           </button>
         }
       />
+      <MyCourseTabs />
 
       <div className="flex-1 overflow-auto p-6 space-y-4 animate-float-up">
 
@@ -1481,56 +1652,14 @@ export default function ShadowPage() {
           </div>
         )}
 
-        {/* ── Sale: my visits (list / grid) ─────────────────────────────── */}
+        {/* ── Sale: my visits table ──────────────────────────────────────── */}
         {!isLead && (
-          <div className="space-y-3">
-            {/* View toggle */}
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-bold text-gray-700">บันทึกของฉัน ({myRecords.length} รายการ)</p>
-              <div className="flex items-center gap-1 bg-white rounded-xl border border-gray-200 p-1">
-                <button
-                  type="button"
-                  onClick={() => setSaleView('list')}
-                  className={`flex items-center justify-center size-7 rounded-lg transition-all ${
-                    saleView === 'list' ? 'bg-freshket-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-600'
-                  }`}
-                  title="List view"
-                >
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSaleView('grid')}
-                  className={`flex items-center justify-center size-7 rounded-lg transition-all ${
-                    saleView === 'grid' ? 'bg-freshket-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-600'
-                  }`}
-                  title="Grid view"
-                >
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            {/* Content */}
-            {saleView === 'list' ? (
-              <SaleVisitsList
-                records={myRecords}
-                acknowledgments={acknowledgments}
-                onView={r => setSelectedVisit(r)}
-                hideTitle
-              />
-            ) : (
-              <SaleVisitsGrid
-                records={myRecords}
-                acknowledgments={acknowledgments}
-                onView={r => setSelectedVisit(r)}
-              />
-            )}
-          </div>
+          <SaleVisitsTable
+            records={myRecords}
+            acknowledgments={acknowledgments}
+            onView={r => setSelectedVisit(r)}
+            onCreate={() => setShowForm(true)}
+          />
         )}
 
       </div>

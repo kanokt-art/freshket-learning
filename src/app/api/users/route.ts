@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Timestamp } from 'firebase-admin/firestore'
 import { getAdminAuth } from '@/lib/firebase/admin'
 import { getAdminFirestore } from '@/lib/firebase/admin'
+import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
 
 const ALLOWED_DOMAIN = 'freshket.co'
 
@@ -51,8 +52,17 @@ export async function POST(req: NextRequest) {
 }
 
 // ── GET /api/users — list all or single user (server-side / admin panel) ─────
+// SECURITY: this uses the Admin SDK, which bypasses Firestore rules entirely, so
+// the handler itself is the ONLY gate. It was previously ungated — meaning any
+// anonymous caller could GET the whole users collection (email, employeeId,
+// department, position, role, managerId, startDate, lineManager) straight off the
+// public deployment. No client code calls this endpoint; it is a server/admin
+// utility, so it is gated to super_admin like every other Admin-SDK route here.
 export async function GET(req: NextRequest) {
   try {
+    const gate = await requireSuperAdmin(req)
+    if (!gate.ok) return gate.response
+
     const { searchParams } = new URL(req.url)
     const uid = searchParams.get('uid')
     const db = getAdminFirestore()

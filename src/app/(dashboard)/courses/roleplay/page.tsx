@@ -1,11 +1,16 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useAuth } from '@/hooks/useAuth'
-import { useAllUsers } from '@/hooks/useFirestore'
-import { canAccess } from '@/types/user'
+import { useAllUsers, useTeams, useDepartments, useAllRoleplayAssessments, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
+import { useModuleAccess, useModuleConfig } from '@/hooks/useModuleAccess'
+import { canAccess, getTeamManagerIds } from '@/types/user'
 import type { UserProfile } from '@/types/user'
+import { DEMO_MODE } from '@/lib/demo/demoMode'
 import { Header } from '@/components/layout/Header'
+import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
+import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
+import { RoleplayResultsImport } from '@/components/features/RoleplayResultsImport'
 import {
   ROLEPLAY_TOPICS,
   RADAR_GROUPS,
@@ -265,10 +270,23 @@ function fmt(d: Date) {
   return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
 }
 
-function calcTenure(startDate: Date | undefined | null): string {
-  if (!startDate) return '—'
-  const start = startDate instanceof Date ? startDate : new Date(startDate as unknown as string)
-  if (isNaN(start.getTime())) return '—'
+function toDate(val: unknown): Date | null {
+  if (!val) return null
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val
+  if (typeof val === 'object' && 'toDate' in val && typeof (val as { toDate: unknown }).toDate === 'function') {
+    const d = (val as { toDate(): Date }).toDate()
+    return isNaN(d.getTime()) ? null : d
+  }
+  if (typeof val === 'string' || typeof val === 'number') {
+    const d = new Date(val)
+    return isNaN(d.getTime()) ? null : d
+  }
+  return null
+}
+
+function calcTenure(startDate: unknown): string {
+  const start = toDate(startDate)
+  if (!start) return '—'
   const now = new Date()
   let years = now.getFullYear() - start.getFullYear()
   let months = now.getMonth() - start.getMonth()
@@ -276,6 +294,26 @@ function calcTenure(startDate: Date | undefined | null): string {
   if (days < 0) { months--; days += new Date(now.getFullYear(), now.getMonth(), 0).getDate() }
   if (months < 0) { years--; months += 12 }
   return `${years}.${String(months).padStart(2, '0')}.${String(days).padStart(2, '0')}`
+}
+
+const POSITION_COLORS = [
+  'bg-violet-100 text-violet-800',
+  'bg-indigo-100 text-indigo-800',
+  'bg-cyan-100 text-cyan-800',
+  'bg-teal-100 text-teal-800',
+  'bg-rose-100 text-rose-800',
+  'bg-amber-100 text-amber-800',
+  'bg-orange-100 text-orange-800',
+  'bg-lime-100 text-lime-800',
+  'bg-pink-100 text-pink-800',
+  'bg-sky-100 text-sky-800',
+  'bg-fuchsia-100 text-fuchsia-800',
+  'bg-green-100 text-green-800',
+]
+function positionColor(name: string) {
+  let h = 5381
+  for (let i = 0; i < name.length; i++) h = (h * 33 + name.charCodeAt(i)) & 0xffff
+  return POSITION_COLORS[h % POSITION_COLORS.length]
 }
 
 const DEPT_COLORS = [
@@ -966,14 +1004,18 @@ function MemberAssessmentRow({
   member,
   assessments,
   onViewHistory,
+  isSuperAdmin,
+  teamName,
 }: {
   member: UserProfile
   assessments: RoleplayAssessment[]
   onViewHistory: () => void
+  isSuperAdmin: boolean
+  teamName: string
 }) {
-  const latest = [...assessments].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0]
-  const startDateFormatted = member.startDate
-    ? new Date(member.startDate as unknown as string).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  const parsedStart = toDate(member.startDate)
+  const startDateFormatted = parsedStart
+    ? parsedStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
     : '—'
 
   return (
@@ -982,19 +1024,35 @@ function MemberAssessmentRow({
       <td className="px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="size-9 rounded-full bg-freshket-100 group-hover:bg-freshket-200 flex items-center justify-center text-sm font-bold text-freshket-700 shrink-0 transition-colors">
-            {(member.nickname ?? member.displayName ?? '?').charAt(0)}
+            {(member.displayNameEN || member.displayName || '?').charAt(0)}
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-bold text-gray-900 group-hover:text-freshket-700 transition-colors truncate">{member.displayName}</p>
+            <p className="text-sm font-bold text-gray-900 group-hover:text-freshket-700 transition-colors truncate">
+              {member.displayNameEN || member.displayName}
+            </p>
             {member.nickname && <p className="text-xs text-gray-400 truncate">{member.nickname}</p>}
           </div>
         </div>
       </td>
+      {/* รหัสพนักงาน — super_admin only */}
+      {isSuperAdmin && (
+        <td className="px-4 py-3">
+          <span className="text-xs font-mono text-gray-500">{member.employeeId ?? '—'}</span>
+        </td>
+      )}
       {/* ตำแหน่ง */}
       <td className="px-4 py-3">
         {member.position ? (
-          <span className="inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-700 truncate max-w-[180px]">
+          <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full truncate max-w-[180px] ${positionColor(member.position)}`}>
             {member.position}
+          </span>
+        ) : <span className="text-xs text-gray-300">—</span>}
+      </td>
+      {/* Rank */}
+      <td className="px-4 py-3">
+        {member.rank ? (
+          <span className="inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 whitespace-nowrap">
+            {member.rank}
           </span>
         ) : <span className="text-xs text-gray-300">—</span>}
       </td>
@@ -1006,17 +1064,25 @@ function MemberAssessmentRow({
           </span>
         ) : <span className="text-xs text-gray-300">—</span>}
       </td>
+      {/* ทีม — super_admin only */}
+      {isSuperAdmin && (
+        <td className="px-4 py-3">
+          <span className="text-xs text-gray-600 whitespace-nowrap">{teamName || '—'}</span>
+        </td>
+      )}
+      {/* อีเมล — super_admin only */}
+      {isSuperAdmin && (
+        <td className="px-4 py-3">
+          <span className="text-xs text-gray-400 whitespace-nowrap">{member.email || '—'}</span>
+        </td>
+      )}
       {/* วันเริ่มงาน */}
       <td className="px-4 py-3">
         <span className="text-xs text-gray-500 whitespace-nowrap">{startDateFormatted}</span>
       </td>
       {/* อายุงาน */}
       <td className="px-4 py-3">
-        <span className="text-xs font-mono text-gray-500">{calcTenure(member.startDate as Date | undefined)}</span>
-      </td>
-      {/* ล่าสุด */}
-      <td className="px-4 py-3 text-right">
-        <span className="text-xs text-gray-400 whitespace-nowrap">{latest ? fmt(latest.createdAt) : '—'}</span>
+        <span className="text-xs font-mono text-gray-500">{calcTenure(member.startDate)}</span>
       </td>
     </tr>
   )
@@ -1108,20 +1174,47 @@ function MemberHistoryPanel({ member, assessments, onClose, canEdit, onDeleteAss
 
 export default function RoleplayPage() {
   const { user } = useAuth()
-  const { data: allUsers } = useAllUsers()
+  const { allowedModules, loading: moduleLoading } = useModuleAccess(user?.role, user?.department)
 
-  const isManager = user ? canAccess(user.role, 'team_lead') : false
+  // team_lead and manager see the member datatable; sale sees own scores
+  const isManager = user?.role === 'team_lead' || user?.role === 'manager' || user?.role === 'super_admin'
+
+  // Roster data feeds ONLY the manager/TL member table — every render site
+  // (displayMembers, teamMap) sits after the `if (!isManager) return` below, and
+  // the myMembers memo already bails on !isManager. Ungated, a plain `sale`
+  // learner streamed the entire users collection (plus a second full users read
+  // via useDepartments, which derives department names from it) to feed a table
+  // they never see.
+  const { data: allUsers } = useAllUsers(isManager)
+  const { data: teams } = useTeams(isManager)
+  const { data: departments } = useDepartments(isManager)
   const isSuperAdmin = user?.role === 'super_admin'
 
-  // Assessments + edit/delete state
-  const [assessments, setAssessments] = useState<RoleplayAssessment[]>(DEMO_ASSESSMENTS)
+  // Assessments: demo mode uses the local mock set. Live mode branches by role —
+  // managers get the shared warm listener on the full `roleplayAssessments`
+  // collection (CSV imports land here, feeds the member table); a plain `sale`
+  // learner only ever renders their own radar chart (myAssessments below), so
+  // they get the uid-scoped query instead of streaming every subject's rows to
+  // filter client-side (the same fix already applied to allUsers/teams/departments
+  // above). In-session create/edit/delete still mutate the local state on top —
+  // a live re-read replaces the base when Firestore data changes.
+  const liveAssessments = useAllRoleplayAssessments(!DEMO_MODE && isManager)
+  const myLiveAssessments = useRoleplayAssessmentsByUser(!DEMO_MODE && !isManager ? user?.uid : undefined)
+  const [assessments, setAssessments] = useState<RoleplayAssessment[]>(DEMO_MODE ? DEMO_ASSESSMENTS : [])
+  useEffect(() => {
+    if (DEMO_MODE) return
+    setAssessments(isManager ? liveAssessments.data : myLiveAssessments.data)
+  }, [liveAssessments.data, myLiveAssessments.data, isManager])
   const [showModal, setShowModal] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [editAssessment, setEditAssessment] = useState<RoleplayAssessment | null>(null)
   const [historyMember, setHistoryMember] = useState<UserProfile | null>(null)
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([])
   const [memberSearch, setMemberSearch] = useState('')
   const [memberSortField, setMemberSortField] = useState<'name' | 'position' | 'startDate'>('name')
   const [memberSortDir, setMemberSortDir] = useState<'asc' | 'desc'>('asc')
+  const [filterDept, setFilterDept] = useState('')
+  const [filterTeam, setFilterTeam] = useState('')
 
   function handleSaveAssessment(a: RoleplayAssessment) {
     const isEdit = assessments.some(x => x.id === a.id)
@@ -1208,18 +1301,89 @@ export default function RoleplayPage() {
   }))
   const radarColor = viewMode === 'pre' ? '#3b82f6' : '#00ce7c'
 
-  // For manager view: members belonging to my team
+  // Full moduleAccess config — which departments have roleplay enabled.
+  // Shared warm listener/cache (useModuleConfig) instead of a private
+  // onSnapshot per mount: no re-read on every navigation into this page.
+  const moduleConfig = useModuleConfig()
+
+  // Departments that explicitly have 'roleplay' in their module list
+  const roleplayDeptNames = useMemo(() => {
+    if (moduleConfig === null) return new Set<string>() // still loading
+    const result = new Set<string>()
+    for (const [dept, modules] of Object.entries(moduleConfig)) {
+      if (dept !== 'default' && modules.includes('roleplay')) result.add(dept)
+    }
+    return result
+  }, [moduleConfig])
+
+  // For manager/TL view: members scoped to their team + within roleplay-enabled depts only
   const myMembers = useMemo(() => {
     if (!user || !isManager) return []
-    return (allUsers as UserProfile[]).filter(u =>
-      u.role === 'sale' && (u.teamId === user.teamId || u.managerId === user.uid)
+    const allProfiles = allUsers as UserProfile[]
+    if (user.role === 'super_admin') {
+      return allProfiles.filter(u =>
+        (u.role === 'sale' || u.role === 'team_lead') &&
+        !!u.department && roleplayDeptNames.has(u.department)
+      )
+    }
+    if (user.role === 'manager') {
+      const myTeamIds = new Set(teams.filter(t => getTeamManagerIds(t).includes(user.uid)).map(t => t.id))
+      return allProfiles.filter(u =>
+        (u.role === 'sale' || u.role === 'team_lead') &&
+        (myTeamIds.size > 0 ? (!!u.teamId && myTeamIds.has(u.teamId)) : u.managerId === user.uid)
+      )
+    }
+    // team_lead: only members in the same team
+    if (!user.teamId) return []
+    return allProfiles.filter(u =>
+      (u.role === 'sale' || u.role === 'team_lead') &&
+      u.teamId === user.teamId &&
+      u.uid !== user.uid
     )
-  }, [allUsers, user, isManager])
+  }, [allUsers, user, isManager, teams, roleplayDeptNames])
 
-  // Demo: if no members found, use demo users
-  const displayMembers = myMembers.length > 0
-    ? myMembers
-    : (allUsers as UserProfile[]).filter(u => u.role === 'sale').slice(0, 4)
+  // Demo fallback: show roleplay-enabled members (or first 6 while config loads)
+  const displayMembers = useMemo(() => {
+    if (myMembers.length > 0) return myMembers
+    const allProfiles = allUsers as UserProfile[]
+    const candidates = allProfiles.filter(u =>
+      (u.role === 'sale' || u.role === 'team_lead') &&
+      !!u.department && roleplayDeptNames.has(u.department)
+    )
+    return candidates.slice(0, 6)
+  }, [myMembers, allUsers, roleplayDeptNames])
+
+  const teamMap = useMemo(() => {
+    const m = new Map<string, string>()
+    teams.forEach(t => m.set(t.id, t.name))
+    return m
+  }, [teams])
+
+  const availableDepts = useMemo(() => {
+    const s = new Set<string>()
+    displayMembers.forEach(m => { if (m.department) s.add(m.department) })
+    return Array.from(s).sort()
+  }, [displayMembers])
+
+  const availableTeams = useMemo(() => {
+    if (!isSuperAdmin) return []
+    const s = new Set<string>()
+    displayMembers.forEach(m => { if (m.teamId) s.add(m.teamId) })
+    return Array.from(s).sort((a, b) => (teamMap.get(a) ?? '').localeCompare(teamMap.get(b) ?? '', 'th'))
+  }, [displayMembers, isSuperAdmin, teamMap])
+
+  const top5PostTest = useMemo(() => {
+    return displayMembers
+      .map(m => {
+        const mAss = assessments.filter(a => a.subjectUid === m.uid && a.type === 'post')
+        if (mAss.length === 0) return null
+        const avg = mAss.reduce((sum, a) => sum + overallAvg(a.topics), 0) / mAss.length
+        return { member: m, avg: Math.round(avg * 10) / 10 }
+      })
+      .filter((x): x is { member: UserProfile; avg: number } => x !== null)
+      .sort((a, b) => b.avg - a.avg)
+      .slice(0, 5)
+  }, [displayMembers, assessments])
 
   const filteredMembers = useMemo(() => {
     const q = memberSearch.toLowerCase().trim()
@@ -1227,23 +1391,28 @@ export default function RoleplayPage() {
     if (q) {
       list = list.filter(m =>
         (m.displayName ?? '').toLowerCase().includes(q) ||
+        (m.displayNameEN ?? '').toLowerCase().includes(q) ||
         (m.nickname ?? '').toLowerCase().includes(q) ||
         (m.position ?? '').toLowerCase().includes(q) ||
-        (m.department ?? '').toLowerCase().includes(q)
+        (m.department ?? '').toLowerCase().includes(q) ||
+        (m.employeeId ?? '').toLowerCase().includes(q) ||
+        (m.email ?? '').toLowerCase().includes(q)
       )
     }
+    if (filterDept) list = list.filter(m => m.department === filterDept)
+    if (filterTeam) list = list.filter(m => m.teamId === filterTeam)
     return [...list].sort((a, b) => {
       let cmp = 0
-      if (memberSortField === 'name') cmp = (a.displayName ?? '').localeCompare(b.displayName ?? '', 'th')
+      if (memberSortField === 'name') cmp = ((a.displayNameEN || a.displayName) ?? '').localeCompare((b.displayNameEN || b.displayName) ?? '', 'th')
       else if (memberSortField === 'position') cmp = (a.position ?? '').localeCompare(b.position ?? '', 'th')
       else if (memberSortField === 'startDate') {
-        const ta = a.startDate ? new Date(a.startDate as unknown as string).getTime() : 0
-        const tb = b.startDate ? new Date(b.startDate as unknown as string).getTime() : 0
+        const ta = toDate(a.startDate)?.getTime() ?? 0
+        const tb = toDate(b.startDate)?.getTime() ?? 0
         cmp = ta - tb
       }
       return memberSortDir === 'asc' ? cmp : -cmp
     })
-  }, [displayMembers, memberSearch, memberSortField, memberSortDir])
+  }, [displayMembers, memberSearch, filterDept, filterTeam, memberSortField, memberSortDir])
 
   function handleMemberSort(field: 'name' | 'position' | 'startDate') {
     if (memberSortField === field) setMemberSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -1252,11 +1421,43 @@ export default function RoleplayPage() {
 
   if (!user) return null
 
+  // ── Module access gate ──────────────────────────────────────────────────────
+  if (moduleLoading) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="size-8 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      </div>
+    )
+  }
+
+  if (!allowedModules.has('roleplay')) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50">
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center max-w-xs">
+            <div className="size-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
+              <svg className="size-6 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+              </svg>
+            </div>
+            <p className="text-sm font-bold text-gray-900 mb-1">Module ไม่ได้เปิดใช้งาน</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Role Play ยังไม่ได้เปิดสำหรับแผนกของคุณ<br />กรุณาติดต่อ Admin
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // ── Sale user view ──────────────────────────────────────────────────────────
   if (!isManager) {
     return (
       <div className="flex flex-col h-full bg-slate-50">
         <Header title="Role Play" subtitle="ผลการประเมิน Roleplay ของฉัน" />
+        <MyCourseTabs />
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
           {/* ── Round selector ── */}
@@ -1560,54 +1761,132 @@ export default function RoleplayPage() {
         title="Role Play Assessment"
         subtitle="ประเมิน Roleplay ของทีม"
         actions={
-          <button
-            type="button"
-            onClick={() => setShowModal(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors shadow-sm"
-          >
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            สร้าง Assessment
-          </button>
+          <div className="flex items-center gap-2">
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowImport(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-sm font-bold transition-colors shadow-sm"
+              >
+                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                </svg>
+                นำเข้าผล CSV
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors shadow-sm"
+            >
+              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              สร้าง Assessment
+            </button>
+          </div>
         }
       />
+      {isSuperAdmin && <CourseManagementTabs />}
+      <MyCourseTabs />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Summary stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            { label: 'สมาชิกทั้งหมด', value: displayMembers.length, color: 'text-gray-900' },
-            { label: 'Assessment ทั้งหมด', value: assessments.filter(a => displayMembers.some(m => m.uid === a.subjectUid)).length, color: 'text-blue-600' },
-            { label: 'Pre Test', value: assessments.filter(a => a.type === 'pre' && displayMembers.some(m => m.uid === a.subjectUid)).length, color: 'text-blue-500' },
-            { label: 'Post Test', value: assessments.filter(a => a.type === 'post' && displayMembers.some(m => m.uid === a.subjectUid)).length, color: 'text-freshket-600' },
-          ].map(s => (
-            <div key={s.label} className="bg-white rounded-2xl border border-gray-100 px-4 py-3">
-              <p className="text-xs text-gray-400 mb-1">{s.label}</p>
-              <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
-            </div>
-          ))}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* สมาชิกทั้งหมด */}
+          <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+            <p className="text-xs text-gray-400 mb-1">สมาชิกทั้งหมด</p>
+            <p className="text-3xl font-black text-gray-900">{displayMembers.length}</p>
+          </div>
+
+          {/* Top 5 Post Test */}
+          <div className="sm:col-span-2 bg-white rounded-2xl border border-gray-100 px-5 py-4">
+            <p className="text-xs font-bold text-gray-400 mb-3">Top 5 คะแนน Role Play Post Test</p>
+            {top5PostTest.length === 0 ? (
+              <p className="text-xs text-gray-300 py-2">ยังไม่มีข้อมูล Post Test</p>
+            ) : (
+              <div className="space-y-2">
+                {top5PostTest.map((item, idx) => (
+                  <div key={item.member.uid} className="flex items-center gap-3">
+                    <span className={`size-5 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${
+                      idx === 0 ? 'bg-amber-400 text-white' :
+                      idx === 1 ? 'bg-gray-300 text-gray-700' :
+                      idx === 2 ? 'bg-orange-300 text-white' :
+                      'bg-gray-100 text-gray-500'
+                    }`}>{idx + 1}</span>
+                    <div className="size-6 rounded-full bg-freshket-100 flex items-center justify-center text-xs font-bold text-freshket-700 shrink-0">
+                      {(item.member.displayNameEN || item.member.displayName || '?').charAt(0)}
+                    </div>
+                    <span className="text-xs font-bold text-gray-800 truncate flex-1">
+                      {item.member.displayNameEN || item.member.displayName}
+                    </span>
+                    <span className={`text-sm font-black ${scoreColor(item.avg)}`}>{item.avg.toFixed(1)}</span>
+                    <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{ width: `${(item.avg / 10) * 100}%`, background: '#00ce7c' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Member table */}
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-          <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3">
-            <h2 className="text-sm font-bold text-gray-900 shrink-0">สมาชิกในทีม</h2>
-            <span className="text-xs text-gray-400">{filteredMembers.length} คน</span>
-            <div className="flex-1" />
-            <div className="relative w-56">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" />
-                </svg>
-              </span>
-              <input
-                type="text"
-                value={memberSearch}
-                onChange={e => setMemberSearch(e.target.value)}
-                placeholder="ค้นหาชื่อ / ตำแหน่ง / แผนก..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-freshket-200 placeholder:text-gray-400"
-              />
+          <div className="px-5 py-4 border-b border-gray-100 space-y-3">
+            <div className="flex items-center gap-3">
+              <h2 className="text-sm font-bold text-gray-900 shrink-0">สมาชิกในทีม</h2>
+              <span className="text-xs text-gray-400">{filteredMembers.length} คน</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Search */}
+              <div className="relative flex-1 min-w-48">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" />
+                  </svg>
+                </span>
+                <input
+                  type="text"
+                  value={memberSearch}
+                  onChange={e => setMemberSearch(e.target.value)}
+                  placeholder="ค้นหาชื่อ / รหัส / อีเมล / ตำแหน่ง..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-freshket-200 placeholder:text-gray-400"
+                />
+              </div>
+              {/* Department filter */}
+              {availableDepts.length > 0 && (
+                <select
+                  value={filterDept}
+                  onChange={e => setFilterDept(e.target.value)}
+                  className="text-xs rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-freshket-200 text-gray-600"
+                >
+                  <option value="">ทุกแผนก</option>
+                  {availableDepts.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              )}
+              {/* Team filter — super_admin only */}
+              {isSuperAdmin && availableTeams.length > 0 && (
+                <select
+                  value={filterTeam}
+                  onChange={e => setFilterTeam(e.target.value)}
+                  className="text-xs rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-freshket-200 text-gray-600"
+                >
+                  <option value="">ทุกทีม</option>
+                  {availableTeams.map(tid => (
+                    <option key={tid} value={tid}>{teamMap.get(tid) ?? tid}</option>
+                  ))}
+                </select>
+              )}
+              {/* Clear filters */}
+              {(filterDept || filterTeam || memberSearch) && (
+                <button
+                  onClick={() => { setFilterDept(''); setFilterTeam(''); setMemberSearch('') }}
+                  className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  ล้างตัวกรอง
+                </button>
+              )}
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -1619,19 +1898,22 @@ export default function RoleplayPage() {
                       สมาชิก <SortIcon field="name" current={memberSortField} dir={memberSortDir} />
                     </button>
                   </th>
+                  {isSuperAdmin && <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">รหัสพนักงาน</th>}
                   <th className="px-4 py-3 text-left">
                     <button onClick={() => handleMemberSort('position')} className="flex items-center text-xs font-bold text-gray-400 hover:text-gray-700 transition-colors">
                       ตำแหน่ง <SortIcon field="position" current={memberSortField} dir={memberSortDir} />
                     </button>
                   </th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Rank</th>
                   <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">แผนก</th>
+                  {isSuperAdmin && <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">ทีม</th>}
+                  {isSuperAdmin && <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">อีเมล</th>}
                   <th className="px-4 py-3 text-left">
                     <button onClick={() => handleMemberSort('startDate')} className="flex items-center text-xs font-bold text-gray-400 hover:text-gray-700 transition-colors">
                       วันเริ่มงาน <SortIcon field="startDate" current={memberSortField} dir={memberSortDir} />
                     </button>
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">อายุงาน</th>
-                  <th className="px-4 py-3 text-right text-xs font-bold text-gray-400">ล่าสุด</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -1641,11 +1923,13 @@ export default function RoleplayPage() {
                     member={m}
                     assessments={memberAssessments(m)}
                     onViewHistory={() => setHistoryMember(m)}
+                    isSuperAdmin={isSuperAdmin}
+                    teamName={teamMap.get(m.teamId ?? '') ?? ''}
                   />
                 ))}
                 {filteredMembers.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-sm text-gray-300">ไม่พบสมาชิก</td>
+                    <td colSpan={isSuperAdmin ? 9 : 6} className="px-4 py-12 text-center text-sm text-gray-300">ไม่พบสมาชิก</td>
                   </tr>
                 )}
               </tbody>
@@ -1697,6 +1981,12 @@ export default function RoleplayPage() {
           onClose={() => { setShowModal(false); setEditAssessment(null) }}
           onSave={handleSaveAssessment}
         />
+      )}
+
+      {/* CSV import (super_admin) — writes to roleplayAssessments; the live
+          listener above refreshes the datatable once the commit lands. */}
+      {showImport && (
+        <RoleplayResultsImport onClose={() => setShowImport(false)} />
       )}
 
       {/* Member history panel */}

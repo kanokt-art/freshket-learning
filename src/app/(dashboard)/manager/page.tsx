@@ -1,12 +1,18 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Header } from '@/components/layout/Header'
+import { getClientFirestore } from '@/lib/firebase/client'
+import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
-import { useTeamTrainingRecords, useAllUsers, useTeams } from '@/hooks/useFirestore'
+import { useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList } from '@/hooks/useFirestore'
+import { useModuleAccess } from '@/hooks/useModuleAccess'
+import { RoleplayRadar } from '@/components/features/RoleplayRadar'
 import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
-import { canAccess, ROLE_LABELS, type UserProfile } from '@/types/user'
-import { formatDate, formatDateEN } from '@/lib/utils/dateFormatter'
+import { canAccess, ROLE_LABELS, getTeamManagerIds, getTeamLeadIds, type UserProfile } from '@/types/user'
+import type { AssessmentScore } from '@/types/assessmentScore'
+import { canViewByLevel } from '@/lib/jobLevel'
+import { formatDateEN } from '@/lib/utils/dateFormatter'
 
 // ── Dept color palette ─────────────────────────────────────────────────────────
 const DEPT_COLORS = [
@@ -32,6 +38,15 @@ const STATUS_PASTEL: Record<TrainingStatus, string> = {
 
 function scoreBarColor(s: number) { return s >= 80 ? '#00ce7c' : s >= 60 ? '#fbbf24' : '#f87171' }
 function scoreTextColor(s: number) { return s >= 80 ? 'text-freshket-600' : s >= 60 ? 'text-amber-600' : 'text-rose-600' }
+function scorePastel(s: number) { return s >= 80 ? 'bg-freshket-100 text-freshket-700' : s >= 60 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700' }
+
+function ddmmyyyy(d: Date | string | undefined | null): string {
+  if (!d) return '—'
+  const dt = d instanceof Date ? d : new Date(d as string)
+  if (isNaN(dt.getTime())) return '—'
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(dt.getDate())}/${p(dt.getMonth() + 1)}/${dt.getFullYear()}`
+}
 
 function calcTenure(startDate: Date | undefined | null): string {
   if (!startDate) return '—'
@@ -46,20 +61,72 @@ function calcTenure(startDate: Date | undefined | null): string {
   return `${years}.${String(months).padStart(2, '0')}.${String(days).padStart(2, '0')}`
 }
 
+// Prefer the English full name; fall back to the Thai name when EN is missing.
+function enName(u: { displayNameEN?: string; displayName: string }): string {
+  return u.displayNameEN?.trim() || u.displayName
+}
+
+// Millis from a Date | Firestore-Timestamp | ISO string (0 if unusable).
+function toMillis(v: unknown): number {
+  if (!v) return 0
+  if (v instanceof Date) return isNaN(v.getTime()) ? 0 : v.getTime()
+  if (typeof v === 'object' && typeof (v as { toDate?: unknown }).toDate === 'function') {
+    const d = (v as { toDate(): Date }).toDate()
+    return isNaN(d.getTime()) ? 0 : d.getTime()
+  }
+  if (typeof v === 'string' || typeof v === 'number') {
+    const d = new Date(v)
+    return isNaN(d.getTime()) ? 0 : d.getTime()
+  }
+  return 0
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function ManagerPage() {
   const { user } = useAuth()
-  const { data: records, loading } = useTeamTrainingRecords(user?.teamId ?? '')
   const { data: allUsers } = useAllUsers()
   const { data: teams } = useTeams()
 
+  // Teams this manager oversees. Source of truth = the team docs' managerId /
+  // teamLeadId (exactly what OrgBoard shows), UNIONed with any explicit
+  // visibleTeamIds and their own teamId. Relying on visibleTeamIds alone broke
+  // when a manager was linked via team.managerId but their visibleTeamIds was
+  // never populated — the roster then showed 0 members.
+  const managedTeamIds = useMemo(() => {
+    const set = new Set<string>()
+    teams.forEach(t => { if (getTeamManagerIds(t).includes(user?.uid ?? '') || getTeamLeadIds(t).includes(user?.uid ?? '')) set.add(t.id) })
+    ;(user?.visibleTeamIds ?? []).forEach(id => set.add(id))
+    if (user?.teamId) set.add(user.teamId)
+    return set
+  }, [teams, user?.uid, user?.visibleTeamIds, user?.teamId])
+
+  // Exclude the manager themselves, and anyone more senior — a viewer only sees
+  // members at or below their own level (a team_lead never sees the manager).
   const users = useMemo(
-    () => allUsers.filter(u => u.teamId === user?.teamId),
-    [allUsers, user?.teamId],
+    () => allUsers.filter(u =>
+      u.uid !== user?.uid &&
+      u.teamId && managedTeamIds.has(u.teamId) &&
+      !!user && canViewByLevel(user, u)),
+    [allUsers, managedTeamIds, user],
   )
+
+  // Records scoped to the managed members. This used to stream the ENTIRE
+  // trainingRecords collection (ungated) and then throw most of it away here; now
+  // the member uids drive the query itself, so a manager reads only their own
+  // people. Teams above the `in` limit still fall back to a filtered full read
+  // inside the hook, so behaviour is identical either way.
+  const memberUids = useMemo(() => users.map(u => u.uid), [users])
+  const { data: records, loading } = useTeamTrainingRecords(memberUids)
   const [activeDept, setActiveDept] = useState<string>('all')
   const [userSearch, setUserSearch] = useState('')
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
+  const [sortField, setSortField] = useState<'name' | 'position' | 'department' | 'startDate' | 'team'>('name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+
+  const toggleSort = (field: typeof sortField) => {
+    if (sortField === field) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortField(field); setSortDir('asc') }
+  }
 
   const teamMap = useMemo(() => {
     const m: Record<string, string> = {}
@@ -73,8 +140,10 @@ export default function ManagerPage() {
     return Array.from(set).sort()
   }, [users])
 
-  // Stat cards computed from all records
-  const totalUsers    = useMemo(() => new Set(records.map(r => r.userId)).size, [records])
+  // Stat cards. "พนักงานทั้งหมด" = the managed roster (same set the table shows),
+  // NOT the count of users who happen to have a training record — the old
+  // records-based count read "2 คน" while the roster below listed 11.
+  const totalUsers    = users.length
   const overallCompletion = useMemo(() => {
     if (!records.length) return 0
     return Math.round((records.filter(r => r.status === 'completed').length / records.length) * 100)
@@ -92,6 +161,7 @@ export default function ManagerPage() {
     return users.filter(u => {
       const matchDept   = activeDept === 'all' || u.department === activeDept
       const matchSearch = !q ||
+        enName(u).toLowerCase().includes(q) ||
         u.displayName.toLowerCase().includes(q) ||
         (u.nickname?.toLowerCase() ?? '').includes(q) ||
         (u.employeeId ?? '').toLowerCase().includes(q)
@@ -99,9 +169,81 @@ export default function ManagerPage() {
     })
   }, [users, activeDept, userSearch])
 
+  // Sorted view of the filtered members — driven by the clickable column headers.
+  const sortedUsers = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1
+    const val = (u: UserProfile): string | number => {
+      switch (sortField) {
+        case 'name':       return enName(u).toLowerCase()
+        case 'position':   return (u.position ?? '').toLowerCase()
+        case 'department': return (u.department ?? '').toLowerCase()
+        case 'team':       return (u.teamId ? (teamMap[u.teamId] ?? '') : '').toLowerCase()
+        case 'startDate': {
+          const d = u.startDate instanceof Date ? u.startDate : (u.startDate ? new Date(u.startDate as unknown as string) : null)
+          return d && !isNaN(d.getTime()) ? d.getTime() : 0
+        }
+      }
+    }
+    return [...filteredUsers].sort((a, b) => {
+      const av = val(a), bv = val(b)
+      if (av < bv) return -1 * dir
+      if (av > bv) return 1 * dir
+      return 0
+    })
+  }, [filteredUsers, sortField, sortDir, teamMap])
+
   const selectedUser = selectedUserId ? users.find(u => u.uid === selectedUserId) ?? null : null
 
-  if (user && !canAccess(user.role, 'manager')) {
+  // ── Per-member "new training data" notification ─────────────────────────────
+  // A red dot marks members whose latest training record was written AFTER the
+  // manager last opened them. "Seen" timestamps are stored per-manager in
+  // localStorage so the dot survives reloads and only clears when THIS manager
+  // opens the member — not on someone else's read.
+  const latestTrainingByUser = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const r of records) {
+      const t = Math.max(toMillis(r.updatedAt), toMillis(r.completedAt), toMillis(r.startedAt))
+      if (t > (m[r.userId] ?? 0)) m[r.userId] = t
+    }
+    return m
+  }, [records])
+
+  const seenKey = user?.uid ? `mgr_seen_training_${user.uid}` : null
+  const [seenMap, setSeenMap] = useState<Record<string, number>>({})
+  useEffect(() => {
+    if (!seenKey) { setSeenMap({}); return }
+    try {
+      const raw = localStorage.getItem(seenKey)
+      setSeenMap(raw ? JSON.parse(raw) : {})
+    } catch { setSeenMap({}) }
+  }, [seenKey])
+
+  const isUnread = (uid: string) => {
+    const latest = latestTrainingByUser[uid] ?? 0
+    return latest > 0 && latest > (seenMap[uid] ?? 0)
+  }
+
+  // Mark a member's training updates as read (persist immediately). Called when
+  // the manager actually opens that member's ประวัติการเรียน tab — so the row
+  // dot and the tab dot clear together, and only on a real read (not merely
+  // opening the card).
+  function markTrainingRead(uid: string) {
+    if (!isUnread(uid)) return
+    setSeenMap(prev => {
+      const next = { ...prev, [uid]: Date.now() }
+      if (seenKey) { try { localStorage.setItem(seenKey, JSON.stringify(next)) } catch {} }
+      return next
+    })
+  }
+
+  const unreadCount = useMemo(
+    () => sortedUsers.filter(u => isUnread(u.uid)).length,
+    // isUnread depends on latestTrainingByUser + seenMap; both are deps here
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sortedUsers, latestTrainingByUser, seenMap],
+  )
+
+  if (user && !canAccess(user.role, 'team_lead')) {
     return (
       <div className="flex items-center justify-center h-full bg-slate-50">
         <p className="text-sm text-gray-400">ไม่มีสิทธิ์เข้าถึงหน้านี้</p>
@@ -162,7 +304,15 @@ export default function ManagerPage() {
         {/* ── Employee table ───────────────────────────────────────────── */}
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="font-bold text-gray-900 text-sm">รายชื่อพนักงาน</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-gray-900 text-sm">รายชื่อพนักงาน</h3>
+              {unreadCount > 0 && (
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-full">
+                  <span className="size-1.5 rounded-full bg-rose-500" />
+                  {unreadCount} ใหม่
+                </span>
+              )}
+            </div>
             <span className="text-xs text-gray-400">{filteredUsers.length} คน</span>
           </div>
 
@@ -180,18 +330,19 @@ export default function ManagerPage() {
                 <thead>
                   <tr className="bg-gray-50/60 border-b border-gray-100">
                     <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 w-10">#</th>
-                    <th className="text-left px-4 py-3 text-xs font-bold text-gray-500">พนักงาน</th>
-                    <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden sm:table-cell">ตำแหน่งงาน</th>
-                    <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden md:table-cell">แผนก</th>
-                    <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden lg:table-cell">วันเริ่มงาน</th>
-                    <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden lg:table-cell">ทีม</th>
+                    <SortableTh label="พนักงาน" field="name" sortField={sortField} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh label="ตำแหน่งงาน" field="position" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden sm:table-cell" />
+                    <SortableTh label="แผนก" field="department" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell" />
+                    <SortableTh label="วันเริ่มงาน" field="startDate" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
+                    <SortableTh label="ทีม" field="team" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
                     <th className="w-8" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filteredUsers.map((u, i) => {
+                  {sortedUsers.map((u, i) => {
                     const teamName = u.teamId ? (teamMap[u.teamId] ?? null) : null
                     const isSelected = u.uid === selectedUserId
+                    const unread = isUnread(u.uid)
                     return (
                       <tr
                         key={u.uid}
@@ -201,16 +352,28 @@ export default function ManagerPage() {
                         <td className="px-4 py-3.5 text-xs text-gray-400 tabular-nums">{i + 1}</td>
                         <td className="px-4 py-3.5">
                           <div className="flex items-center gap-3">
-                            {u.photoURL ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={u.photoURL} alt={u.displayName} className="size-8 rounded-full object-cover shrink-0" />
-                            ) : (
-                              <div className="size-8 rounded-full bg-freshket-100 border border-freshket-200 flex items-center justify-center text-freshket-700 text-xs font-bold shrink-0">
-                                {u.displayName.charAt(0)}
-                              </div>
-                            )}
+                            <div className="relative shrink-0">
+                              {u.photoURL ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={u.photoURL} alt={u.displayName} className="size-8 rounded-full object-cover" />
+                              ) : (
+                                <div className="size-8 rounded-full bg-freshket-100 border border-freshket-200 flex items-center justify-center text-freshket-700 text-xs font-bold">
+                                  {enName(u).charAt(0)}
+                                </div>
+                              )}
+                              {/* New-training-data indicator — clears when this manager opens the member */}
+                              {unread && (
+                                <span className="absolute -top-0.5 -right-0.5 flex size-2.5">
+                                  <span className="absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75 animate-ping" />
+                                  <span className="relative inline-flex size-2.5 rounded-full bg-rose-500 border-2 border-white" />
+                                </span>
+                              )}
+                            </div>
                             <div className="min-w-0">
-                              <p className="text-sm font-bold text-gray-900 truncate">{u.displayName}</p>
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-sm font-bold text-gray-900 truncate">{enName(u)}</p>
+                                {unread && <span className="text-xs font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded-full leading-none shrink-0">ใหม่</span>}
+                              </div>
                               {u.nickname && <p className="text-xs text-gray-400 leading-tight">{u.nickname}</p>}
                             </div>
                           </div>
@@ -247,20 +410,21 @@ export default function ManagerPage() {
 
       </div>
 
-      {/* Backdrop + Sidebar */}
+      {/* Card overlay */}
       {selectedUser && (
-        <>
-          <div
-            className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-30"
-            onClick={() => setSelectedUserId(null)}
-          />
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+          onClick={() => setSelectedUserId(null)}
+        >
           <EmployeeSidebar
             user={selectedUser}
             records={records}
             teamMap={teamMap}
+            hasNewTraining={isUnread(selectedUser.uid)}
+            onReadTraining={() => markTrainingRead(selectedUser.uid)}
             onClose={() => setSelectedUserId(null)}
           />
-        </>
+        </div>
       )}
     </div>
   )
@@ -271,14 +435,109 @@ function EmployeeSidebar({
   user,
   records,
   teamMap,
+  hasNewTraining,
+  onReadTraining,
   onClose,
 }: {
   user: UserProfile
   records: TrainingRecord[]
   teamMap: Record<string, string>
+  hasNewTraining: boolean
+  onReadTraining: () => void
   onClose: () => void
 }) {
-  const [tab, setTab] = useState<'info' | 'history' | 'radar'>('info')
+  const [tab, setTab] = useState<'info' | 'history' | 'assess' | 'shadow' | 'radar'>('info')
+
+  // Opening the ประวัติการเรียน tab is the "read" that clears both the tab dot
+  // and the member's row dot. The isUnread guard in onReadTraining makes the
+  // repeated call a no-op once already cleared, so identity churn is harmless.
+  useEffect(() => {
+    if (tab === 'history' && hasNewTraining) onReadTraining()
+  }, [tab, hasNewTraining, onReadTraining])
+  const { user: viewer } = useAuth()
+  const canFeedback = viewer ? canAccess(viewer.role, 'team_lead') : false
+
+  // Shadow Visit tab appears only when this member's department has the shadow
+  // module enabled by super_admin (appConfig/moduleAccess).
+  const { allowedModules, loading: moduleLoading } = useModuleAccess(user.role, user.department)
+  const showShadow = !moduleLoading && allowedModules.has('shadow')
+  const { data: shadowRecords } = useShadowRecordsByUser(showShadow ? user.uid : undefined)
+
+  // Imported Pre/Post assessment scores, grouped by subject with the latest
+  // pre → latest post and the improvement between them.
+  const { data: assessmentScores } = useAssessmentScoresByUser(user.uid)
+  const { data: roleplayAssessments } = useRoleplayAssessmentsByUser(user.uid)
+  // Latest Post + latest Pre (max 2 polygons) for the radar.
+  const radarAssessments = useMemo(() => {
+    const post = roleplayAssessments.find(a => a.type === 'post')
+    const pre = roleplayAssessments.find(a => a.type === 'pre')
+    return [post, pre].filter((a): a is NonNullable<typeof a> => !!a)
+  }, [roleplayAssessments])
+  const assessBySubject = useMemo(() => {
+    const map = new Map<string, { subject: string; pre?: AssessmentScore; post?: AssessmentScore }>()
+    for (const a of assessmentScores) {
+      const g = map.get(a.subject) ?? { subject: a.subject }
+      const t = a.takenAt instanceof Date ? a.takenAt : new Date(a.takenAt as unknown as string)
+      if (a.type === 'pre') {
+        const prev = g.pre?.takenAt ? new Date(g.pre.takenAt as unknown as string) : null
+        if (!prev || t >= prev) g.pre = a
+      } else {
+        const prev = g.post?.takenAt ? new Date(g.post.takenAt as unknown as string) : null
+        if (!prev || t >= prev) g.post = a
+      }
+      map.set(a.subject, g)
+    }
+    return Array.from(map.values())
+  }, [assessmentScores])
+  const showAssess = assessBySubject.length > 0
+
+  // Employee reflections ("act knowledge") + the lead's feedback, keyed by
+  // courseId. Both read through the shared warm-listener registry (keyed by this
+  // member's uid) so re-opening a member detail is instant — previously each
+  // mount fired a fresh getDocs pair and re-read from Firestore every time.
+  const takeawayDocs = useFirestoreList<{ courseId?: string; text?: string }>(
+    'takeaways',
+    [{ type: 'where', field: 'uid', op: '==', value: user.uid }],
+    !getDemoMode() && !!user.uid,
+  )
+  const feedbackDocs = useFirestoreList<{ courseId?: string; comment?: string; score?: number | null; leadName?: string }>(
+    'courseFeedback',
+    [{ type: 'where', field: 'memberUid', op: '==', value: user.uid }],
+    !getDemoMode() && !!user.uid,
+  )
+
+  const takeaways = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const d of takeawayDocs.data) if (d.courseId) m[d.courseId] = d.text ?? ''
+    return m
+  }, [takeawayDocs.data])
+
+  // Local optimistic overlay for feedback the lead just saved — merged on top of
+  // the live docs so the UI reflects a save instantly, before the listener
+  // round-trips. Once the listener catches up the overlay is simply redundant.
+  const [feedbackOverlay, setFeedbackOverlay] = useState<Record<string, { comment: string; score: number | null; leadName?: string }>>({})
+  const feedback = useMemo(() => {
+    const m: Record<string, { comment: string; score: number | null; leadName?: string }> = {}
+    for (const d of feedbackDocs.data) if (d.courseId) m[d.courseId] = { comment: d.comment ?? '', score: d.score ?? null, leadName: d.leadName }
+    return { ...m, ...feedbackOverlay }
+  }, [feedbackDocs.data, feedbackOverlay])
+
+  async function saveFeedback(courseId: string, comment: string, score: number | null) {
+    const next = { comment, score, leadName: viewer?.displayName }
+    setFeedbackOverlay((prev) => ({ ...prev, [courseId]: next }))
+    try {
+      const db = getClientFirestore()
+      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore')
+      await setDoc(doc(db, 'courseFeedback', `${user.uid}_${courseId}`), {
+        memberUid: user.uid, courseId, comment, score,
+        leadUid: viewer?.uid ?? '', leadName: viewer?.displayName ?? '',
+        updatedAt: serverTimestamp(),
+      }, { merge: true })
+    } catch (e) {
+      console.error('saveFeedback', e)
+      alert('บันทึกความคิดเห็นไม่สำเร็จ')
+    }
+  }
 
   const userRecords = useMemo(
     () => records
@@ -297,28 +556,38 @@ function EmployeeSidebar({
   const scores        = userRecords.filter(r => r.score != null).map(r => r.score as number)
   const avgScore      = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null
 
-  type TabKey = 'info' | 'history' | 'radar'
+  type TabKey = 'info' | 'history' | 'assess' | 'shadow' | 'radar'
   const TABS: { key: TabKey; label: string }[] = [
     { key: 'info',    label: 'ข้อมูลพนักงาน' },
     { key: 'history', label: 'ประวัติการเรียน' },
+    ...(showAssess ? [{ key: 'assess' as TabKey, label: 'แบบทดสอบ' }] : []),
+    ...(showShadow ? [{ key: 'shadow' as TabKey, label: 'Shadow Visit' }] : []),
     ...(isSaleDept ? [{ key: 'radar' as TabKey, label: 'Radar Chart' }] : []),
   ]
 
   return (
-    <aside
-      className="fixed top-0 right-0 h-full bg-white shadow-2xl z-40 flex flex-col border-l border-gray-100"
-      style={{ width: 'min(500px, 100vw)', animation: 'panelIn 0.22s cubic-bezier(0.16,1,0.3,1)' }}
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="bg-white rounded-3xl shadow-2xl flex flex-col border border-gray-100 w-[min(1080px,96vw)] h-[min(760px,94vh)]"
+      style={{ animation: 'panelIn 0.2s cubic-bezier(0.16,1,0.3,1)' }}
     >
-      <style>{`@keyframes panelIn { from { transform: translateX(100%) } to { transform: translateX(0) } }`}</style>
+      <style>{`@keyframes panelIn { from { opacity:0; transform:scale(0.96) } to { opacity:1; transform:scale(1) } }`}</style>
 
       {/* Header */}
-      <div className="px-5 pt-5 pb-4 border-b border-gray-100 shrink-0">
-        <div className="flex items-start gap-3">
-          <div className="size-12 rounded-2xl bg-freshket-100 border-2 border-freshket-200 flex items-center justify-center text-freshket-700 text-xl font-bold shrink-0">
-            {user.displayName.charAt(0)}
-          </div>
+      <div className="px-6 pt-6 pb-4 border-b border-gray-100 shrink-0">
+        <div className="flex items-start gap-4">
+          {user.photoURL ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={user.photoURL} alt={user.displayName} className="size-16 rounded-2xl object-cover border-2 border-freshket-200 shrink-0" />
+          ) : (
+            <div className="size-16 rounded-2xl bg-gradient-to-br from-freshket-200 to-emerald-100 border-2 border-freshket-200 flex items-center justify-center text-freshket-700 shrink-0 overflow-hidden">
+              <svg className="size-9" viewBox="0 0 24 24" fill="currentColor" opacity={0.85}>
+                <path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4.42 0-8 2.69-8 6v2h16v-2c0-3.31-3.58-6-8-6z" />
+              </svg>
+            </div>
+          )}
           <div className="flex-1 min-w-0">
-            <p className="font-bold text-gray-900 text-base leading-snug truncate">{user.displayName}</p>
+            <p className="font-bold text-gray-900 text-base leading-snug truncate">{enName(user)}</p>
             {user.nickname && <p className="text-sm text-gray-400">{user.nickname}</p>}
             <div className="flex flex-wrap gap-1.5 mt-1.5">
               {user.employeeId && (
@@ -370,7 +639,15 @@ function EmployeeSidebar({
                 : 'border-transparent text-gray-400 hover:text-gray-600'
             }`}
           >
-            {t.label}
+            <span className="inline-flex items-center justify-center gap-1.5">
+              {t.label}
+              {t.key === 'history' && hasNewTraining && (
+                <span className="relative flex size-2">
+                  <span className="absolute inline-flex size-2 rounded-full bg-rose-400 opacity-75 animate-ping" />
+                  <span className="relative inline-flex size-2 rounded-full bg-rose-500" />
+                </span>
+              )}
+            </span>
           </button>
         ))}
       </div>
@@ -398,58 +675,168 @@ function EmployeeSidebar({
             {userRecords.length === 0 ? (
               <p className="text-xs text-gray-400 text-center py-12">ยังไม่มีประวัติการเรียน</p>
             ) : userRecords.map(rec => (
-              <div key={rec.id} className="border border-gray-100 rounded-xl p-4 hover:bg-gray-50/50 transition-colors">
-                <div className="flex items-start justify-between gap-2 mb-2.5">
+              <div key={rec.id} className="border border-gray-100 rounded-xl p-4">
+                <div className="flex items-start justify-between gap-2 mb-1">
                   <p className="font-bold text-sm text-gray-800 leading-snug flex-1">{rec.courseTitle}</p>
                   <span className={`shrink-0 text-xs font-bold px-2.5 py-0.5 rounded-full ${STATUS_PASTEL[rec.status]}`}>
                     {STATUS_LABELS[rec.status]}
                   </span>
                 </div>
 
+                {/* วันที่เรียน (dd/mm/yyyy) */}
+                <div className="flex items-center gap-3 text-xs text-gray-400 mb-2.5">
+                  <span>วันที่เรียน {ddmmyyyy(rec.completedAt ?? rec.startedAt)}</span>
+                  {rec.attemptCount > 1 && <span>· {rec.attemptCount} ครั้ง</span>}
+                </div>
+
                 {rec.score != null && (
-                  <div className="mb-2">
+                  <div className="mb-2.5">
                     <div className="flex items-center justify-between text-xs mb-1">
                       <span className="text-gray-400">คะแนน</span>
                       <span className={`font-bold ${scoreTextColor(rec.score)}`}>{rec.score} / 100</span>
                     </div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${rec.score}%`, background: scoreBarColor(rec.score) }}
-                      />
+                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${rec.score}%`, background: scoreBarColor(rec.score) }} />
                     </div>
-                    {rec.passScore != null && (
-                      <p className="text-xs text-gray-400 mt-1">เกณฑ์ผ่าน: {rec.passScore}</p>
-                    )}
+                    {rec.passScore != null && <p className="text-xs text-gray-400 mt-1">เกณฑ์ผ่าน: {rec.passScore}</p>}
                   </div>
                 )}
 
-                <div className="flex items-center gap-3 text-xs text-gray-400">
-                  {rec.completedAt && <span>สำเร็จ {formatDate(rec.completedAt)}</span>}
-                  {rec.attemptCount > 1 && <span>{rec.attemptCount} ครั้ง</span>}
+                {/* Reflect knowledge (จากพนักงาน) + หัวหน้าคอมเมนต์ข้างล่าง */}
+                <div className="mt-1 rounded-xl border border-gray-100 overflow-hidden">
+                  <div className="bg-freshket-50 border-b border-freshket-100 px-3 py-2.5">
+                    <p className="text-xs font-bold text-freshket-700 mb-1">Reflect Knowledge (จากพนักงาน)</p>
+                    {takeaways[rec.courseId] ? (
+                      <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{takeaways[rec.courseId]}</p>
+                    ) : (
+                      <p className="text-xs text-gray-400 italic">ยังไม่มี reflection จากพนักงาน</p>
+                    )}
+                  </div>
+                  <div className="px-3 py-2.5">
+                    <FeedbackBlock
+                      courseId={rec.courseId}
+                      existing={feedback[rec.courseId]}
+                      canEdit={canFeedback}
+                      onSave={saveFeedback}
+                    />
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        {/* Tab 3 — Radar Chart (Sale dept only) */}
+        {/* Tab — แบบทดสอบ (imported Pre/Post scores) */}
+        {tab === 'assess' && (
+          <div className="p-4 space-y-3">
+            {assessBySubject.map(({ subject, pre, post }) => {
+              const delta = pre && post ? post.pct - pre.pct : null
+              return (
+                <div key={subject} className="border border-gray-100 rounded-xl p-4">
+                  <p className="font-bold text-sm text-gray-800 mb-3">{subject}</p>
+                  <div className="flex items-center gap-3">
+                    {/* Pre */}
+                    <div className="flex-1 rounded-xl bg-slate-50 border border-gray-100 p-3 text-center">
+                      <p className="text-xs text-gray-400 mb-1">Pre-Test</p>
+                      {pre ? (
+                        <>
+                          <p className={`text-xl font-black ${scoreTextColor(pre.pct)}`}>{pre.pct}%</p>
+                          <p className="text-xs text-gray-400 mt-0.5">{pre.score}/{pre.total}</p>
+                        </>
+                      ) : <p className="text-sm text-gray-300 py-2">—</p>}
+                    </div>
+                    {/* Arrow + delta */}
+                    <div className="flex flex-col items-center shrink-0">
+                      <svg className="size-4 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12h15m0 0l-6-6m6 6l-6 6" /></svg>
+                      {delta != null && (
+                        <span className={`text-xs font-bold mt-1 ${delta > 0 ? 'text-freshket-600' : delta < 0 ? 'text-rose-600' : 'text-gray-400'}`}>
+                          {delta > 0 ? `+${delta}` : delta}%
+                        </span>
+                      )}
+                    </div>
+                    {/* Post */}
+                    <div className="flex-1 rounded-xl bg-freshket-50 border border-freshket-100 p-3 text-center">
+                      <p className="text-xs text-freshket-600 mb-1">Post-Test</p>
+                      {post ? (
+                        <>
+                          <p className={`text-xl font-black ${scoreTextColor(post.pct)}`}>{post.pct}%</p>
+                          <p className="text-xs text-gray-400 mt-0.5">{post.score}/{post.total}</p>
+                        </>
+                      ) : <p className="text-sm text-gray-300 py-2">—</p>}
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2.5">
+                    {pre && `Pre ${ddmmyyyy(pre.takenAt)}`}{pre && post ? ' · ' : ''}{post && `Post ${ddmmyyyy(post.takenAt)}`}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Tab — Shadow Visit (dept has shadow module) */}
+        {tab === 'shadow' && (
+          <div className="p-4 space-y-3">
+            {shadowRecords.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-12">ยังไม่มีประวัติ Shadow Visit</p>
+            ) : shadowRecords.map(rec => {
+              const rating = rec.ratingScore ?? null
+              return (
+                <div key={rec.id} className="border border-gray-100 rounded-xl p-4">
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <div className="min-w-0">
+                      <p className="font-bold text-sm text-gray-800 leading-snug truncate">{rec.storeName}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {rec.mentorName ? `พี่เลี้ยง ${rec.mentorName}` : '—'}{rec.mentorPosition ? ` · ${rec.mentorPosition}` : ''}
+                      </p>
+                    </div>
+                    {rating != null && (
+                      <span className={`shrink-0 text-xs font-bold px-2.5 py-0.5 rounded-full ${scorePastel(rating * 20)}`}>
+                        {rating}/5
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">{rec.segment}</span>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{rec.persona}</span>
+                    <span className="text-xs text-gray-400 ml-auto">{ddmmyyyy(rec.createdAt)}</span>
+                  </div>
+                  {rec.evaluationFeedback && (
+                    <p className="text-xs text-gray-500 leading-relaxed border-t border-gray-50 pt-2 mt-1 whitespace-pre-wrap">
+                      {rec.evaluationFeedback}
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Tab — Radar Chart (Sale dept only): real roleplay assessment radar */}
         {tab === 'radar' && (
-          <div className="flex flex-col items-center justify-center h-72 p-8 text-center">
+          radarAssessments.length > 0 ? (
+            <div className="p-4">
+              <p className="text-sm font-bold text-gray-900 mb-1 text-center">Role Play Radar</p>
+              <p className="text-xs text-gray-400 text-center mb-2">ค่าเฉลี่ยรายด้าน (เต็ม 10){radarAssessments.length > 1 ? ' · Pre เทียบ Post' : ''}</p>
+              <RoleplayRadar assessments={radarAssessments} />
+            </div>
+          ) : (
+          <div className="flex flex-col items-center justify-center h-full min-h-72 p-8 text-center">
             <div className="size-16 rounded-2xl bg-freshket-50 border border-freshket-200 flex items-center justify-center mb-4">
               <svg className="size-8 text-freshket-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l2.5 7.5H21l-6.5 4.5 2.5 7.5L12 18l-5 4.5 2.5-7.5L4 10.5h6.5L12 3z" />
               </svg>
             </div>
-            <p className="text-sm font-bold text-gray-700 mb-2">Shadow Radar Chart</p>
+            <p className="text-sm font-bold text-gray-700 mb-2">Role Play Radar</p>
             <p className="text-xs text-gray-400 leading-relaxed">
               จะแสดงเมื่อมีข้อมูลจาก<br />Role Play Assessment
             </p>
           </div>
+          )
         )}
 
       </div>
-    </aside>
+    </div>
   )
 }
 
@@ -465,6 +852,94 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
   )
 }
 
+// ── Feedback (lead/manager comment + score on a member's course) ────────────────
+function FeedbackBlock({ courseId, existing, canEdit, onSave }: {
+  courseId: string
+  existing?: { comment: string; score: number | null; leadName?: string }
+  canEdit: boolean
+  onSave: (courseId: string, comment: string, score: number | null) => Promise<void>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [comment, setComment] = useState(existing?.comment ?? '')
+  const [score, setScore] = useState<string>(existing?.score != null ? String(existing.score) : '')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setComment(existing?.comment ?? '')
+    setScore(existing?.score != null ? String(existing.score) : '')
+  }, [existing])
+
+  async function submit() {
+    setSaving(true)
+    const n = score.trim() === '' ? null : Math.max(0, Math.min(100, Number(score) || 0))
+    try {
+      await onSave(courseId, comment.trim(), n)
+      setEditing(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Read-only view of existing feedback
+  if (!editing) {
+    return (
+      <>
+        {existing && (existing.comment || existing.score != null) ? (
+          <div className="rounded-xl bg-blue-50 border border-blue-100 p-3">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <p className="text-xs font-bold text-blue-700">ความเห็นหัวหน้า{existing.leadName ? ` · ${existing.leadName}` : ''}</p>
+              {existing.score != null && (
+                <span className={`text-xs font-black ${scoreTextColor(existing.score)}`}>{existing.score}/100</span>
+              )}
+            </div>
+            {existing.comment && <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{existing.comment}</p>}
+            {canEdit && (
+              <button onClick={() => setEditing(true)} className="text-xs font-bold text-blue-600 hover:text-blue-700 mt-1.5">แก้ไข</button>
+            )}
+          </div>
+        ) : canEdit ? (
+          <button onClick={() => setEditing(true)} className="text-xs font-bold text-freshket-600 hover:text-freshket-700">
+            + ให้คะแนน / คอมเมนต์
+          </button>
+        ) : (
+          <p className="text-xs text-gray-300 italic">ยังไม่มีความเห็นจากหัวหน้า</p>
+        )}
+      </>
+    )
+  }
+
+  // Edit form
+  return (
+    <div className="space-y-2">
+      <textarea
+        rows={2}
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder="คอมเมนต์ถึงพนักงาน..."
+        className="w-full px-2.5 py-2 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
+      />
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <input
+            type="number" min={0} max={100}
+            value={score}
+            onChange={(e) => setScore(e.target.value)}
+            placeholder="คะแนน"
+            className="w-20 px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
+          />
+          <span className="text-xs text-gray-400">/ 100</span>
+        </div>
+        <div className="ml-auto flex gap-2">
+          <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">ยกเลิก</button>
+          <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs font-bold rounded-lg bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-60">
+            {saving ? 'บันทึก...' : 'บันทึก'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Stat Card ─────────────────────────────────────────────────────────────────
 function StatCard({
   label, value, unit, bg, iconBg, iconColor, icon,
@@ -473,7 +948,7 @@ function StatCard({
   bg: string; iconBg: string; iconColor: string; icon: React.ReactNode
 }) {
   return (
-    <div className={`${bg} rounded-2xl p-5 flex flex-col gap-3 border border-white/80`}>
+    <div className={`${bg} rounded-2xl p-5 flex flex-col gap-3 border border-white/80 transition-all duration-150 hover:-translate-y-1 hover:shadow-md`}>
       <div className={`size-10 rounded-xl ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}>
         {icon}
       </div>
@@ -501,5 +976,34 @@ function DeptPill({ label, active, onClick }: { label: string; active: boolean; 
     >
       {label}
     </button>
+  )
+}
+
+type MemberSortField = 'name' | 'position' | 'department' | 'startDate' | 'team'
+function SortableTh({ label, field, sortField, sortDir, onSort, className = '' }: {
+  label: string
+  field: MemberSortField
+  sortField: MemberSortField
+  sortDir: 'asc' | 'desc'
+  onSort: (f: MemberSortField) => void
+  className?: string
+}) {
+  const active = sortField === field
+  return (
+    <th className={`text-left px-4 py-3 text-xs font-bold text-gray-500 ${className}`}>
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-gray-700 ${active ? 'text-gray-900' : ''}`}
+      >
+        {label}
+        <svg
+          className={`size-3 transition-transform ${active ? 'opacity-100' : 'opacity-30'} ${active && sortDir === 'desc' ? 'rotate-180' : ''}`}
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+        </svg>
+      </button>
+    </th>
   )
 }

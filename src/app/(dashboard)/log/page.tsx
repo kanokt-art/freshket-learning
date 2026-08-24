@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { Header } from '@/components/layout/Header'
+import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 
 const DEMO = getDemoMode()
 
@@ -285,9 +286,10 @@ export default function ActivityLogPage() {
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <Header title="Activity Log" subtitle="ติดตามกิจกรรมของผู้ใช้และ Admin แบบ real-time" />
+      <AdministrationTabs />
 
       <div className="flex-1 overflow-auto">
-        <div className="max-w-4xl mx-auto px-6 py-5">
+        <div className="w-full px-6 py-5">
 
           {/* ── Tabs ── */}
           <div className="flex border-b border-gray-200 mb-5">

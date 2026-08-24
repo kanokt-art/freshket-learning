@@ -20,18 +20,36 @@ export async function pushNotification(
     return
   }
 
-  const { getClientFirestore } = await import('@/lib/firebase/client')
-  const { addDoc, collection, serverTimestamp } = await import('firebase/firestore')
-  const db = getClientFirestore()
-  await addDoc(collection(db, 'notifications', targetUid, 'items'), {
-    type: notif.type,
-    title: notif.title,
-    body: notif.body,
-    refId: notif.refId,
-    refPath: notif.refPath,
-    read: false,
-    createdAt: serverTimestamp(),
-  })
+  // Routed through the server (POST /api/notifications/push) rather than written
+  // straight from the client. firestore.rules now denies client creates: it used
+  // to allow ANY signed-in employee to write into ANY other employee's
+  // notification feed with arbitrary text and link, which is a phishing
+  // primitive. The route re-derives the sender from the verified ID token,
+  // validates the type/link, and writes with the Admin SDK.
+  //
+  // Still best-effort and fire-and-forget: a notification must never break the
+  // action that triggered it (saving a course, submitting a shadow visit), so a
+  // failure is logged rather than thrown.
+  try {
+    const { authedFetch } = await import('@/lib/api/authedFetch')
+    const res = await authedFetch('/api/notifications/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetUid,
+        type: notif.type,
+        title: notif.title,
+        body: notif.body,
+        refId: notif.refId,
+        refPath: notif.refPath,
+      }),
+    })
+    if (!res.ok) {
+      console.error('pushNotification rejected for', targetUid, res.status, await res.text())
+    }
+  } catch (err) {
+    console.error('pushNotification failed for', targetUid, err)
+  }
 }
 
 export { type NotifType }

@@ -3,10 +3,10 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
-import { useNotifications } from '@/hooks/useNotifications'
 import { canAccess } from '@/types/user'
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
 import { useMemo } from 'react'
+import { NotificationBellButton } from '@/components/features/NotificationBellButton'
 
 // ── Icon pairs: filled (active) vs outlined (inactive) ───────────────────────
 
@@ -84,34 +84,12 @@ function ProfileIcon({ filled }: { filled: boolean }) {
   )
 }
 
-function BellIcon({ filled, count }: { filled: boolean; count: number }) {
-  return (
-    <div className="relative">
-      {filled ? (
-        <svg className="size-6" viewBox="0 0 24 24" fill="currentColor">
-          <path fillRule="evenodd" d="M5.25 9a6.75 6.75 0 0 1 13.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 0 1-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 1 1-7.48 0 24.585 24.585 0 0 1-4.831-1.244.75.75 0 0 1-.298-1.205A8.217 8.217 0 0 0 5.25 9.75V9Zm4.502 8.9a2.25 2.25 0 1 0 4.496 0 25.057 25.057 0 0 1-4.496 0Z" clipRule="evenodd" />
-        </svg>
-      ) : (
-        <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-          <path d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
-        </svg>
-      )}
-      {count > 0 && (
-        <span className="absolute -top-1 -right-1.5 min-w-[16px] h-4 px-0.5 rounded-full bg-rose-500 text-white text-xs font-bold leading-4 text-center tabular">
-          {count > 99 ? '99+' : count}
-        </span>
-      )}
-    </div>
-  )
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function BottomBar() {
   const pathname = usePathname()
   const { user } = useAuth()
   const isNewJoiner = useMemo(() => getDaysSince(user?.startDate) < NEW_JOINER_DAYS, [user?.startDate])
-  const { unreadCount } = useNotifications(user?.uid)
 
   if (!user) return null
 
@@ -123,7 +101,6 @@ export function BottomBar() {
   const toolActive    = pathname.startsWith('/tools') && pathname !== '/tools/new-joiner'
   const joinerActive  = pathname === '/tools/new-joiner'
   const adminActive   = pathname.startsWith('/users') || pathname.startsWith('/admin') || pathname.startsWith('/assessment')
-  const notifActive   = pathname === '/notifications'
   const profileActive = pathname === '/profile'
 
   const items = [
@@ -162,10 +139,11 @@ export function BottomBar() {
         }]
       : []),
     {
-      href: '/notifications',
+      // Handled specially in the render below — opens a popover instead of navigating.
+      href: null,
       label: 'แจ้งเตือน',
-      active: notifActive,
-      icon: <BellIcon filled={notifActive} count={unreadCount} />,
+      active: false,
+      icon: null,
     },
     {
       href: '/profile',
@@ -178,38 +156,43 @@ export function BottomBar() {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-white/95 backdrop-blur-md border-t border-gray-100 shadow-[0_-4px_24px_rgba(0,0,0,0.06)]">
       <div className="flex items-center justify-around h-[62px] pb-safe px-1">
-        {items.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            prefetch
-            className="flex-1 flex items-center justify-center"
-            aria-label={item.label}
-          >
-            <span
-              className={`flex items-center gap-0 rounded-full transition-all duration-300 ease-in-out ${
-                item.active
-                  ? 'bg-freshket-100 text-freshket-600 px-4 py-2 gap-1.5'
-                  : 'text-gray-400 p-2 active:text-gray-600 active:scale-90'
-              }`}
+        {items.map((item) =>
+          item.href === null ? (
+            // Notification bell — opens a popover in place instead of navigating.
+            <NotificationBellButton key="notifications" variant="nav" />
+          ) : (
+            <Link
+              key={item.href}
+              href={item.href}
+              prefetch
+              className="flex-1 flex items-center justify-center"
+              aria-label={item.label}
             >
-              {/* Icon: filled when active, outlined when not */}
-              <span className="shrink-0 transition-transform duration-300">
-                {item.icon}
-              </span>
-              {/* Label: only shown when active, animates in/out */}
               <span
-                className={`text-xs font-bold whitespace-nowrap overflow-hidden transition-all duration-300 ease-in-out leading-none ${
+                className={`flex items-center gap-0 rounded-full transition-all duration-300 ease-in-out ${
                   item.active
-                    ? 'max-w-[72px] opacity-100'
-                    : 'max-w-0 opacity-0'
+                    ? 'bg-freshket-100 text-freshket-600 px-4 py-2 gap-1.5'
+                    : 'text-gray-400 p-2 active:text-gray-600 active:scale-90'
                 }`}
               >
-                {item.label}
+                {/* Icon: filled when active, outlined when not */}
+                <span className="shrink-0 transition-transform duration-300">
+                  {item.icon}
+                </span>
+                {/* Label: only shown when active, animates in/out */}
+                <span
+                  className={`text-xs font-bold whitespace-nowrap overflow-hidden transition-all duration-300 ease-in-out leading-none ${
+                    item.active
+                      ? 'max-w-[72px] opacity-100'
+                      : 'max-w-0 opacity-0'
+                  }`}
+                >
+                  {item.label}
+                </span>
               </span>
-            </span>
-          </Link>
-        ))}
+            </Link>
+          )
+        )}
       </div>
     </nav>
   )

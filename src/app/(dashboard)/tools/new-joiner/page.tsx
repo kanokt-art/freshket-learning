@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { canAccess } from '@/types/user'
 import { Header } from '@/components/layout/Header'
+import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
+import { FreshketToolTabs } from '@/components/layout/FreshketToolTabs'
 
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
 
@@ -545,6 +547,8 @@ export default function NewJoinerPage() {
           ) : undefined
         }
       />
+      <AdministrationTabs />
+      <FreshketToolTabs />
 
       {/* ── Tab Bar ─────────────────────────────────────────────────────── */}
       <div className="bg-white border-b border-gray-100 flex overflow-x-auto shrink-0">

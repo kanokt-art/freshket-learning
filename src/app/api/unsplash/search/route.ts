@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
 
 // Picsum seed URL — deterministic per keyword, no API key needed
 function picsumFallback(query: string) {
@@ -7,6 +8,11 @@ function picsumFallback(query: string) {
 }
 
 export async function GET(req: NextRequest) {
+  // Course-authoring only (same caller as gemini/course-image) — without this,
+  // anyone who finds the route could spend the billed UNSPLASH_ACCESS_KEY quota.
+  const gate = await requireSuperAdmin(req)
+  if (!gate.ok) return gate.response
+
   const { searchParams } = new URL(req.url)
   const query = searchParams.get('q')?.trim()
 

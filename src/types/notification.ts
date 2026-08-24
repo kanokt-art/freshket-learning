@@ -2,6 +2,7 @@ export type NotifType =
   | 'shadow_pending_ack'   // team_lead / manager: someone submitted a shadow visit
   | 'shadow_ack_received'  // sale: your shadow visit was acknowledged
   | 'new_course'           // any role: a new course is published for you
+  | 'heart_received'       // any role: a colleague sent you a heart (ส่งใจ)
 
 export interface AppNotification {
   id: string

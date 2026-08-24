@@ -2,7 +2,6 @@ import type { UserProfile, Team, Department } from '@/types/user'
 import type { Course, Resource } from '@/types/course'
 import type { TrainingRecord } from '@/types/tracking'
 import type { Assessment } from '@/types/assessment'
-import type { PointEvent, UserPoints } from '@/types/points'
 
 type MockUser = Omit<UserProfile, 'createdAt' | 'updatedAt'>
 

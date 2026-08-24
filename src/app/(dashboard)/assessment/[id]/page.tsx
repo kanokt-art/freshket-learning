@@ -1,23 +1,112 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useAssessment } from '@/hooks/useFirestore'
+import { useCourse } from '@/hooks/useFirestore'
+import { useAuth } from '@/hooks/useAuth'
+import { authedFetch } from '@/lib/api/authedFetch'
+import { progKey, readScoped } from '@/lib/courseProgressKeys'
+import { getDemoMode } from '@/lib/demo/demoMode'
+import { MOCK_ASSESSMENTS } from '@/lib/utils/mockData'
+import { gradeSubmission, sanitizeQuestion } from '@/lib/assessment/grade'
 import type { Question, DragPair } from '@/types/assessment'
 
+const DEMO_MODE = getDemoMode()
+
+// What GET /api/assessment/[id]/take returns — the assessment minus its key.
+interface TakeAssessment {
+  id: string
+  title: string
+  description: string
+  passingScore: number
+  questions: Question[]
+}
+
+// What POST /api/assessment/submit returns. `results` is the per-question
+// breakdown, which is the only way the result screen can reveal correct answers
+// now that the client never holds the key.
+export interface SubmitResult {
+  score: number
+  passed: boolean
+  passingScore: number
+  pointsEarned: number
+  pointsPossible: number
+  attemptNumber: number
+  results: {
+    questionId: string
+    correct: boolean | null
+    pointsEarned: number
+    pointsPossible: number
+    correctLabel: string
+  }[]
+}
+
 type ReturnCtx = { courseId: string; step: 'pre' | 'post' }
+
+const MAX_VIOLATIONS = 3
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function TakeAssessmentPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const { data: assessment, loading } = useAssessment(id)
+  const { user } = useAuth()
+
+  // Loaded from the API, not Firestore: the route strips every answer key before
+  // it leaves the server, and it enforces isPublished (the old direct-Firestore
+  // read did neither).
+  const [assessment, setAssessment] = useState<TakeAssessment | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const [currentIndex, setCurrentIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string | Record<string, string>>>({})
   const [submitted, setSubmitted] = useState(false)
   const [score, setScore] = useState(0)
+  const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [returnCtx, setReturnCtx] = useState<ReturnCtx | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!user) return
+
+    // Demo mode never initializes Firebase, so there is no ID token to send and
+    // the API would answer 401. Serve the mock quiz locally instead, sanitized
+    // through the same helper the server uses so the demo behaves like the real
+    // thing (no key in the rendered props, verdict only after submitting).
+    if (DEMO_MODE) {
+      const found = MOCK_ASSESSMENTS.find((a) => a.id === id)
+      setAssessment(found
+        ? {
+            id: found.id,
+            title: found.title,
+            description: found.description,
+            passingScore: found.passingScore,
+            questions: found.questions.map(sanitizeQuestion),
+          }
+        : null)
+      setLoadError(found ? null : 'ไม่พบแบบทดสอบนี้')
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    authedFetch(`/api/assessment/${encodeURIComponent(id)}/take`)
+      .then(async (res) => {
+        const json = await res.json().catch(() => null)
+        if (cancelled) return
+        if (!res.ok) {
+          setLoadError(json?.error ?? 'โหลดแบบทดสอบไม่สำเร็จ')
+          setAssessment(null)
+        } else {
+          setAssessment(json as TakeAssessment)
+        }
+      })
+      .catch(() => { if (!cancelled) setLoadError('เชื่อมต่อ server ไม่ได้') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [id, user])
 
   // Read course context written by course detail page before navigation
   useEffect(() => {
@@ -27,6 +116,63 @@ export default function TakeAssessmentPage() {
     } catch {}
   }, [])
 
+  // ── Anti-cheat (fullscreen enforcement + tab/window-switch detection) ──────
+  const { data: course } = useCourse(returnCtx?.courseId ?? '')
+  const antiCheatEnabled = !!returnCtx && !!course?.quizSettings?.antiCheatEnabled
+  const [started, setStarted] = useState(false)
+  const [violations, setViolations] = useState(0)
+  const [showViolationWarning, setShowViolationWarning] = useState(false)
+  const submittingRef = useRef(false)
+  const lastViolationAtRef = useRef(0)
+
+  async function handleStartAntiCheat() {
+    try { await document.documentElement.requestFullscreen() } catch {}
+    setStarted(true)
+  }
+
+  async function handleAckViolationWarning() {
+    setShowViolationWarning(false)
+    if (!document.fullscreenElement) {
+      try { await document.documentElement.requestFullscreen() } catch {}
+    }
+  }
+
+  useEffect(() => {
+    if (!started || !antiCheatEnabled || submitted) return
+
+    function registerViolation() {
+      if (submittingRef.current) return
+      const now = Date.now()
+      // visibilitychange + blur can both fire for the same switch — dedupe
+      if (now - lastViolationAtRef.current < 800) return
+      lastViolationAtRef.current = now
+      setViolations((v) => v + 1)
+    }
+    function onVisibility() { if (document.hidden) registerViolation() }
+    function onBlur() { registerViolation() }
+    function onFullscreenChange() { if (!document.fullscreenElement) registerViolation() }
+
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('blur', onBlur)
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('blur', onBlur)
+      document.removeEventListener('fullscreenchange', onFullscreenChange)
+    }
+  }, [started, antiCheatEnabled, submitted])
+
+  useEffect(() => {
+    if (violations === 0) return
+    if (violations >= MAX_VIOLATIONS) {
+      setShowViolationWarning(false)
+      handleSubmit()
+    } else {
+      setShowViolationWarning(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [violations])
+
   const questions = assessment?.questions.slice().sort((a, b) => a.order - b.order) ?? []
   const total = questions.length
   const current = questions[currentIndex]
@@ -35,42 +181,92 @@ export default function TakeAssessmentPage() {
     setAnswers((prev) => ({ ...prev, [questionId]: value }))
   }
 
-  function calcScore(): number {
-    if (!assessment) return 0
-    let earned = 0
-    let totalPts = 0
-    for (const q of questions) {
-      totalPts += q.points
-      const ans = answers[q.id]
-      if (q.type === 'multiple_choice') {
-        const correct = q.choices?.find((c) => c.isCorrect)
-        if (correct && ans === correct.id) earned += q.points
-      } else if (q.type === 'drag_drop') {
-        const map = ans as Record<string, string>
-        if (map && q.dragPairs) {
-          const allCorrect = q.dragPairs.every((p) => map[p.id] === p.right)
-          if (allCorrect) earned += q.points
-        }
-      }
-      // open_ended: not auto-graded
-    }
-    return totalPts > 0 ? Math.round((earned / totalPts) * 100) : 0
-  }
+  // Grading happens on the server (POST /api/assessment/submit). The browser no
+  // longer has the answer key to grade with, and the score it receives back is
+  // the one already written to the training record — it can't be edited into
+  // something else on the way to the database.
+  async function handleSubmit() {
+    if (submittingRef.current) return
+    submittingRef.current = true
+    setSubmitError(null)
+    setSubmitting(true)
 
-  function handleSubmit() {
-    const s = calcScore()
-    // Save step progress to localStorage so course detail page can re-read it
-    if (returnCtx) {
-      try {
-        const progKey = `course_prog_${returnCtx.courseId}`
-        const existing: Record<string, boolean> = JSON.parse(localStorage.getItem(progKey) ?? '{}')
-        const field = returnCtx.step === 'pre' ? 'preDone' : 'postDone'
-        localStorage.setItem(progKey, JSON.stringify({ ...existing, [field]: true }))
-      } catch {}
-      sessionStorage.removeItem('assessment_return')
+    // Demo mode: grade locally against the mock key. Safe because the data is
+    // fictional and nothing is persisted — the real path below never sees a key.
+    if (DEMO_MODE) {
+      const source = MOCK_ASSESSMENTS.find((a) => a.id === id)
+      const graded = gradeSubmission(source?.questions ?? [], answers)
+      const passingScore = source?.passingScore ?? 70
+      setScore(graded.score)
+      setSubmitResult({
+        score: graded.score,
+        passed: graded.score >= passingScore,
+        passingScore,
+        pointsEarned: graded.pointsEarned,
+        pointsPossible: graded.pointsPossible,
+        attemptNumber: 1,
+        results: graded.answers.map((a) => ({
+          questionId: a.questionId,
+          correct: a.correct,
+          pointsEarned: a.pointsEarned,
+          pointsPossible: a.pointsPossible,
+          correctLabel:
+            source?.questions.find((q) => q.id === a.questionId)?.choices?.find((c) => c.isCorrect)?.text ?? '',
+        })),
+      })
+      if (returnCtx) sessionStorage.removeItem('assessment_return')
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+      setSubmitted(true)
+      setSubmitting(false)
+      return
     }
-    setScore(s)
-    setSubmitted(true)
+
+    try {
+      const res = await authedFetch('/api/assessment/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assessmentId: id,
+          answers,
+          ...(returnCtx ? { courseId: returnCtx.courseId, step: returnCtx.step } : {}),
+          autoSubmitted: violations >= MAX_VIOLATIONS,
+        }),
+      })
+
+      if (!res.ok) {
+        const msg = await res.json().catch(() => null)
+        setSubmitError(msg?.error ?? 'ส่งคำตอบไม่สำเร็จ — กรุณาลองอีกครั้ง')
+        submittingRef.current = false
+        setSubmitting(false)
+        return
+      }
+
+      const result: SubmitResult = await res.json()
+
+      // Mark the course step done locally so the course page's step machine
+      // advances. The SCORE is intentionally not written here any more — the
+      // server owns it. It is kept in local state only for the result screen.
+      if (returnCtx && user?.uid) {
+        try {
+          const key = progKey(user.uid, returnCtx.courseId)
+          const existing: Record<string, boolean | number> =
+            JSON.parse(readScoped(user.uid, key, `course_prog_${returnCtx.courseId}`) ?? '{}')
+          const doneField = returnCtx.step === 'pre' ? 'preDone' : 'postDone'
+          localStorage.setItem(key, JSON.stringify({ ...existing, [doneField]: true }))
+        } catch {}
+        sessionStorage.removeItem('assessment_return')
+      }
+
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+      setScore(result.score)
+      setSubmitResult(result)
+      setSubmitted(true)
+    } catch {
+      setSubmitError('เชื่อมต่อ server ไม่ได้ — คำตอบยังไม่ถูกบันทึก กรุณาลองอีกครั้ง')
+      submittingRef.current = false
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   function handleBack() {
@@ -94,14 +290,29 @@ export default function TakeAssessmentPage() {
   if (!assessment) {
     return (
       <div className="flex flex-col items-center justify-center h-full bg-slate-50 text-gray-400 gap-3">
-        <p className="text-sm">ไม่พบแบบทดสอบนี้</p>
+        <p className="text-sm">{loadError ?? 'ไม่พบแบบทดสอบนี้'}</p>
         <button onClick={() => router.back()} className="text-sm text-freshket-600 hover:underline">← กลับ</button>
       </div>
     )
   }
 
+  if (antiCheatEnabled && !started) {
+    return <AntiCheatGate onStart={handleStartAntiCheat} />
+  }
+
   if (submitted) {
-    return <ResultScreen score={score} passingScore={assessment.passingScore} total={total} questions={questions} answers={answers} onBack={handleBack} fromCourse={!!returnCtx} />
+    return (
+      <ResultScreen
+        score={score}
+        passingScore={assessment.passingScore}
+        total={total}
+        questions={questions}
+        answers={answers}
+        result={submitResult}
+        onBack={handleBack}
+        fromCourse={!!returnCtx}
+      />
+    )
   }
 
   const progress = ((currentIndex) / total) * 100
@@ -119,6 +330,14 @@ export default function TakeAssessmentPage() {
           <p className="text-sm font-bold text-gray-800 truncate">{assessment.title}</p>
           <p className="text-xs text-gray-400 mt-0.5">ข้อ {currentIndex + 1} จาก {total}</p>
         </div>
+        {antiCheatEnabled && (
+          <div className="shrink-0 flex items-center gap-1.5 text-xs font-bold text-rose-600 bg-rose-50 px-3 py-1.5 rounded-full border border-rose-100">
+            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+            ป้องกันการทุจริต · แจ้งเตือน {violations}/{MAX_VIOLATIONS}
+          </div>
+        )}
       </div>
 
       {/* Progress bar */}
@@ -180,14 +399,82 @@ export default function TakeAssessmentPage() {
         ) : (
           <button
             onClick={handleSubmit}
-            className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all"
+            disabled={submitting}
+            className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            ส่งคำตอบ
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </svg>
+            {submitting ? 'กำลังส่ง...' : 'ส่งคำตอบ'}
+            {submitting ? (
+              <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
+            ) : (
+              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+            )}
           </button>
         )}
+      </div>
+
+      {/* A failed submit must be loud: the score now lives only on the server, so
+          unlike the old localStorage write there is nothing to fall back on. */}
+      {submitError && (
+        <div className="mx-auto mb-4 max-w-lg px-4">
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {submitError}
+          </div>
+        </div>
+      )}
+
+      {showViolationWarning && (
+        <ViolationWarningModal violations={violations} maxViolations={MAX_VIOLATIONS} onAck={handleAckViolationWarning} />
+      )}
+    </div>
+  )
+}
+
+// ── Anti-Cheat gate & warning ─────────────────────────────────────────────────
+function AntiCheatGate({ onStart }: { onStart: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6">
+      <div className="animate-pop-in max-w-md w-full bg-white rounded-2xl border border-gray-100 shadow-sm p-8 text-center">
+        <div className="size-14 rounded-2xl bg-freshket-100 flex items-center justify-center mx-auto mb-4">
+          <svg className="size-7 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+          </svg>
+        </div>
+        <h2 className="text-lg font-bold text-gray-900 mb-2">แบบทดสอบนี้มีระบบป้องกันการทุจริต</h2>
+        <p className="text-sm text-gray-500 mb-5 leading-relaxed">
+          เมื่อเริ่มทำแบบทดสอบ หน้าจอจะเข้าสู่โหมดเต็มจอ (Fullscreen) โดยอัตโนมัติ ห้ามสลับแท็บหรือหน้าต่างระหว่างทำแบบทดสอบ
+          ระบบจะแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และจะ<span className="font-bold text-rose-600">ส่งคำตอบอัตโนมัติทันที</span>หากถูกแจ้งเตือนครบ 3 ครั้ง
+        </p>
+        <button onClick={onStart}
+          className="w-full px-5 py-3 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all">
+          เข้าสู่โหมดเต็มจอและเริ่มทำแบบทดสอบ
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ViolationWarningModal({ violations, maxViolations, onAck }: {
+  violations: number; maxViolations: number; onAck: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="animate-pop-in bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center">
+        <div className="size-14 rounded-full bg-rose-100 flex items-center justify-center mx-auto mb-4">
+          <svg className="size-7 text-rose-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          </svg>
+        </div>
+        <h3 className="text-base font-bold text-gray-900 mb-1">ตรวจพบการสลับหน้าจอ</h3>
+        <p className="text-sm text-gray-600 mb-1">ระบบตรวจพบว่าคุณออกจากโหมดทำแบบทดสอบ ({violations}/{maxViolations} ครั้ง)</p>
+        <p className="text-sm text-gray-400 mb-6">หากถูกแจ้งเตือนครบ {maxViolations} ครั้ง ระบบจะส่งคำตอบอัตโนมัติทันที</p>
+        <button onClick={onAck}
+          className="w-full px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all">
+          เข้าใจแล้ว กลับเข้าสู่โหมดเต็มจอ
+        </button>
       </div>
     </div>
   )
@@ -408,6 +695,7 @@ function ResultScreen({
   total,
   questions,
   answers,
+  result,
   onBack,
   fromCourse,
 }: {
@@ -416,10 +704,15 @@ function ResultScreen({
   total: number
   questions: Question[]
   answers: Record<string, string | Record<string, string>>
+  /** Server verdict per question — the client has no key to derive this itself. */
+  result: SubmitResult | null
   onBack: () => void
   fromCourse?: boolean
 }) {
-  const passed = score >= passingScore
+  const passed = result ? result.passed : score >= passingScore
+  const verdictByQuestion = new Map(
+    (result?.results ?? []).map((r) => [r.questionId, r]),
+  )
   const openEndedCount = questions.filter((q) => q.type === 'open_ended').length
 
   return (
@@ -452,17 +745,11 @@ function ResultScreen({
           <p className="text-xs font-bold text-gray-500">สรุปคำตอบ</p>
           {questions.map((q, i) => {
             const ans = answers[q.id]
-            let isCorrect: boolean | null = null
-            let correctLabel = ''
-
-            if (q.type === 'multiple_choice') {
-              const correctChoice = q.choices?.find((c) => c.isCorrect)
-              isCorrect = ans === correctChoice?.id
-              correctLabel = correctChoice?.text ?? ''
-            } else if (q.type === 'drag_drop') {
-              const map = ans as Record<string, string>
-              isCorrect = q.dragPairs?.every((p) => map?.[p.id] === p.right) ?? false
-            }
+            // Verdict and the revealed answer both come from the server response.
+            // The sanitized question this page holds has no key to check against.
+            const verdict = verdictByQuestion.get(q.id)
+            const isCorrect: boolean | null = verdict ? verdict.correct : null
+            const correctLabel = verdict?.correctLabel ?? ''
 
             return (
               <div key={q.id} className={`bg-white rounded-xl border p-4 ${
@@ -493,7 +780,9 @@ function ResultScreen({
                       <p className="text-xs text-freshket-600 mt-1">เฉลย: {correctLabel}</p>
                     )}
                   </div>
-                  <span className="text-xs font-bold text-gray-400 shrink-0">{isCorrect ? q.points : 0}/{q.points}</span>
+                  <span className="text-xs font-bold text-gray-400 shrink-0">
+                    {verdict?.pointsEarned ?? 0}/{verdict?.pointsPossible ?? q.points}
+                  </span>
                 </div>
               </div>
             )

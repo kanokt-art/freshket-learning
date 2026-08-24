@@ -38,6 +38,12 @@ firebase-adminsdk*.json
 # Firebase local logs / cache
 .firebase/logs/
 
+# Test output (Playwright)
+/test-results/
+/playwright-report/
+/blob-report/
+/.playwright/
+
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
@@ -45,5 +51,7 @@ next-env.d.ts
 # OS
 .DS_Store
 Thumbs.db
+
+.vercel
 
 .vercel

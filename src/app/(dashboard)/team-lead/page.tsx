@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import dynamic from 'next/dynamic'
 import { Header } from '@/components/layout/Header'
-import { StatusBarChart } from '@/components/features/ProgressChart'
 import { useAuth } from '@/hooks/useAuth'
 import { useTeamTrainingRecords, useAllUsers } from '@/hooks/useFirestore'
 import { STATUS_LABELS, STATUS_COLORS, type TrainingRecord } from '@/types/tracking'
@@ -11,6 +11,17 @@ import { canAccess, ROLE_LABELS, type UserProfile } from '@/types/user'
 import { getDemoMode } from '@/lib/demo/demoMode'
 
 const DEMO_MODE = getDemoMode()
+
+// recharts is ~94 kB gzipped and this page used it for ONE below-the-fold chart,
+// which made /team-lead the only route over 300 kB First Load JS. Loading it on
+// demand keeps the chart identical and takes recharts out of the initial payload.
+const StatusBarChart = dynamic(
+  () => import('@/components/features/ProgressChart').then((m) => m.StatusBarChart),
+  {
+    ssr: false,
+    loading: () => <div className="h-[220px] rounded-xl bg-gray-50 animate-pulse" />,
+  },
+)
 
 // ── Helpers ───────────────────────────────────────────────────────────────────────
 const ROLE_BADGE: Record<string, string> = {
@@ -465,7 +476,6 @@ function MemberCard({
 // ── Main Page ─────────────────────────────────────────────────────────────────────
 export default function TeamLeadPage() {
   const { user } = useAuth()
-  const { data: records, loading } = useTeamTrainingRecords(user?.teamId ?? '')
   const { data: allUsers } = useAllUsers()
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
 
@@ -473,6 +483,11 @@ export default function TeamLeadPage() {
     if (!user?.teamId) return []
     return allUsers.filter(u => u.teamId === user.teamId && u.role === 'sale')
   }, [allUsers, user?.teamId])
+
+  // Records are fetched BY MEMBER UID — trainingRecords has no teamId field, so
+  // the old team-scoped query always came back empty (see useTeamTrainingRecords).
+  const teamMemberUids = useMemo(() => teamMembers.map(u => u.uid), [teamMembers])
+  const { data: records, loading } = useTeamTrainingRecords(teamMemberUids)
 
   const recordsByMember = useMemo(() => {
     const map: Record<string, TrainingRecord[]> = {}

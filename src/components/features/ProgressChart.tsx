@@ -1,12 +1,7 @@
 'use client'
 
 import {
-  RadialBarChart,
-  RadialBar,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
   Tooltip,
   Legend,
   BarChart,
@@ -15,48 +10,6 @@ import {
   YAxis,
   CartesianGrid,
 } from 'recharts'
-
-// --- Donut / Completion Ring ---
-interface CompletionRingProps {
-  percent: number
-  label?: string
-  size?: number
-}
-
-export function CompletionRing({ percent, label = 'ผ่านแล้ว', size = 120 }: CompletionRingProps) {
-  const data = [{ value: percent }, { value: 100 - percent }]
-  const COLORS = ['#27AE60', '#E8F5E9']
-
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <div style={{ width: size, height: size }} className="relative">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data}
-              cx="50%"
-              cy="50%"
-              innerRadius={size * 0.33}
-              outerRadius={size * 0.46}
-              startAngle={90}
-              endAngle={-270}
-              dataKey="value"
-              strokeWidth={0}
-            >
-              {data.map((_, i) => (
-                <Cell key={i} fill={COLORS[i]} />
-              ))}
-            </Pie>
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-xl font-bold text-brand-dark">{Math.round(percent)}%</span>
-        </div>
-      </div>
-      <span className="text-xs text-brand-muted">{label}</span>
-    </div>
-  )
-}
 
 // --- Status Bar Chart ---
 interface StatusData {
@@ -89,31 +42,26 @@ export function StatusBarChart({ data }: StatusBarChartProps) {
   )
 }
 
-// --- Score Radial Chart ---
-interface ScoreRadialProps {
-  score: number
+// --- Department Completion Chart (course overview modal, admin-only) ---
+interface DeptCompletionDatum {
+  name: string
+  completedPct: number
+  total: number
 }
 
-export function ScoreRadial({ score }: ScoreRadialProps) {
-  const data = [{ name: 'คะแนนเฉลี่ย', value: score, fill: '#27AE60' }]
-
+export function DeptCompletionChart({ data }: { data: DeptCompletionDatum[] }) {
   return (
-    <ResponsiveContainer width={140} height={140}>
-      <RadialBarChart
-        cx="50%"
-        cy="50%"
-        innerRadius={40}
-        outerRadius={60}
-        startAngle={180}
-        endAngle={-180}
-        barSize={10}
-        data={data}
-      >
-        <RadialBar background dataKey="value" cornerRadius={5} />
-        <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" className="text-sm font-bold fill-brand-dark">
-          {score}
-        </text>
-      </RadialBarChart>
+    <ResponsiveContainer width="100%" height={Math.max(data.length * 44, 120)}>
+      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F0" horizontal={false} />
+        <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11 }} />
+        <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 11 }} />
+        <Tooltip
+          formatter={(value: number, _name, item) => [`${value}% (${item.payload.total} คน)`, 'เรียนจบแล้ว']}
+          contentStyle={{ fontSize: 12, borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+        />
+        <Bar dataKey="completedPct" fill="#00ce7c" radius={[0, 4, 4, 0]} barSize={20} />
+      </BarChart>
     </ResponsiveContainer>
   )
 }

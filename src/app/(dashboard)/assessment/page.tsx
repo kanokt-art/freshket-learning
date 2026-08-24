@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react'
 import { addDoc, collection, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
+import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
 import { useAuth } from '@/hooks/useAuth'
 import { useAssessments } from '@/hooks/useFirestore'
 import {
@@ -16,6 +17,7 @@ import {
   type DragPair,
 } from '@/types/assessment'
 import { getClientFirestore } from '@/lib/firebase/client'
+import { InfoTooltip } from '@/components/common/InfoTooltip'
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
 
@@ -29,7 +31,9 @@ function fmtDate(d: Date | string | undefined) {
 export default function AssessmentPage() {
   const { user } = useAuth()
   const router = useRouter()
-  const { data: assessments, loading } = useAssessments()
+  // The quiz authoring surface — super_admin only (guarded below), so it is the
+  // one place that legitimately subscribes to the key-bearing documents.
+  const { data: assessments, loading } = useAssessments(true)
   const [showCreate, setShowCreate] = useState(false)
   const [editTarget, setEditTarget] = useState<Assessment | null>(null)
   const [localCreated, setLocalCreated] = useState<Assessment[]>([])
@@ -96,6 +100,7 @@ export default function AssessmentPage() {
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <Header title="แบบทดสอบ" subtitle={`${all.length} ชุด`} />
+      <CourseManagementTabs />
 
       <div className="flex-1 overflow-auto p-6">
 
@@ -352,6 +357,8 @@ function emptyQuestion(type: QuestionType, order: number): Question {
       choices: [
         { id: genId(), text: '', isCorrect: true },
         { id: genId(), text: '', isCorrect: false },
+        { id: genId(), text: '', isCorrect: false },
+        { id: genId(), text: '', isCorrect: false },
       ],
     }
   }
@@ -396,6 +403,21 @@ function AssessmentEditor({
   }
   function removeQuestion(id: string) {
     setQuestions((prev) => prev.filter((q) => q.id !== id).map((q, i) => ({ ...q, order: i + 1 })))
+  }
+  function duplicateQuestion(id: string) {
+    setQuestions((prev) => {
+      const idx = prev.findIndex((q) => q.id === id)
+      if (idx === -1) return prev
+      const src = prev[idx]
+      const clone: Question = {
+        ...src,
+        id: genId(),
+        choices: src.choices?.map((c) => ({ ...c, id: genId() })),
+        dragPairs: src.dragPairs?.map((p) => ({ ...p, id: genId() })),
+      }
+      const next = [...prev.slice(0, idx + 1), clone, ...prev.slice(idx + 1)]
+      return next.map((q, i) => ({ ...q, order: i + 1 }))
+    })
   }
   function updateQuestion(id: string, patch: Partial<Question>) {
     setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, ...patch } : q)))
@@ -558,7 +580,8 @@ function AssessmentEditor({
               </div>
 
               {questions.map((q, idx) => (
-                <QuestionEditor key={q.id} question={q} index={idx} onChange={(patch) => updateQuestion(q.id, patch)} onRemove={() => removeQuestion(q.id)} />
+                <QuestionEditor key={q.id} question={q} index={idx} onChange={(patch) => updateQuestion(q.id, patch)}
+                  onRemove={() => removeQuestion(q.id)} onDuplicate={() => duplicateQuestion(q.id)} />
               ))}
 
               <div className="flex flex-wrap gap-2 pt-1">
@@ -602,11 +625,13 @@ function QuestionEditor({
   index,
   onChange,
   onRemove,
+  onDuplicate,
 }: {
   question: Question
   index: number
   onChange: (patch: Partial<Question>) => void
   onRemove: () => void
+  onDuplicate: () => void
 }) {
   const typeColor = QUESTION_TYPE_COLORS[question.type]
 
@@ -645,12 +670,12 @@ function QuestionEditor({
           {QUESTION_TYPE_LABELS[question.type]}
         </span>
         <div className="flex items-center gap-1 ml-auto">
-          <input type="number" min={0} value={question.points}
-            onChange={(e) => onChange({ points: Number(e.target.value) })}
-            className="w-14 text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white text-right focus:outline-none focus:ring-1 focus:ring-freshket-300"
-          />
-          <span className="text-xs text-gray-400">คะแนน</span>
-          <button onClick={onRemove} className="ml-1 p-1 rounded-lg hover:bg-rose-50 hover:text-rose-500 text-gray-400 transition-colors">
+          <button onClick={onDuplicate} className="p-1 rounded-lg hover:bg-gray-100 hover:text-gray-600 text-gray-400 transition-colors" title="ทำสำเนาคำถาม">
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" />
+            </svg>
+          </button>
+          <button onClick={onRemove} className="p-1 rounded-lg hover:bg-rose-50 hover:text-rose-500 text-gray-400 transition-colors" title="ลบคำถาม">
             <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
             </svg>
@@ -659,11 +684,26 @@ function QuestionEditor({
       </div>
 
       {/* Question text */}
-      <textarea value={question.text} onChange={(e) => onChange({ text: e.target.value })}
-        placeholder="พิมพ์คำถามที่นี่..."
-        rows={2}
-        className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
-      />
+      <div>
+        <label className="text-xs font-bold text-gray-600 block mb-1">คำถาม <span className="text-rose-500">*</span></label>
+        <textarea value={question.text} onChange={(e) => onChange({ text: e.target.value })}
+          placeholder="พิมพ์คำถามที่นี่..."
+          rows={2}
+          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
+        />
+      </div>
+
+      {/* Weight */}
+      <div className="flex items-center gap-2">
+        <label className="text-xs font-bold text-gray-600 flex items-center gap-1">
+          น้ำหนัก
+          <InfoTooltip text="คะแนนของคำถามนี้ เทียบกับน้ำหนักรวมของคำถามทั้งหมดในชุดคำถาม ใช้คำนวณเปอร์เซ็นต์คะแนนสุดท้าย" />
+        </label>
+        <input type="number" min={0} value={question.points}
+          onChange={(e) => onChange({ points: Number(e.target.value) })}
+          className="w-16 text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white text-right focus:outline-none focus:ring-1 focus:ring-freshket-300"
+        />
+      </div>
 
       {/* Type-specific inputs */}
       {question.type === 'multiple_choice' && (

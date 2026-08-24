@@ -1,9 +1,11 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
-import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
+import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
+import { useModuleAccess } from '@/hooks/useModuleAccess'
+import type { UserStats } from '@/types/stats'
 import { CATEGORY_LABELS, type CourseCategory } from '@/types/course'
 import { STATUS_LABELS, type TrainingRecord, type TrainingStatus } from '@/types/tracking'
 import { ROLE_LABELS, canAccess, type UserProfile } from '@/types/user'
@@ -11,6 +13,12 @@ import { formatDateEN } from '@/lib/utils/dateFormatter'
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
 import { RADAR_GROUPS, type RoleplayAssessment } from '@/types/roleplay'
 import type { ShadowRecord } from '@/types/shadow'
+import { CalendarCard } from '@/components/features/CalendarCard'
+import { LearnerCourseGridCard } from '@/components/features/LearnerCourseDashboard'
+import { TeamLeadHome } from '@/components/features/TeamLeadHome'
+import { getDemoMode } from '@/lib/demo/demoMode'
+
+const DEMO_MODE = getDemoMode()
 
 const CAT_TEXT: Record<CourseCategory, string> = {
   product:     'text-blue-500',
@@ -34,21 +42,31 @@ const STATUS_BADGE: Record<TrainingStatus, string> = {
 }
 
 // ── Training Status Half Donut ────────────────────────────────────────────────
-function HalfDonutChart({ records }: { records: TrainingRecord[] }) {
-  const total = records.length
+// Counts are computed from the user's assigned courses merged with their live
+// training records (see `trainingStatus` in the page), so the donut reflects the
+// real backend state — including assigned-but-not-started and past-deadline
+// (overdue) courses — instead of only rows that already exist in trainingRecords.
+export interface TrainingCounts {
+  completed: number
+  in_progress: number
+  failed: number
+  overdue: number
+  not_started: number
+  total: number
+}
 
-  const counts = useMemo(() => ({
-    completed:   records.filter(r => r.status === 'completed').length,
-    in_progress: records.filter(r => r.status === 'in_progress').length,
-    failed:      records.filter(r => r.status === 'failed').length,
-    not_started: records.filter(r => r.status === 'not_started').length,
-  }), [records])
+function HalfDonutChart({ counts }: { counts: TrainingCounts }) {
+  // Collapsed by default — this is secondary detail vs. the "For You" course
+  // list, so it shouldn't compete for attention on first load; the learner
+  // opens it on demand.
+  const [open, setOpen] = useState(false)
+  const total = counts.total
 
   const segments = [
     { key: 'completed',   label: 'Pass',        count: counts.completed,   color: '#00ce7c' },
     { key: 'in_progress', label: 'In Progress', count: counts.in_progress, color: '#60a5fa' },
     { key: 'failed',      label: 'Failed',      count: counts.failed,      color: '#f87171' },
-    { key: 'overdue',     label: 'Overdue',     count: 0,                  color: '#fb923c' },
+    { key: 'overdue',     label: 'Overdue',     count: counts.overdue,     color: '#fb923c' },
     { key: 'not_started', label: 'Not Started', count: counts.not_started, color: '#d1d5db' },
   ]
 
@@ -67,47 +85,59 @@ function HalfDonutChart({ records }: { records: TrainingRecord[] }) {
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-      <div className="px-4 py-3.5 border-b border-gray-100 flex items-center justify-between">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-4 py-3.5 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
+      >
         <h3 className="text-sm font-bold text-gray-900">Training Status</h3>
-        <span className="text-xs text-gray-400">{total} หลักสูตร</span>
-      </div>
-
-      <div className="px-4 pt-4 pb-3">
-        <div className="relative flex justify-center mb-1">
-          <svg width="200" height="105" viewBox="0 0 200 105">
-            <path
-              d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
-              fill="none" stroke="#f3f4f6" strokeWidth={sw} strokeLinecap="round"
-            />
-            {total === 0 ? null : arcs.map(arc => arc.len > 0 && (
-              <path
-                key={arc.key}
-                d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
-                fill="none"
-                stroke={arc.color}
-                strokeWidth={sw}
-                strokeLinecap="butt"
-                strokeDasharray={`${arc.len} ${half}`}
-                strokeDashoffset={-arc.off}
-              />
-            ))}
+        <span className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-gray-400">{total} หลักสูตร</span>
+          <svg className={`size-4 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
           </svg>
-          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-center leading-tight">
-            <p className="text-xl font-bold text-gray-900">{counts.completed}</p>
-            <p className="text-xs text-gray-400">Pass</p>
+        </span>
+      </button>
+
+      {open && (
+        <div className="px-4 pt-4 pb-3 border-t border-gray-100">
+          <div className="relative flex justify-center mb-1">
+            <svg width="200" height="105" viewBox="0 0 200 105">
+              <path
+                d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
+                fill="none" stroke="#f3f4f6" strokeWidth={sw} strokeLinecap="round"
+              />
+              {total === 0 ? null : arcs.map(arc => arc.len > 0 && (
+                <path
+                  key={arc.key}
+                  d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
+                  fill="none"
+                  stroke={arc.color}
+                  strokeWidth={sw}
+                  strokeLinecap="butt"
+                  strokeDasharray={`${arc.len} ${half}`}
+                  strokeDashoffset={-arc.off}
+                />
+              ))}
+            </svg>
+            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-center leading-tight">
+              <p className="text-xl font-bold text-gray-900">{counts.completed}</p>
+              <p className="text-xs text-gray-400">Pass</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-2">
+            {segments.map(seg => (
+              <div key={seg.key} className="flex items-center gap-2">
+                <span className="size-2.5 rounded-full shrink-0" style={{ background: seg.color }} />
+                <span className="text-xs text-gray-500 flex-1 truncate">{seg.label}</span>
+                <span className="text-xs font-bold text-gray-800 tabular-nums">{seg.count}</span>
+              </div>
+            ))}
           </div>
         </div>
-
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-2">
-          {segments.map(seg => (
-            <div key={seg.key} className="flex items-center gap-2">
-              <span className="size-2.5 rounded-full shrink-0" style={{ background: seg.color }} />
-              <span className="text-xs text-gray-500 flex-1 truncate">{seg.label}</span>
-              <span className="text-xs font-bold text-gray-800 tabular-nums">{seg.count}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      )}
     </div>
   )
 }
@@ -118,12 +148,36 @@ export default function SaleDashboardPage() {
   const router = useRouter()
   const { data: myRecords } = useMyTrainingRecords(user?.uid ?? '')
   const { data: courses } = useCourses()
-  const { data: allRecords } = useAllTrainingRecords()
-  const { data: allUsers } = useAllUsers()
+  const { data: stats, loading: statsLoading } = useUserStats()
+  // Was `stats.length > 0` — a GLOBAL check: one other user having a summary doc
+  // was enough to consider stats "ready" for everyone, so a learner whose own
+  // summary hadn't been built yet silently read 0 instead of falling back.
+  // Checking for THIS user's own doc makes the fallback fire exactly when it's
+  // actually needed.
+  const hasStats = !statsLoading && !!user?.uid && stats.some((s) => s.uid === user.uid)
+  // Fall back to the full trainingRecords collection only while summaries aren't built.
+  // NOTE: this fallback still streams the entire collection, so if userStats is
+  // ever empty for everyone (cold deploy) every client does it at once. The real
+  // fix is a server-maintained aggregate — see the audit notes.
+  const { data: allRecords } = useAllTrainingRecords(!hasStats)
+  // isAdmin only depends on `user`, computed here (ahead of its other use below)
+  // so this hook call can gate on it — a sale-role learner has no admin UI that
+  // reads `allUsers` on this page, so subscribing them to the whole roster was
+  // a full-collection read paid by every learner on the app's landing page.
+  const isAdmin = user?.role ? canAccess(user.role, 'team_lead') : false
+  const { data: allUsers } = useAllUsers(isAdmin)
+
+  const statsByUid = useMemo(() => {
+    const m = new Map<string, UserStats>()
+    for (const s of stats) m.set(s.uid, s)
+    return m
+  }, [stats])
+
 
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null)
-
-  const isAdmin = user?.role ? canAccess(user.role, 'team_lead') : false
+  // Right sidebar (streak + training status) is secondary detail — collapsed by
+  // default so it doesn't compete with the course list, opened on demand.
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const firstName = user?.nickname ?? user?.displayName?.split(' ')[0] ?? 'คุณ'
   const daysSince = getDaysSince(user?.startDate)
   const isNewJoiner = !isAdmin && daysSince < NEW_JOINER_DAYS
@@ -139,12 +193,17 @@ export default function SaleDashboardPage() {
   )
   const streakDays = Math.min(myRecords.length * 2, 14)
 
-  // Admin-specific stats
-  const adminTotalCompletions = useMemo(() => allRecords.filter(r => r.status === 'completed').length, [allRecords])
-  const adminCompletionRate = useMemo(() => {
-    if (!allRecords.length) return 0
-    return Math.round((adminTotalCompletions / allRecords.length) * 100)
-  }, [allRecords, adminTotalCompletions])
+  // Admin-specific stats — from the summaries when built, else the raw records.
+  const adminTotals = useMemo(() => {
+    if (hasStats) {
+      let completed = 0, total = 0
+      for (const s of stats) { completed += s.completedCount; total += s.totalCount }
+      return { completed, total }
+    }
+    return { completed: allRecords.filter(r => r.status === 'completed').length, total: allRecords.length }
+  }, [hasStats, stats, allRecords])
+  const adminTotalCompletions = adminTotals.completed
+  const adminCompletionRate = adminTotals.total ? Math.round((adminTotals.completed / adminTotals.total) * 100) : 0
   const adminPublishedCourses = useMemo(() => courses.filter(c => c.isPublished).length, [courses])
   const continueRecords = useMemo(() => myRecords.filter((r) => r.status === 'in_progress'), [myRecords])
   const firstContinueRecord = continueRecords[0] ?? null
@@ -153,8 +212,21 @@ export default function SaleDashboardPage() {
     myRecords.forEach((r) => { m[r.courseId] = { status: r.status, score: r.score } })
     return m
   }, [myRecords])
+  // Full records keyed by course — needed by LearnerCourseGridCard for its
+  // lesson-progress bar (recordMap above only carries status/score).
+  const recordByCourse = useMemo(() => {
+    const m: Record<string, TrainingRecord> = {}
+    myRecords.forEach((r) => { m[r.courseId] = r })
+    return m
+  }, [myRecords])
+  // Targeting must match /courses: role-based OR individually assigned
   const forYouCourses = useMemo(
-    () => courses.filter((c) => c.isPublished && c.targetRoles.includes(user?.role ?? 'sale')),
+    () => courses.filter((c) =>
+      c.isPublished && (
+        c.targetRoles.includes(user?.role ?? 'sale') ||
+        (c.assignedUserIds?.includes(user?.uid ?? '') ?? false)
+      ),
+    ),
     [courses, user],
   )
 
@@ -188,32 +260,42 @@ export default function SaleDashboardPage() {
     () => forYouCourses.filter((c) => !recordMap[c.id] || recordMap[c.id].status !== 'completed').length,
     [forYouCourses, recordMap],
   )
-  const avgScore = useMemo(() => {
-    const scored = completedRecords.filter((r) => (r.score ?? 0) > 0)
-    if (!scored.length) return 0
-    return scored.reduce((s, r) => s + (r.score ?? 0), 0) / scored.length
-  }, [completedRecords])
 
-  const leaderboard = useMemo(() => {
-    const pts: Record<string, number> = {}
-    allRecords.forEach((r) => { if (r.status === 'completed' && r.score) pts[r.userId] = (pts[r.userId] ?? 0) + r.score })
-    return allUsers
-      .map((u) => ({ user: u, points: pts[u.uid] ?? 0 }))
-      .filter((e) => e.points > 0)
-      .sort((a, b) => b.points - a.points)
-      .slice(0, 5)
-  }, [allRecords, allUsers])
-  const myPoints = useMemo(() => leaderboard.find((e) => e.user.uid === user?.uid)?.points ?? 0, [leaderboard, user])
+  // Training Status donut — real backend state. Each assigned+published course
+  // falls into exactly one bucket (priority: completed → failed → overdue →
+  // in_progress → not started), so the segments always sum to the course total.
+  const trainingStatus = useMemo<TrainingCounts>(() => {
+    const now = new Date()
+    let completed = 0, in_progress = 0, failed = 0, overdue = 0, not_started = 0
+    for (const c of forYouCourses) {
+      const status = recordMap[c.id]?.status
+      const end = c.endDate ? (c.endDate instanceof Date ? c.endDate : new Date(c.endDate as unknown as string)) : null
+      const isOverdue = !!end && !isNaN(end.getTime()) && end < now
+      if (status === 'completed') completed++
+      else if (status === 'failed') failed++
+      else if (isOverdue) overdue++
+      else if (status === 'in_progress') in_progress++
+      else not_started++
+    }
+    return { completed, in_progress, failed, overdue, not_started, total: forYouCourses.length }
+  }, [forYouCourses, recordMap])
+
+  // Team lead / manager get the dedicated 3-column team dashboard.
+  if (user?.role === 'team_lead' || user?.role === 'manager') {
+    return <TeamLeadHome />
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50 overflow-auto">
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 min-h-0">
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0">
 
         {/* ── LEFT / MAIN ────────────────────────────────────────────────────── */}
-        <div className="lg:col-span-2 overflow-y-auto p-5 space-y-5">
+        <div className="flex-1 min-w-0 overflow-y-auto p-5 space-y-5">
 
-          {/* Hero */}
-          <div className="relative rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(135deg, #00804c 0%, #00a862 55%, #00ce7c 100%)' }}>
+          {/* Hero — solid brand fill, no gradient (design.md DS-#020: gradients are a
+              marketing/onboarding-only carve-out). Uses the standard freshket-500
+              (#00ce7c) brand fill, matching the header bar and every CTA button. */}
+          <div className="relative rounded-2xl overflow-hidden bg-freshket-500">
             <div className="absolute inset-0 pointer-events-none">
               <div className="absolute top-4 right-20 size-10 rounded-2xl bg-white/15 flex items-center justify-center rotate-6">
                 <svg className="size-5 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M11.7 2.805a.75.75 0 01.6 0A60.65 60.65 0 0122.83 8.72a.75.75 0 01-.231 1.337 49.949 49.949 0 00-9.902 3.912l-.003.002-.34.18a.75.75 0 01-.707 0A50.009 50.009 0 007.5 12.174v-.224c0-.131.067-.248.172-.311a54.614 54.614 0 014.653-2.52.75.75 0 00-.65-1.352 56.129 56.129 0 00-4.78 2.589 1.858 1.858 0 00-.859 1.228 49.803 49.803 0 00-4.634-1.527.75.75 0 01-.231-1.337A60.653 60.653 0 0111.7 2.805z" /></svg>
@@ -249,6 +331,76 @@ export default function SaleDashboardPage() {
               </div>
             </div>
           </div>
+
+          {/* Stat cards */}
+          <div className={`grid grid-cols-2 gap-3 ${isAdmin ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+            {isAdmin ? (<>
+              <MiniStat value={allUsers.length} label="พนักงานทั้งหมด"
+                iconBg="bg-blue-100"
+                icon={<svg className="size-4 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>}
+              />
+              <MiniStat value={`${adminCompletionRate}%`} label="อัตราผ่านรวม"
+                iconBg="bg-emerald-100"
+                icon={<svg className="size-4 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>}
+              />
+              <MiniStat value={adminTotalCompletions} label="ผ่านแล้วทั้งหมด"
+                iconBg="bg-freshket-100"
+                icon={<svg className="size-4 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+              />
+              <MiniStat value={adminPublishedCourses} label="หลักสูตรที่เปิดใช้"
+                iconBg="bg-amber-100"
+                icon={<svg className="size-4 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>}
+              />
+            </>) : (<>
+              <MiniStat value={completedCount} label="Courses Completed"
+                iconBg="bg-blue-100"
+                icon={<svg className="size-4 text-blue-500" viewBox="0 0 24 24" fill="currentColor"><path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" /></svg>}
+              />
+              <MiniStat value={completedCount} label="Certificates Earned"
+                iconBg="bg-amber-100"
+                icon={<svg className="size-4 text-amber-500" viewBox="0 0 24 24" fill="currentColor"><path fillRule="evenodd" d="M5.166 2.621v.858c-1.035.148-2.059.33-3.071.543a.75.75 0 00-.584.859 6.753 6.753 0 006.138 5.6 6.73 6.73 0 002.743 1.346A6.707 6.707 0 019.279 15H8.54c-1.036 0-1.875.84-1.875 1.875V19.5h-.75a2.25 2.25 0 000 4.5h9a2.25 2.25 0 000-4.5h-.75v-2.625c0-1.036-.84-1.875-1.875-1.875h-.739a6.706 6.706 0 01-1.112-3.173 6.73 6.73 0 002.743-1.347 6.753 6.753 0 006.139-5.6.75.75 0 00-.585-.858 47.077 47.077 0 00-3.07-.543V2.62a.75.75 0 00-.658-.744 49.798 49.798 0 00-6.093-.377.75.75 0 00-.657.744zm0 2.629c0 1.196.312 2.32.857 3.294A5.266 5.266 0 013.16 5.337a45.6 45.6 0 012.006-.343v.256zm13.5 0v-.256c.674.1 1.343.214 2.006.343a5.265 5.265 0 01-2.863 3.207 6.72 6.72 0 00.857-3.294z" clipRule="evenodd" /></svg>}
+              />
+              <MiniStat
+                value={pendingCourseCount > 0
+                  ? pendingCourseCount
+                  : <span className="text-sm font-bold text-gray-400">ไม่มีหลักสูตรค้าง</span>}
+                label="หลักสูตรคงค้าง"
+                iconBg="bg-amber-100"
+                icon={<svg className="size-4 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" /></svg>}
+              />
+            </>)}
+          </div>
+
+          {/* Empty state — ไม่มีหลักสูตรคงค้าง (left, when nothing's outstanding) + Calendar (right).
+              Sale-role only — super_admin's overview has no personal course schedule to show. */}
+          {!isAdmin && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+              {continueRecords.length === 0 && forYouCourses.length === 0 && (
+                <div className="card-ds p-10 flex flex-col items-center text-center">
+                  <div className="size-20 rounded-full bg-freshket-100 flex items-center justify-center mb-4">
+                    <svg className="size-10 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <h2 className="text-base font-bold text-gray-900 mb-1">ไม่มีหลักสูตรคงค้าง</h2>
+                  <p className="text-sm font-normal text-gray-500 max-w-sm">
+                    ตอนนี้คุณเรียนครบทุกหลักสูตรที่ได้รับมอบหมายแล้ว หากมีหลักสูตรใหม่ จะแสดงขึ้นที่นี่
+                  </p>
+                  <button
+                    onClick={() => router.push('/courses')}
+                    className="mt-5 px-4 py-2 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all duration-150"
+                  >
+                    ดูหลักสูตรทั้งหมด
+                  </button>
+                </div>
+              )}
+              {/* Pinned to column 2 so Calendar stays on the right even when the
+                  empty-state card above doesn't render (outstanding courses exist). */}
+              <div className="lg:col-start-2">
+                <CalendarCard demoMode={DEMO_MODE} />
+              </div>
+            </div>
+          )}
 
           {/* New Joiner banner */}
           {isNewJoiner && (
@@ -310,45 +462,6 @@ export default function SaleDashboardPage() {
             </div>
           )}
 
-          {/* Stat cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {isAdmin ? (<>
-              <MiniStat value={allUsers.length} label="พนักงานทั้งหมด"
-                bg="bg-blue-50" iconBg="bg-blue-100"
-                icon={<svg className="size-4 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>}
-              />
-              <MiniStat value={`${adminCompletionRate}%`} label="อัตราผ่านรวม"
-                bg="bg-emerald-50" iconBg="bg-emerald-100"
-                icon={<svg className="size-4 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>}
-              />
-              <MiniStat value={adminTotalCompletions} label="ผ่านแล้วทั้งหมด"
-                bg="bg-freshket-100" iconBg="bg-freshket-200"
-                icon={<svg className="size-4 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
-              />
-              <MiniStat value={adminPublishedCourses} label="หลักสูตรที่เปิดใช้"
-                bg="bg-amber-50" iconBg="bg-amber-100"
-                icon={<svg className="size-4 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>}
-              />
-            </>) : (<>
-              <MiniStat value={completedCount} label="Courses Completed"
-                bg="bg-white border border-gray-100" iconBg="bg-blue-100"
-                icon={<svg className="size-4 text-blue-500" viewBox="0 0 24 24" fill="currentColor"><path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" /></svg>}
-              />
-              <MiniStat value={completedCount} label="Certificates Earned"
-                bg="bg-white border border-gray-100" iconBg="bg-amber-100"
-                icon={<svg className="size-4 text-amber-500" viewBox="0 0 24 24" fill="currentColor"><path fillRule="evenodd" d="M5.166 2.621v.858c-1.035.148-2.059.33-3.071.543a.75.75 0 00-.584.859 6.753 6.753 0 006.138 5.6 6.73 6.73 0 002.743 1.346A6.707 6.707 0 019.279 15H8.54c-1.036 0-1.875.84-1.875 1.875V19.5h-.75a2.25 2.25 0 000 4.5h9a2.25 2.25 0 000-4.5h-.75v-2.625c0-1.036-.84-1.875-1.875-1.875h-.739a6.706 6.706 0 01-1.112-3.173 6.73 6.73 0 002.743-1.347 6.753 6.753 0 006.139-5.6.75.75 0 00-.585-.858 47.077 47.077 0 00-3.07-.543V2.62a.75.75 0 00-.658-.744 49.798 49.798 0 00-6.093-.377.75.75 0 00-.657.744zm0 2.629c0 1.196.312 2.32.857 3.294A5.266 5.266 0 013.16 5.337a45.6 45.6 0 012.006-.343v.256zm13.5 0v-.256c.674.1 1.343.214 2.006.343a5.265 5.265 0 01-2.863 3.207 6.72 6.72 0 00.857-3.294z" clipRule="evenodd" /></svg>}
-              />
-              <MiniStat value={pendingCourseCount} label="หลักสูตรคงค้าง"
-                bg="bg-white border border-gray-100" iconBg="bg-amber-100"
-                icon={<svg className="size-4 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" /></svg>}
-              />
-              <MiniStat value={avgScore > 0 ? avgScore.toFixed(1) : '-'} label="คะแนนเฉลี่ยทั้งหมด"
-                bg="bg-white border border-gray-100" iconBg="bg-freshket-100"
-                icon={<svg className="size-4 text-freshket-600" viewBox="0 0 24 24" fill="currentColor"><path fillRule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clipRule="evenodd" /></svg>}
-              />
-            </>)}
-          </div>
-
           {/* Continue Learning */}
           {continueRecords.length > 0 && (
             <section>
@@ -392,7 +505,6 @@ export default function SaleDashboardPage() {
           {isAdmin ? (
             <UserTable
               users={allUsers}
-              allRecords={allRecords}
               onSelect={setSelectedUser}
               selectedUid={selectedUser?.uid}
             />
@@ -408,100 +520,56 @@ export default function SaleDashboardPage() {
                     <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
                   </button>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {forYouCourses.map((course) => {
-                    const steps = [course.hasPreAssessment, !!(course as typeof course & { slideUrl?: string }).slideUrl, course.hasPostAssessment].filter(Boolean).length || 1
-                    const rec = recordMap[course.id]
-                    const statusLabel = rec?.status === 'completed' ? 'ผ่านแล้ว' : rec?.status === 'in_progress' ? 'กำลังเรียน' : 'ยังไม่เริ่ม'
-                    const statusCls = rec?.status === 'completed' ? 'bg-freshket-100 text-freshket-700' : rec?.status === 'in_progress' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
-                    return (
-                      <button key={course.id} onClick={() => router.push(`/courses/${course.id}`)}
-                        className="text-left bg-white rounded-2xl border border-gray-100 hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 overflow-hidden group">
-                        <div className={`h-36 w-full bg-gradient-to-br ${CAT_BG[course.category]} overflow-hidden relative`}>
-                          {course.thumbnailUrl && <img src={course.thumbnailUrl} alt={course.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />}
-                          <span className={`absolute top-2 left-2 text-xs font-bold px-2 py-0.5 rounded-full ${statusCls}`}>{statusLabel}</span>
-                          {course.isRequired && <span className="absolute top-2 right-2 text-xs font-bold px-2 py-0.5 rounded-full bg-rose-500 text-white">บังคับ</span>}
-                        </div>
-                        <div className="p-3.5">
-                          <p className={`text-xs font-bold mb-1 ${CAT_TEXT[course.category]}`}>{CATEGORY_LABELS[course.category]}</p>
-                          <p className="text-sm font-bold text-gray-900 line-clamp-2 group-hover:text-indigo-600 transition-colors leading-snug mb-2">{course.title}</p>
-                          <p className="text-xs text-gray-400 mb-3">{steps} Lessons</p>
-                          <div className="flex items-center gap-2 pt-2.5 border-t border-gray-100">
-                            <div className="size-6 rounded-full bg-freshket-100 flex items-center justify-center overflow-hidden">
-                              <img src="https://ivpysunrulnrdykfaezk.supabase.co/storage/v1/object/public/logo-freshket/FRESHKET%20LOGO-01.png" alt="Freshket" className="size-5 object-contain" />
-                            </div>
-                            <span className="text-xs text-gray-500">Freshket Academy</span>
-                            {rec?.score != null && <span className="ml-auto text-xs font-bold text-freshket-600">{rec.score} คะแนน</span>}
-                          </div>
-                        </div>
-                      </button>
-                    )
-                  })}
+                <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {forYouCourses.map((course) => (
+                    <LearnerCourseGridCard
+                      key={course.id}
+                      course={course}
+                      record={recordByCourse[course.id]}
+                      onClick={() => router.push(`/courses/${course.id}`)}
+                    />
+                  ))}
                 </div>
               </section>
             )
           )}
         </div>
 
-        {/* ── RIGHT SIDEBAR ────────────────────────────────────────────────── */}
-        <div className="hidden lg:flex lg:col-span-1 flex-col gap-4 p-5 overflow-y-auto border-l border-gray-100 bg-white">
-          {/* Streak card */}
-          <div className="rounded-2xl p-4" style={{ background: 'linear-gradient(135deg,#eef2ff 0%,#e0e7ff 100%)' }}>
-            <p className="text-sm font-bold text-indigo-900">You&apos;re on fire, {firstName}! 🔥</p>
-            <p className="text-xs text-indigo-600/80 mt-1 leading-relaxed">เรียนมาแล้ว {streakDays} วันติดต่อกัน<br />Keep the momentum going!</p>
-            <button onClick={() => router.push('/courses')}
-              className="mt-3 w-full py-2 rounded-xl bg-white text-indigo-600 text-xs font-bold hover:bg-indigo-50 transition-all border border-indigo-100 shadow-sm">
-              Start Learning
-            </button>
-          </div>
+        {/* ── RIGHT SIDEBAR — collapsed by default, handle opens it ─────────── */}
+        <div className={`hidden lg:flex relative flex-col shrink-0 border-l border-gray-100 bg-white transition-all duration-200 ${sidebarOpen ? 'w-80' : 'w-12'}`}>
+          {/* Toggle handle — centered vertically and protruding past the sidebar
+              edge so it reads as its own control, not part of the scrollbar. */}
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((v) => !v)}
+            title={sidebarOpen ? 'ซ่อนแถบด้านข้าง' : 'แสดงแถบด้านข้าง'}
+            className="absolute top-1/2 -translate-y-1/2 -left-4 z-10 flex flex-col items-center gap-1.5 py-3 px-1.5 rounded-l-xl bg-white border border-gray-200 border-r-0 shadow-md text-gray-500 hover:text-freshket-600 hover:border-freshket-300 transition-colors"
+          >
+            <svg className={`size-4 shrink-0 transition-transform duration-200 ${sidebarOpen ? 'rotate-180' : ''}`}
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+            <span className="text-xs font-bold whitespace-nowrap" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+              {sidebarOpen ? 'Hide' : 'Open'}
+            </span>
+          </button>
 
-          {/* Training Status Donut */}
-          <HalfDonutChart records={myRecords} />
+          {sidebarOpen && (
+            <div className="flex-1 min-w-0 overflow-y-auto p-5 pt-0 space-y-4">
+              {/* Streak card */}
+              <div className="rounded-2xl p-4" style={{ background: 'linear-gradient(135deg,#eef2ff 0%,#e0e7ff 100%)' }}>
+                <p className="text-sm font-bold text-indigo-900">You&apos;re on fire, {firstName}! 🔥</p>
+                <p className="text-xs text-indigo-600/80 mt-1 leading-relaxed">เรียนมาแล้ว {streakDays} วันติดต่อกัน<br />Keep the momentum going!</p>
+                <button onClick={() => router.push('/courses')}
+                  className="mt-3 w-full py-2 rounded-xl bg-white text-indigo-600 text-xs font-bold hover:bg-indigo-50 transition-all border border-indigo-100 shadow-sm">
+                  Start Learning
+                </button>
+              </div>
 
-          {/* Leaderboard */}
-          <div className="bg-white rounded-2xl border border-gray-100 flex-1 overflow-hidden">
-            <div className="px-4 py-3.5 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-gray-900">Leaderboard</h3>
-              <button className="text-xs font-bold text-indigo-500">See All</button>
+              {/* Training Status Donut */}
+              <HalfDonutChart counts={trainingStatus} />
             </div>
-            <div className="px-3 py-2 space-y-0.5">
-              {leaderboard.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-8">ยังไม่มีข้อมูลคะแนน</p>
-              ) : leaderboard.map((entry, i) => {
-                const isMe = entry.user.uid === user?.uid
-                const initials = entry.user.displayName?.charAt(0).toUpperCase() ?? '?'
-                return (
-                  <div key={entry.user.uid} className={`flex items-center gap-2.5 px-2 py-2.5 rounded-xl ${isMe ? 'bg-indigo-50' : 'hover:bg-gray-50'} transition-colors`}>
-                    {entry.user.photoURL ? (
-                      <img src={entry.user.photoURL} alt="" className="size-9 rounded-full object-cover border-2 border-white shadow-sm shrink-0" />
-                    ) : (
-                      <div className={`size-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${isMe ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600'}`}>
-                        {initials}
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-bold truncate ${isMe ? 'text-indigo-700' : 'text-gray-800'}`}>{entry.user.displayName ?? entry.user.email?.split('@')[0]}</p>
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <span className="text-xs">🔥</span>
-                        <span className="text-xs text-gray-400">{Math.max(1, 15 - i * 3)} days</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <svg className="size-3.5 text-indigo-400" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
-                      </svg>
-                      <span className={`text-xs font-bold ${isMe ? 'text-indigo-600' : 'text-gray-700'}`}>{entry.points.toLocaleString()}</span>
-                    </div>
-                  </div>
-                )
-              })}
-              {myPoints === 0 && (
-                <div className="mt-2 mx-2 px-3 py-2.5 rounded-xl bg-gray-50 border border-dashed border-gray-200">
-                  <p className="text-xs text-gray-400 text-center">ทำแบบทดสอบให้ผ่านเพื่อขึ้น Leaderboard!</p>
-                </div>
-              )}
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -513,7 +581,6 @@ export default function SaleDashboardPage() {
         >
           <UserSidePanel
             user={selectedUser}
-            allRecords={allRecords}
             onClose={() => setSelectedUser(null)}
           />
         </div>
@@ -524,16 +591,20 @@ export default function SaleDashboardPage() {
 
 // ── MiniStat ──────────────────────────────────────────────────────────────────
 function MiniStat({
-  icon, label, value, bg = 'bg-white border border-gray-100', iconBg = 'bg-gray-50',
+  icon, label, value, iconBg = 'bg-gray-50',
 }: {
   icon: React.ReactNode
   label: string
-  value: number | string
-  bg?: string
+  value: React.ReactNode
   iconBg?: string
 }) {
+  // DS 2026: white card + rgba border, no shadow at rest, lift + shadow on hover.
+  // The colour lives in the SVG icon (on a soft tinted pill), not the card bg.
   return (
-    <div className={`${bg} rounded-2xl p-4 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] transition-all duration-150 cursor-default`}>
+    <div
+      className="bg-white rounded-2xl p-4 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] transition-all duration-150 cursor-default"
+      style={{ border: 'var(--card-border)' }}
+    >
       <div className={`size-8 rounded-xl ${iconBg} flex items-center justify-center mb-3`}>{icon}</div>
       <p className="text-xs font-normal text-gray-500 mb-0.5">{label}</p>
       <p className="text-2xl font-black text-gray-900">{value}</p>
@@ -561,12 +632,10 @@ function calcTenure(startDate: Date | undefined | null): string {
 // ── User Table ────────────────────────────────────────────────────────────────
 function UserTable({
   users,
-  allRecords,
   onSelect,
   selectedUid,
 }: {
   users: UserProfile[]
-  allRecords: TrainingRecord[]
   onSelect: (u: UserProfile) => void
   selectedUid?: string
 }) {
@@ -581,24 +650,6 @@ function UserTable({
       (u.employeeId ?? '').toLowerCase().includes(q),
     )
   }, [users, search])
-
-  // Build summary per user: completed count
-  const summaryMap = useMemo(() => {
-    const m: Record<string, { completed: number; total: number }> = {}
-    allRecords.forEach((r) => {
-      if (!m[r.userId]) m[r.userId] = { completed: 0, total: 0 }
-      m[r.userId].total++
-      if (r.status === 'completed') m[r.userId].completed++
-    })
-    return m
-  }, [allRecords])
-
-  const ROLE_BADGE: Record<string, string> = {
-    sale: 'bg-gray-100 text-gray-600',
-    team_lead: 'bg-blue-100 text-blue-700',
-    manager: 'bg-purple-100 text-purple-700',
-    super_admin: 'bg-freshket-100 text-freshket-700',
-  }
 
   return (
     <section>
@@ -643,7 +694,7 @@ function UserTable({
               <p className="text-sm">ไม่พบพนักงาน</p>
             </div>
           ) : (
-            <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+            <div className="divide-y divide-gray-50 max-h-[500px] lg:max-h-[calc(100vh-380px)] min-h-[320px] overflow-y-auto">
               {filtered.map((u, i) => {
                 const isSelected = u.uid === selectedUid
                 return (
@@ -703,11 +754,9 @@ type ProfileTab = 'info' | 'training' | 'shadow' | 'roleplay'
 
 function UserSidePanel({
   user,
-  allRecords,
   onClose,
 }: {
   user: UserProfile
-  allRecords: TrainingRecord[]
   onClose: () => void
 }) {
   const [tab, setTab] = useState<ProfileTab>('info')
@@ -715,13 +764,29 @@ function UserSidePanel({
   const { data: shadowRecords } = useShadowRecordsByUser(user.uid)
   const { data: roleplayAssessments } = useRoleplayAssessmentsByUser(user.uid)
 
+  // Gate the Shadow / Role Play tabs (and their header counts) by whether THIS
+  // user's department has those modules enabled — don't surface a feature the
+  // viewed employee has no access to. super_admin viewed users get all modules;
+  // the shared module store is warm after first load so this resolves instantly.
+  const { allowedModules, loading: moduleLoading } = useModuleAccess(user.role, user.department)
+  const showShadow = !moduleLoading && allowedModules.has('shadow')
+  const showRoleplay = !moduleLoading && allowedModules.has('roleplay')
+
+  // If the active tab gets hidden (module not allowed, or still resolving), fall
+  // back to Information so the panel never lands on a tab with no trigger.
+  useEffect(() => {
+    if ((tab === 'shadow' && !showShadow) || (tab === 'roleplay' && !showRoleplay)) setTab('info')
+  }, [tab, showShadow, showRoleplay])
+  // This one user's records only — no longer needs the whole collection passed in.
+  const { data: scopedRecords } = useUserTrainingRecords(user.uid)
+
   const userRecords = useMemo(
-    () => allRecords.filter((r) => r.userId === user.uid).sort((a, b) => {
+    () => [...scopedRecords].sort((a, b) => {
       const ta = a.completedAt ? new Date(a.completedAt as unknown as string).getTime() : 0
       const tb = b.completedAt ? new Date(b.completedAt as unknown as string).getTime() : 0
       return tb - ta
     }),
-    [allRecords, user.uid],
+    [scopedRecords],
   )
 
   const completedCount = userRecords.filter((r) => r.status === 'completed').length
@@ -741,8 +806,8 @@ function UserSidePanel({
   const tabs: { key: ProfileTab; label: string; count?: number }[] = [
     { key: 'info',     label: 'Information' },
     { key: 'training', label: 'Training',   count: userRecords.length },
-    { key: 'shadow',   label: 'Shadow',     count: shadowRecords.length },
-    { key: 'roleplay', label: 'Role Play',  count: roleplayAssessments.length },
+    ...(showShadow   ? [{ key: 'shadow'   as const, label: 'Shadow',    count: shadowRecords.length }] : []),
+    ...(showRoleplay ? [{ key: 'roleplay' as const, label: 'Role Play', count: roleplayAssessments.length }] : []),
   ]
 
   return (
@@ -781,14 +846,18 @@ function UserSidePanel({
             <p className="text-base font-black text-freshket-600 leading-none">{completedCount}</p>
             <p className="text-xs text-freshket-700 mt-0.5">Passed</p>
           </div>
-          <div className="text-center px-3 py-2 bg-blue-50 rounded-xl min-w-[52px]">
-            <p className="text-base font-black text-blue-600 leading-none">{shadowRecords.length}</p>
-            <p className="text-xs text-blue-700 mt-0.5">Shadow</p>
-          </div>
-          <div className="text-center px-3 py-2 bg-purple-50 rounded-xl min-w-[52px]">
-            <p className="text-base font-black text-purple-600 leading-none">{roleplayAssessments.length}</p>
-            <p className="text-xs text-purple-700 mt-0.5">RolePlay</p>
-          </div>
+          {showShadow && (
+            <div className="text-center px-3 py-2 bg-blue-50 rounded-xl min-w-[52px]">
+              <p className="text-base font-black text-blue-600 leading-none">{shadowRecords.length}</p>
+              <p className="text-xs text-blue-700 mt-0.5">Shadow</p>
+            </div>
+          )}
+          {showRoleplay && (
+            <div className="text-center px-3 py-2 bg-purple-50 rounded-xl min-w-[52px]">
+              <p className="text-base font-black text-purple-600 leading-none">{roleplayAssessments.length}</p>
+              <p className="text-xs text-purple-700 mt-0.5">RolePlay</p>
+            </div>
+          )}
         </div>
         <button onClick={onClose} className="shrink-0 p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
           <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -1334,13 +1403,5 @@ function DeadlineBanner({
   )
 }
 
-function _InfoRowUnused({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <span className="text-xs text-gray-500 shrink-0">{label}</span>
-      <span className="text-xs font-bold text-gray-800 text-right break-all">{value}</span>
-    </div>
-  )
-}
 
 

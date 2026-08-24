@@ -1,8 +1,8 @@
 # Design System · Freshket Sale Tracking Web 2026
 
-**Source:** FKT Design Guidelines 2026 (merged from 25+ spec files)
+**Source:** FKT Design Guidelines v1.0 · 2026-06-17 (merged from 25+ spec files at `Design.MD-fkt/FKT Design Guidelines-20260628T094735Z-3-001/`)
 **Tokens ref:** `tailwind.config.ts` · `globals.css`
-**Last updated:** 2026-06-28
+**Last updated:** 2026-08-20 — re-aligned against the full FKT source set; fixed factual drift (wrong/reversed values, self-contradicting DS-# citations) and closed gaps in the Decision References table (DS-#001–#128, all now present)
 
 ---
 
@@ -38,6 +38,8 @@
 | Shadow on Primary button | DS-#059 |
 | `neutral-200+` as page background | Pillar 4 |
 | Hardcoded hex values | Always use tokens |
+| Pixel values outside 4px base scale | Breaks spacing system |
+| strokeWidth ≠ 1 on icons | DS icon rule |
 
 ---
 
@@ -64,7 +66,7 @@
 | Stop | Hex | Role |
 |---|---|---|
 | `dark-green-50` | `#F0FAF8` | Badge bg, Quick Menu bg |
-| `dark-green-100` | `#C8E6E0` | Muted brand fill, focus ring |
+| `dark-green-100` | `#C8E6E0` | Muted brand fill — never as a solid `focus-ring` (use the `focus-ring` rgba token instead, DS-#004) |
 | `dark-green-200` | `#A0D1C7` | Chip bg |
 | ★ `dark-green-600` | `#008065` | Brand primary · `bg-brand` · Tier 1 CTA |
 | `dark-green-700` | `#006D56` | `interactive-hover` |
@@ -99,11 +101,11 @@
 ### Layer 2 — Semantic Aliases
 | Alias | Primitive | Hex | Usage |
 |---|---|---|---|
-| `bg-canvas` | neutral-0 | `#FFFFFF` | Page background |
+| `bg-canvas` | neutral-0 | `#FFFFFF` (default) | Page background — pure white by default; off-white or a very light tint is allowed depending on context (DS-#029) |
 | `bg-surface` | neutral-0 | `#FFFFFF` | Card / Panel surface |
 | `bg-subtle` | neutral-50 | `#F8F9FA` | Optional separator |
 | `bg-brand` | dark-green-600 | `#008065` | Header, Primary Action |
-| `text-primary` | neutral-900 | `#26292C` | Body text on white |
+| `text-primary` | neutral-900 / neutral-50 | `#26292C` / `#F8F9FA` | Body text — `neutral-900` on white, `neutral-50` on dark/black surface (DS-#030) |
 | `text-secondary` | neutral-600 | `#565E64` | Sub-text, meta |
 | `text-on-tint` | dark-green-900 | `#004637` | Text on tinted/colored bg |
 | `text-on-brand` | neutral-50 | `#F8F9FA` | Text on dark-green-600 |
@@ -143,6 +145,14 @@
 - **Interactive link** — Rest: `dark-green-600` / Hover: `dark-green-700` + underline / Active: `dark-green-800`
 - **Text hierarchy — no opacity** — always use lighter color token (DS-#100)
 - **Portal text color** — Primary: `neutral-900` / Secondary: `neutral-600` / Active: `dark-green-600` / Disabled: `neutral-400` (DS-#097)
+- **bg hierarchy order** — (1) pure white → (2) `neutral-50` → (3) any `{family}-50` tint → (4) dark/solid = special approved cases only (DS-#041)
+- **Colored full-viewport bg** — solid colored background is a marketing/onboarding/campaign carve-out only, never in-product (DS-#012)
+- **No 3 colors in 1 element** — a single badge/avatar/icon must not mix more than 2 colors internally (DS-#016)
+- **Border color** — never darker than `neutral-200`, except for focus or semantic (error/success) states (DS-#031)
+- **Purple** — special-cases-only accent (Beverage/Premium), never a general-purpose accent color (DS-#039)
+- **Premium pairing** — `dark-green-900` + `brown-400`, or `brown-50` + `dark-green-800`/`900` (DS-#040)
+- **Banana is never Warning** — system Warning state always uses `yellow-600`, never `banana` (DS-#062)
+- **Layout grid alignment** — sections on the same page must share the same column system; mismatched grid lines are prohibited (DS-#019)
 
 ---
 
@@ -151,14 +161,14 @@
 **Font:** Noto Sans Thai only · 2 weights: Regular 400 / Bold 700
 
 ### Heading Scale
-| Token | Desktop (px/lh) | Mobile (px/lh) | Role |
-|---|---|---|---|
-| H1 | 72/90 | 48/60 | Landing / Hero |
-| H2 | 56/64 | 38/44 | Marketing section |
-| H3 | 40/50 | 34/42 | Marketing sub-section |
-| H4 | 24/32 | 20/28 | In-product panel / card title |
-| H5 | 18/26 | 18/26 | Component title / drawer header |
-| H6 | 16/24 | 16/24 | Sub-section label / group header |
+| Token | Desktop (px/lh) | Tablet (px/lh) | Mobile (px/lh) | Role |
+|---|---|---|---|---|
+| H1 | 72/90 | 58/68 | 48/60 | Landing / Hero |
+| H2 | 56/64 | 46/54 | 38/44 | Marketing section |
+| H3 | 40/50 | 38/48 | 34/42 | Marketing sub-section (DS-#056) |
+| H4 | 24/32 | 22/30 | 20/28 | In-product panel / card title (DS-#056) |
+| H5 | 18/26 | 18/26 | 18/26 | Component title / drawer header (DS-#091) |
+| H6 | 16/24 | 16/24 | 16/24 | Sub-section label / group header (DS-#091) |
 
 All heading weights: **Bold 700**
 
@@ -168,7 +178,7 @@ All heading weights: **Bold 700**
 | Body1 | 16/24 | Primary body text, paragraph |
 | Body2 | 14/20 | Label, meta, sub-text |
 | Caption1 | 12/18 | Timestamp, metadata |
-| Caption2 | 10/14 | Helper text, legal (exception to 12px floor) |
+| Caption2 | 10/14 | Helper text, legal — exception to 12px floor · never for decision-grade content (price, quantity, status) (DS-#092) |
 
 ### Type Rules
 - **Binary weight only** — Regular 400 (body) / Bold 700 (heading, label, CTA) · No Medium 500 / SemiBold 600 (DS-#093)
@@ -180,10 +190,10 @@ All heading weights: **Bold 700**
 - **Nav item / tab / option** — Regular 400 at every state (DS-#118); state via color/bg not weight
 
 ### Price Typography
-| Context | Price number | Currency unit |
+| Context | Price number (size/lh) | Currency unit (size/lh) |
 |---|---|---|
-| Product Detail / Cart | 32–40px / Bold 700 | 14px / Bold 700 |
-| Product Listing | 20–24px / Bold 700 | 12px / Bold 700 |
+| Product Detail / Cart | 32/40 · Bold 700 | 14/40 · Bold 700 |
+| Product Listing | 20–24/32 · Bold 700 | 12/32 · Bold 700 |
 
 Bottom-aligned · red-600 for discounted price (must be large text for WCAG) (DS-#055)
 
@@ -219,7 +229,7 @@ Bottom-aligned · red-600 for discounted price (must be large text for WCAG) (DS
 | `r-lg` | 14 | Panel, Filter sidebar |
 | `r-xl` | 18 | **Card** (Product, Content) |
 | `r-2xl` | 24 | **Modal, Bottom Sheet** |
-| `r-pill` | 999 | Pill, Avatar, Tag, Badge |
+| `r-pill` | 999 | Pill, Avatar, Tag, Badge, Top Navigation button (Mobile) (DS-#021) |
 
 ### Shadow Tokens
 | Token | Value | Usage |
@@ -257,6 +267,7 @@ Bottom-aligned · red-600 for discounted price (must be large text for WCAG) (DS
 - **Default**: `neutral-100` 1px (surface-aware: family-100 on tinted bg)
 - **Form controls**: `neutral-100` 1px (locked, does not change by surface)
 - **Card**: `family-100` @ 60% opacity 1px
+- **Button**: Secondary = `dark-green-600` border · Primary/Ghost = none
 - **No-border group**: Badge · Chip · Toggle · Primary/Ghost/Danger button
 
 ---
@@ -278,7 +289,11 @@ Bottom-aligned · red-600 for discounted price (must be large text for WCAG) (DS
 
 Always use `absoluteStrokeWidth=true` (DS-#065)
 
-**Portal Override (DS-#083):** strokeWidth=1 for all icon sizes in Portal context
+**Portal Override (DS-#083):**
+| Tier | Size | strokeWidth |
+|---|---|---|
+| Portal A | ≤ 40px | `1` |
+| Portal B | > 40px | `1.5` |
 
 ### Icon Color
 | Context | Token |
@@ -340,6 +355,11 @@ Rest → Hover: `neutral-800` → Pressed: `neutral-700`
 Rest → Hover: `red-700` → Pressed: `red-800`
 > Danger requires a Confirmation Dialog before executing — never trigger immediately
 
+### Focus Ring by Family
+Primary/Secondary/Ghost: `dark-green-600` border + `dark-green-100` ring (`#C8E6E0`)
+Availability: `neutral-600` border + `neutral-100` ring (`#E6E9EB`)
+Danger: `red-600` border + `red-100` ring (`#FEEBEB`)
+
 ### Loading State
 Visual = hover bg + spinner · no text · `pointer-events: none` · `aria-busy="true"`
 ```css
@@ -347,7 +367,7 @@ Visual = hover bg + spinner · no text · `pointer-events: none` · `aria-busy="
 .spinner-s { width: 10px; height: 10px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 ```
-> After Add to Cart loading → must transition to QTY adjuster (DS-#075) · never show green check
+> After Add to Cart loading → must transition to QTY adjuster · never show green check
 
 ### Icon-only Button
 Circle shape (r-pill 999px) · M: 40×40px icon 20px · S: 32×32px icon 16px
@@ -435,7 +455,11 @@ Same type system as text button — requires `aria-label` (WCAG 1.1.1)
 
 ### Dismiss Button
 × (Lucide X · stroke 1.8) · 14×14px icon · 20×20px touch area
-Rest: transparent bg · family-600 icon · Hover: family-100 bg · family-700 icon
+Light variant — Rest: transparent bg · `family-600` icon · Hover: `family-100` bg · `family-700` icon
+Vivid variant — icon color is **white** (not `family-600`), since it sits on a solid vivid-color chip
+
+### Vivid ≠ Clickable
+Vivid styling does not imply the badge/chip is clickable — it's used for high-importance states regardless of interactivity (DS-#048)
 
 ### CSS Variables
 ```css
@@ -488,7 +512,7 @@ Rest: transparent bg · family-600 icon · Hover: family-100 bg · family-700 ic
 | Filled | 1px `neutral-100` | white | `neutral-900` |
 | Focus | 1.5px `dark-green-600` (no glow DS-#116) | white | `neutral-900` |
 | Error | 1px `red-600` | white | `neutral-900` |
-| Error + Focus | 1.5px `red-600` | white | — |
+| Error + Focus | 1.5px `red-600` | white | `neutral-900` |
 | Disabled | 1px `border-disabled` | `bg-disabled` | `text-disabled` |
 | Read-only | 1px `border-subtle` | `neutral-50` | `neutral-600` |
 | Success (Valid) | 1px `green-fresh-600` | white | `neutral-900` |
@@ -632,9 +656,10 @@ Selected values shown as Light chips S (dark-green family) · >3 chips shows `+N
 ### Variants
 | | A — Ghost+Primary | B — Full Ghost |
 |---|---|---|
-| Container | `dark-green-50` (on white) | `white` (on tinted) |
 | +/- style | Primary circle `dark-green-600` | Ghost transparent circles |
 | Best for | Product card, detail | Table row, cart list |
+
+> Container bg is decided by the **Surface Rule** below, independent of Variant A/B — the +/- style is the only thing that differs between variants (DS-#029)
 
 ### Shared Base
 - M: 40px height · 32×32px buttons · 9999px radius
@@ -686,7 +711,7 @@ Width stays constant throughout — no layout shift
 | bg | border rgba |
 |---|---|
 | white / neutral | `rgba(230,233,235, 0.60)` |
-| `freshket-50` / dark-green | `rgba(200,230,224, 0.60)` |
+| `dark-green-50` | `rgba(200,230,224, 0.60)` |
 | `green-fresh-50` | `rgba(204,245,229, 0.60)` |
 | `red-50` | `rgba(254,235,235, 0.60)` |
 | `blue-50` | `rgba(209,225,249, 0.60)` |
@@ -715,7 +740,7 @@ Width stays constant throughout — no layout shift
 ### Primary CTA Card (DS-#023)
 | Property | Value |
 |---|---|
-| shadow at rest | `0 1px 2px rgba(38,41,44,.04)` |
+| shadow at rest | `shadow-sm` (`0 1px 2px rgba(38,41,44,.04)`) or `shadow-md` |
 | bg (optional) | dark-green-600 `#008065` |
 | text on dark bg | neutral-50 `#F8F9FA` |
 | border | none |
@@ -733,8 +758,13 @@ Width stays constant throughout — no layout shift
 padding: 8px · content gap: 4px · image→content: 16px
 ```
 
+### Content Structure — Information Card
+Icon circle 44px (`{color}-50` bg, r-pill) · Title 18px/700 `neutral-900` · Body 14px/400 `neutral-600` · optional link/CTA chip
+Padding: `24px 32px` · internal gap 16px (between blocks) / 8px (between text items)
+
 ### Bento Layout
-Permitted sizes: **1×1, 1×2, 2×1, 2×2, 3×2** · gap: s3–s4 (12–16px)
+Permitted sizes: **1×1, 1×2, 2×1, 2×2, 3×2** · gap: `s4` (16px) standard
+Dashboard only — do not use with Marketplace, Catalog, or List view (DS-#026)
 Primary CTA card → use Card Variant Primary CTA · all others: no shadow at rest
 
 ### CSS Variables
@@ -769,19 +799,23 @@ Primary CTA card → use Card Variant Primary CTA · all others: no shadow at re
 ```
 - Title: H5 20px/700 (default) · H6 16px/700 (compact) · `neutral-900`
 - Icon: 20px · strokeWidth 1 · `neutral-600` · 8px gap
-- Right action: Ghost link or Button S · `dark-green-600`
+- Right action: **Body2 link** or Button S · `dark-green-600`
+- Divider (optional): `1px solid neutral-100` below the whole block · `s3` (12px) gap
 
 ### PanelHeader
 Inside a card · uses card padding
-- Title: Body1 16px/700 · `neutral-900`
+- Title: Body1 16px/700 (card panel) · H6 16px/700 (standalone panel) · `neutral-900`
+- Icon (optional): 16px · strokeWidth 1 · `neutral-500` · `s2` (8px) gap
+- Right action: Caption 12px link · Ghost Icon S · or Badge
 - Divider (optional): `1px solid neutral-100`
+- Spacing: min-height 40px · header→content gap `s3` (12px) with divider / `s2` (8px) without
 
 ### EmptyState Variants
-| Variant | Illustration | Title |
-|---|---|---|
-| Full page | 120px | H4 24px/700 |
-| Section | 80px | H6 16px/700 |
-| Inline | 48px | Body2 14px/700 |
+| Variant | Illustration | Title | Description | Action | Container padding |
+|---|---|---|---|---|---|
+| Full page | 120px | H4 24px/700 | `neutral-500` | Primary/Secondary button | `s8` (32px) |
+| Section | 80px | H6 16px/700 | `neutral-500` | Ghost/Secondary button | `s6` (24px) |
+| Inline | 48px | Body2 14px/700 | `neutral-400` | Ghost link | `s4` (16px) |
 
 **Illustration options:** Emoji (consumer) · Icon circle family-50 bg + family-600 icon (portal) · Custom SVG (important screens)
 
@@ -815,9 +849,17 @@ Width 100% · max-height 80vh · r-2xl top corners · handle bar 32×4px `neutra
 | z-index | Modal: 500 · Backdrop: 400 |
 
 ### Animation
-Modal: `scale(.95) opacity(0) → scale(1) opacity(1)` · 200ms ease-out
-Bottom Sheet: `translateY(100%) → translateY(0)` · 280ms cubic-bezier(.2,.7,.2,1)
-Exit: reverse · 150ms ease-in
+Modal: `scale(.95) opacity(0) → scale(1) opacity(1)` · 200ms ease-out · Exit: reverse · 150ms ease-in
+Bottom Sheet: `translateY(100%) → translateY(0)` · 280ms cubic-bezier(.2,.7,.2,1) · Exit: reverse · **200ms** ease-in
+
+### Nested Modal
+Level 1: z-index 500 · backdrop 400 @ opacity .45
+Level 2: z-index 520 · backdrop 510 @ opacity .30 · must be smaller than Level 1
+Max nesting: 2 levels
+
+### Click Outside Behavior
+Dismissible (default) — simple info/filter/menu modals: click backdrop closes
+Non-dismissible — destructive confirm, unsaved-form, payment-in-progress: backdrop click triggers the shake animation instead of closing
 
 ### Non-dismissible Shake
 ```css
@@ -837,20 +879,23 @@ Size S always · icon circle 44×44px `{family}-50` bg + `{family}-600` icon 20p
 ## Date Picker
 
 ### Trigger
-Calendar icon suffix 16px · Value: `D MMM YYYY` · Opens calendar panel (no direct keyboard)
+Calendar icon suffix 16px · Value: `D MMM YYYY` (Thai Buddhist Era, e.g. "16 May 2026") · Opens calendar panel (no direct keyboard)
+Chevron rotates 180°/0° on open/close · `transform 300ms cubic-bezier(.2,.7,.2,1)`
+Open state: border + calendar icon + placeholder text + chevron all turn `dark-green-600`
 
 ### Calendar Panel
 bg white · r-lg 14px · `shadow-xl` · width 280px (single) / 560px (range)
 z-index: 300 (z-dropdown)
 
 ### Date Cell States
-| State | bg | text |
-|---|---|---|
-| Default | transparent | `neutral-900` |
-| Hover | `dark-green-50` | `dark-green-900` |
-| Selected | `dark-green-600` | `neutral-50` |
-| Today (unselected) | transparent | `dark-green-600` bold + dot below |
-| Disabled | transparent | `neutral-200` |
+| State | bg | text | Ring |
+|---|---|---|---|
+| Default | transparent | `neutral-900` | — |
+| Hover | `dark-green-50` | `dark-green-900` | — |
+| Selected | `dark-green-600` | `neutral-50` | `0 0 0 2px #FFF` (white ring) |
+| Today (unselected) | transparent | `dark-green-600` bold + dot below | — |
+| Other month | transparent | `neutral-200` (pointer cursor) | — |
+| Disabled | transparent | `neutral-200` | — |
 
 Cell: 36×36px · r-sm 4px · gap 2px
 
@@ -884,9 +929,10 @@ z-index: 600 (z-toast) · shadow: `shadow-lg`
 | Success | `green-fresh-50` | ✅ 4s |
 | Warning | `yellow-50` (neutral-900 text) | ❌ manual |
 | Error | `red-50` | ❌ manual |
-| Normal comm | `{family}-50` | ✅ 4s |
+| Normal comm | non-semantic — Variant A or D only, no color tint | ✅ 4s |
 
 > Warning = always yellow bg + neutral-900 text across all variants (DS-#073)
+> Never use `banana` for Warning — Warning is always `yellow-600` (DS-#062)
 
 ### Anatomy
 ```
@@ -897,8 +943,9 @@ z-index: 600 (z-toast) · shadow: `shadow-lg`
 └────────────────────────────────────────┘
 ```
 - Emoji: top-left · 16px · primary icon (no colored borders or left accents)
-- Message: Body2 14px/400 · max 2 lines
+- Message: Body2 14px/400 · max 2 lines — if more is needed, use a Modal instead
 - Border radius: r-xl 18px
+- Container: `min-width: 320px` · `max-width: 480px` (desktop) / `calc(100% - 32px)` (mobile) · padding `s4` (16px) top/bottom/right · `s3` (12px) left
 
 ### Animation
 Enter: translateY(16px) → 0 (mobile) / translateX(16px) → 0 (desktop) + opacity 0→1 · 200ms ease-out
@@ -909,22 +956,33 @@ Max 3 visible · queue beyond that
 
 ## Table
 
-### 3 Variants
+### 3 Variants (DS-#076)
 | Variant | Border | Use when |
 |---|---|---|
 | **Grid** | all cell borders | Data table with many columns |
-| **Outline** | outer border + row dividers only | Standard list view |
-| **Clean** | no border | Embedded in card / dialog |
+| **Outline** | header/row bottom-borders only · no outer border, no vertical borders | Standard list view |
+| **Clean** | header bottom border only · rows borderless | Marketplace · light UI |
 
 ### Density
+Header row height is always **40px regardless of density** — only row height/padding scale below.
+
 | Size | Row height | Padding | Font |
 |---|---|---|---|
 | S (dense) | 40px | 0 12px | Caption 12px/400 |
 | M | 52px | 0 16px | Body2 14px/400 |
-| L (comfortable) | 64px | 0 20px | Body2 14px/400 |
+| L (comfortable) | 64px | 0 16px | Body2 14px/400 |
+
+### Column Builder Helpers
+`col.text` · `col.number` · `col.currency` · `col.name` · `col.badge` · `col.action` — shared helpers for per-column alignment/width defaults (DS-#127)
+
+### Bulk Action Toolbar
+Appears when rows are selected · bg `dark-green-50` · border `1px solid dark-green-100` · height 48px · sticky top · z-index 40
+
+### Frozen Column
+Sticky header z-index 10 · frozen column z-index 20 · header+frozen intersection z-index 30 · frozen column casts a shadow toward scrollable content (DS-#076)
 
 ### Key Rules
-- **Active vs Selected** (DS-#127): Active = cursor is here (keyboard focus/hover) · Selected = user checked/chose it. Active uses bg tint; Selected uses check + row tint
+- **Active vs Selected** (DS-#127): Active = row clicked to expand its 2-Layer sub-table (click-to-expand, no checkbox) → bg `neutral-50` · Selected = checkbox checked for batch/bulk action → bg `dark-green-50`. Both use `border-left: 3px solid dark-green-600`
 - **Sticky header** — column headers stay visible on scroll
 - **Column alignment**: text left · number right · action right
 - **2-Layer expand pattern**: click row → expand row below with sub-table / details
@@ -979,8 +1037,8 @@ Transition: `200ms cubic-bezier(.2,.7,.2,1)`
 | border-top | `0.5px solid rgba(230,233,235,.60)` |
 | z-index | z-sidebar (100) |
 
-Active indicator: 2px top border `dark-green-600` · 60% of tab width · centered
-Tab items: 4 (icon 22px / label 10px) or 5 max (icon 20px / label 10px)
+Active indicator: 2px top border `dark-green-600`
+Tab items: icon 24px / label 10–11px · 4 or 5 max
 
 **Center CTA Variant:** 48×48px circle Primary button `dark-green-600` · `translateY(-12px)` float above bar
 
@@ -1075,26 +1133,30 @@ Left panel (~280px fixed) + Right panel (flex:1) · Left panel has batch cards w
 
 ### PageLoader
 - Container: `position: fixed · inset: 0` · bg `neutral-50` · flex center
+- Logo: `freshket-original.svg` · width 120px
 - 3 dots: 7×7px · r-pill · `dark-green-600` · gap 8px
 - Animation: `scale 0.6→1→0.6` + `opacity 0.35→1→0.35` · 1.2s ease-in-out · stagger +0.2s
 
-### Filter Bar
-Horizontal scroll chip filter · fade mask at edge (gradient exemption from DS-#020 for scroll indicator)
+### Filter Bar (List Toolbar Widget)
+CalendarBtn / SortDropdown / SearchInput — all 32px height, `r-sm` 4px (DS-#084 context-group consistency)
+Dismissible FilterChips — 24px height, pill, `neutral-100` bg
+
+> Not to be confused with the **Full-page Data Table** category-chip scroll strip above (horizontal scroll · fade mask at edge — gradient exemption from DS-#020 for the scroll indicator)
 
 ### UserAvatar Dropdown
 Avatar 32×32px · `dark-green-50` bg + `dark-green-900` initials (2 chars) · dropdown on click
 
 ### BulkBar
-Fixed floating bar (above bottom nav) · appears when selection count > 0 · white bg + shadow-xl
+Fixed floating bar (above bottom nav) · appears when selection count > 0 · white bg · `border-radius: 20px` · `box-shadow: 0 8px 24px rgba(38,41,44,.10)` · `z-index: 1300`
 
 ### Skeleton Row
 Pulse animation: `neutral-100` bg · 1.5s ease-in-out infinite · matches real content shape
 
 ### Pagination Bar
-Ghost icon buttons for prev/next · page number chips (active: `dark-green-50` bg)
+Ghost icon buttons for prev/next · page number buttons: 28×28px square, `r-sm` 4px (not pill) — active: solid `dark-green-600` bg + `neutral-50` text
 
 ### InlineEditCell
-Table cell switches to input on click · enter/blur to confirm · escape to revert
+Table cell switches to input on click · confirm only via explicit ✓ button click · `onBlur` (focus leaves component) = **cancel**, not confirm
 
 ---
 
@@ -1103,28 +1165,41 @@ Table cell switches to input on click · enter/blur to confirm · escape to reve
 ### Toast Copy
 | Type | Pattern | Example |
 |---|---|---|
-| Success (4s) | `[action past tense]` | "Saved" / "Email sent" |
+| Success (4s) | `[action past tense] already` | "Saved" / "Email sent" |
 | Info (4s) | State information, concise | — |
-| Warning (manual) | Consequence statement | "Changes will be lost if you leave" |
+| Warning (manual) | Consequence statement | "Changes will be lost if you leave this page" |
 | Error (manual) | `[action] failed — [next step]` | "Save failed — try again" |
+
+Max 2 lines — if more copy is needed, use a Modal instead
 
 ### Modal Copy
 - Title: Noun phrase ≤5 words, not a question
-- ✅ "Confirm deletion" · ❌ "Are you sure?"
+- ✅ "Confirm deletion" / "Change password" · ❌ "Are you sure?" / "Please confirm"
 - Destructive CTA: specify the object: [Delete order] not [Yes / OK]
+- Destructive example — Title: "Delete this order?" · Body: "Order PO-202600022 will be permanently deleted" · Buttons: [Cancel] [Delete order]
+
+### Loading Copy
+PageLoader / Skeleton rows need no label text. If an API call/upload/save must show text, use `[action in progress]…` — e.g. "Saving…", "Uploading…"
+
+### Coming Soon
+✅ "Coming soon" · ❌ "Coming soon (Q3 2026)" — never promise a timeline that isn't confirmed
 
 ### Navigation Labels (Sidebar)
 Nouns only · no pronouns · ≤3 words
-✅ "Orders" · ❌ "Manage orders"
+✅ "Orders" · ❌ "Manage orders" / "My orders"
+✅ "Product prices" · ❌ "View prices" — ✅ "Pick list" · ❌ "Check pick list"
+
+### Password & Auth
+Password rules checklist always uses **positive framing** — show all requirements, not just the ones that currently fail
 
 ### Auth CTA Table
-| Page | Primary CTA |
-|---|---|
-| Login | Log in |
-| Sign Up | Sign up |
-| Forgot Password | Send reset link |
-| Reset Password | Set password |
-| Change Password | Save |
+| Page | Title | Primary CTA |
+|---|---|---|
+| Login | Log in | Log in |
+| Sign Up | Create new account | Sign up |
+| Forgot Password | Forgot password | Send reset link |
+| Reset Password | Set new password | Set password |
+| Change Password | Change password | Save |
 
 ### Search Placeholder
 Use object name, not "Search":
@@ -1155,20 +1230,25 @@ Every interactive element must have touch area ≥44×44px (add padding if eleme
 - Bottom Sheet — NOT center modal for quick actions
 
 ### Mobile Spacing
-Content padding: 16px horizontal · Card padding: 16px · Section gap: 24px
-`paddingBottom: 80px` for ScrollView when bottom nav exists (56px nav + 24px breathing)
+Content padding: 16px horizontal · Card padding: 16px · Section gap: 24px · List item height (M): 56–64px (touch target headroom)
+`paddingBottom: 80px` for ScrollView when bottom nav exists (56px nav + 24px breathing) — use `ListFooterComponent`/`contentInsetAdjustmentBehavior` for FlatList; plain 24px padding when there is no bottom nav
+Bottom safe area: use `SafeAreaView`, never hardcode the inset value
 
 ### Skeleton Loading
 Priority: Skeleton > Spinner > Nothing
 - Color: `neutral-100` · pulse 1.5s ease-in-out · matches real content shape
 - Reveal: fade-in 400ms when ready
+- Never show a "Loading..." text placeholder — skeleton shape communicates state instead
 
 ### Platform Differences
 | UX Pattern | iOS | Android |
 |---|---|---|
 | Back navigation | Swipe from left edge | Hardware/gesture back |
+| Share sheet | Native share sheet | Native share intent |
 | Date picker | Wheel spinner | Dialog |
+| Alerts | `Alert.alert` native style | Material dialog style |
 | Bottom sheet | Slide up + handle | Similar |
+| Tab bar position | Bottom | Bottom (top also common) |
 
 ---
 
@@ -1180,7 +1260,7 @@ Priority: Skeleton > Spinner > Nothing
 | Spacing | `"16px"` | `16` (unitless) |
 | Radius | `"8px"` | `8` |
 | Shadow | `box-shadow` string | `SHADOW_*` spread object |
-| Font weight | `fontWeight: "700"` | `fontFamily: "Font-Bold"` only (DS-#110) |
+| Font weight | `fontWeight: "700"` | `fontWeight: "700"` (string, as-is) — Android has its own override, see DS-#110 below |
 | Focus ring | `:focus-visible + box-shadow` | `onFocus/onBlur` → borderColor |
 
 ### DS-#110 Android Font Rule
@@ -1191,16 +1271,33 @@ On Android: do NOT combine `fontFamily + fontWeight` — use `fontFamily: "NotoS
 
 ### DS-#112 Key Differences
 - Hover → `pressed` state in `Pressable`
-- `position: fixed` → `position: "absolute"` or `Modal`
+- `position: fixed` → **none** — use navigation patterns instead (no direct RN equivalent)
 - `:hover` → `Pressable` pressed state
-- No `translateY` on card hover — use shadow change only
 - Touch target: ≥44×44px via `padding` on `Pressable`
+
+### DS-#113 iOS-Specific Rules
+- Safe-area insets: Dynamic Island `top≈59px`/`bottom≈34px` · Notch `≈44px`/`≈34px` · Home button `≈20px`/`≈0px`
+- Tap highlight: use `Pressable`, not `TouchableHighlight`
+- `StatusBar` style by background: `neutral-50`/white → `dark` · `dark-green-600` → `light` · modal overlay → `light`
+- `KeyboardAvoidingView` behavior: `iOS: "padding"` / `Android: "height"`
+- Swipe-back gesture: never set `gestureEnabled: false`
+- Haptic feedback mapping: Tap→light · Submit success→success · Form error→error · Delete/destructive→heavy · Long press→medium (Android support is partial)
+
+### Layout Differences (Web → RN)
+`div`→`View` · `p/span/h1`→`Text` (all text must be inside a `Text` node) · `overflow:scroll`→`ScrollView` · Flex direction default is **column** in RN (row on web) · use a spacer View or `marginRight` instead of `gap` on SDK below 71
+
+### Padding After Safe Area
+0px when an App Bar is present · 8–12px following an App Bar · 16px full-screen/edge-to-edge (Material Design 3 keyline) · 20–24px for a spacious layout (Grab/Shopee pattern) · recommended default `paddingTop: 16`
+
+### Expo SDK Compatibility
+SDK 54 = current Expo Go · `npx create-expo-app APP --template blank@sdk-54`
 
 ### SafeAreaView
 ```jsx
 import { SafeAreaView } from 'react-native-safe-area-context';
 <SafeAreaView edges={['top', 'bottom']}>
 ```
+`<StatusBar style="auto" />` — or set explicitly per DS-#113's per-background table above
 
 ### Font Setup
 ```css
@@ -1214,22 +1311,29 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 ---
 
-## Handoff to Dev
+## Handoff to Dev (DS-#115)
 
 ### 4-Section Package
 1. **Workflow** — user flow · entry point · transitions
 2. **Component Spec** — token names · sizes · states · animations
 3. **Wording** — all copy strings labeled and translated
-4. **Source Code** — working code or Figma/Storybook link
+4. **Source Code** — example code, `[WEB]`/`[APP]` code-block format
 
-### Checklist Before Handoff
+### Checklist Before Handoff (5 categories)
+**Workflow / Component Spec / Wording / Source Code / DS Compliance**
 - ✓ All colors use design token names (no hex)
 - ✓ All states designed (rest · hover · focus · error · disabled · loading · empty)
 - ✓ Desktop + Mobile specs included
-- ✓ Copy strings written + labeled
-- ✓ Responsive breakpoints specified
-- ✓ Animation duration + easing specified
-- ✓ Accessibility: aria-labels, focus order, contrast ratios noted
+- ✓ Touch target ≥ 44×44px on mobile (DS-#114)
+- ✓ Copy strings written + labeled — UX writing check: no leading "Enter" as an imperative without context
+- ✓ `tokens.platform.js` included
+- ✓ DS-#112: `[WEB]`/`[APP]`/`[BOTH]` specified in the Build Manifest
+- ✓ Passed Web AI Designer validation / Passed App AI Designer validation
+- ✓ No `[PROPOSED]` items left unlogged
+
+### Handoff Template & Storage
+Template: Date / Designer / Platform / DS Decisions header + numbered workflow/spec/wording/code sections
+Store at: `handoff/[feature-name]-handoff.md` · code lives under `[WEB]/components/` and `[APP]/components/`
 
 ---
 
@@ -1265,19 +1369,24 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 | Decision | Subject |
 |---|---|
-| DS-#001 | Checkbox r-sm (4px) |
+| DS-#001 | Checkbox r-sm (4px) · r-sm NOT used for input text — use r-md (8px) |
 | DS-#002 | Focus = no color ring on content card (Variant B) |
 | DS-#003 | Field focus = Variant A (same as category) |
 | DS-#004 | focus-border = dark-green-600 · focus-ring = rgba(0,128,101,.18) |
+| DS-#005 | text-on-tint origin decision (generalized by DS-#018) |
 | DS-#006 | letter-spacing = normal always |
+| DS-#007 | bg-canvas → white |
 | DS-#008 | r-xl = 18px for cards |
 | DS-#010 | 1 accent per viewport |
 | DS-#011 | Border hierarchy system |
+| DS-#012 | Colored full-viewport bg — marketing/onboarding carve-out only, never in-product |
 | DS-#013 | Type hierarchy: role-based size + binary weight |
 | DS-#014 | Min font size 12px (decision-grade) |
 | DS-#015 | ≤2 size variants per viewport |
+| DS-#016 | No 3 colors in 1 element (badge/avatar/icon) |
 | DS-#017 | Action color hierarchy 3-tier |
 | DS-#018 | Text on tinted bg = same family -900 |
+| DS-#019 | Layout grid alignment — shared column system across sections on the same page |
 | DS-#020 | No gradients in product UI |
 | DS-#021 | r-pill for mobile top nav (search superseded by DS-#119) |
 | DS-#022 | Tinted surface Quick Menu spec |
@@ -1287,25 +1396,35 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 | DS-#026 | Bento Box layout (Dashboard only) |
 | DS-#027 | Landing macro-whitespace 80–120px |
 | DS-#028 | dark-green rename |
+| DS-#029 | bg canvas / component-bg flexibility — e.g. QTY Adjuster container follows the surface beneath it, not the variant |
+| DS-#030 | text-primary is context-aware: neutral-900 on white, neutral-50 on dark surface |
+| DS-#031 | Border color must never be darker than neutral-200, except focus/semantic states |
 | DS-#032 | Disabled tokens: bg/text/border |
 | DS-#034 | Chip bg = vivid/mid-tone |
 | DS-#035 | lime-300 ≤1% accent |
 | DS-#037 | Yellow bg text rule |
 | DS-#038 | Price color: neutral-900 / red-600 |
+| DS-#039 | purple = special-cases-only accent, never general-purpose |
+| DS-#040 | Premium color pairing: dark-green-900+brown-400, or brown-50+dark-green-800/900 |
+| DS-#041 | bg hierarchy order: white → neutral-50 → any {family}-50 tint → dark (special cases only) |
 | DS-#042 | No border on badges/chips |
 | DS-#043 | Light Badge = default non-clickable |
 | DS-#044 | Default = Light · Vivid = exception |
 | DS-#045 | Vivid when high-importance or category no icon |
 | DS-#046 | Icon position — left default · trailing exceptions |
 | DS-#047 | Clickable chip: cursor+hover+focus signal |
+| DS-#048 | Vivid does not imply clickable |
 | DS-#049 | Availability = always neutral |
+| DS-#050 | Promotion color system (badge/chip) |
 | DS-#051 | lime-300 ≤1% · urgent + special comms |
 | DS-#052 | text-on-brand = neutral-50 |
 | DS-#054 | text-on-tint = dark-green-900 default |
 | DS-#055 | Price typography spec |
+| DS-#056 | H3 = marketing/landing · H4 = in-product panel/card title |
 | DS-#059 | Primary button — no shadow |
 | DS-#060 | Availability button — solid neutral-900 |
 | DS-#061 | banana ≤2% · featured/spotlight |
+| DS-#062 | banana is never Warning — Warning is always yellow-600 |
 | DS-#063 | Lucide as fallback Priority 2 |
 | DS-#065 | Lucide stroke 2-tier · absoluteStrokeWidth=true |
 | DS-#066 | shadow-ambient 3 variants |
@@ -1314,14 +1433,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 | DS-#071 | Icon spec (fkt-icon.md) |
 | DS-#072 | Toast spec created |
 | DS-#073 | Toast v2 — 4 variants · emoji top-left |
-| DS-#075 | Dropdown spec created |
+| DS-#075 | Dropdown spec created (Select/Combobox/Multi-select) |
+| DS-#076 | Table — 3 border variants · fixed header/frozen column · frozen-column shadow rule |
 | DS-#080 | Modal structural-only spec |
 | DS-#082 | No uppercase — sentence case always |
-| DS-#083 | Portal icon strokeWidth=1 override |
-| DS-#086 | PageLoader dots animation |
-| DS-#087 | Mobile: 100dvh · my:auto |
+| DS-#083 | Portal icon strokeWidth=1 (≤40px) / 1.5 (>40px) override |
+| DS-#086 | PageLoader dots animation · Skeleton pattern |
+| DS-#087 | Mobile UX (keyboard/viewport) · Auth Page 100dvh · my:auto |
 | DS-#088 | Auth Card standard |
-| DS-#090 | Labels Bold 700 on every surface |
+| DS-#090 | Labels Bold 700 on every surface (label · button) — NavItem case superseded by DS-#118 |
+| DS-#091 | H5/H6 added to close the H4↔Body1 gap |
+| DS-#092 | Caption1/Caption2 restructured — Caption2 never for decision-grade content |
 | DS-#093 | Binary weight only: 400 / 700 |
 | DS-#094 | Text on colored surface rule |
 | DS-#095 | Interactive text states (link) |
@@ -1330,12 +1452,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 | DS-#098 | r-sm/r-md = 4/8 reconciled |
 | DS-#100 | No opacity for text hierarchy |
 | DS-#105 | r-2xl = 24px for modal/bottom sheet |
+| DS-#107 | Clarifies DS-#013 (typography hierarchy) |
 | DS-#108 | focus-visible + single focus-ring token |
+| DS-#109 | React Native App Guidelines (general) |
 | DS-#110 | Android font: fontFamily only, no fontWeight |
 | DS-#111 | Android shadow = elevation (gap documented) |
 | DS-#112 | Cross-platform (RN/Expo) guidelines |
 | DS-#113 | iOS-specific rules |
 | DS-#114 | Mobile UX Principles |
+| DS-#115 | Design-to-Dev Handoff format |
 | DS-#116 | Input field: border only on focus (no box-shadow glow) |
 | DS-#118 | Nav weight = Regular 400 all states · state via color/bg only |
 | DS-#119 | Search input = r-md 8px (not pill) |
@@ -1343,5 +1468,5 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 | DS-#124 | Clickable card-shaped element = shadow-hover + translateY(-2px) |
 | DS-#125 | labelAction contextual link · NumberInput Compact 26px |
 | DS-#126 | ConfirmModal = S size · icon circle 44×44px family-50 |
-| DS-#127 | Active vs Selected state distinction in table |
+| DS-#127 | Table: Active (click-to-expand row) vs Selected (checkbox for batch) · `col.*` column builders · 2-Layer expand pattern |
 | DS-#128 | SectionHeader + PanelHeader + EmptyState spec |

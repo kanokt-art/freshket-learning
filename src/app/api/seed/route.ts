@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { Timestamp } from 'firebase-admin/firestore'
 import { getAdminFirestore } from '@/lib/firebase/admin'
+import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
 import {
   MOCK_USERS,
   MOCK_COURSES,
@@ -11,11 +12,14 @@ import {
 
 const SEED_DOC_ID = '__seed_meta__'
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   // Block in production unless explicitly allowed
   if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SEED !== 'true') {
     return NextResponse.json({ error: 'Seed is disabled in production' }, { status: 403 })
   }
+
+  const gate = await requireSuperAdmin(req)
+  if (!gate.ok) return gate.response
 
   try {
     const db = getAdminFirestore()
@@ -120,10 +124,17 @@ export async function POST() {
   }
 }
 
-export async function DELETE() {
+// Mass-deletes every _isMock doc across 5 collections. The NODE_ENV/ALLOW_SEED
+// check is an environment guard, NOT an authorization check — it left the handler
+// wide open on any preview/staging deployment, and fully open in production the
+// moment ALLOW_SEED=true is set. Caller verification is required on top of it.
+export async function DELETE(req: NextRequest) {
   if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SEED !== 'true') {
     return NextResponse.json({ error: 'Seed clear is disabled in production' }, { status: 403 })
   }
+
+  const gate = await requireSuperAdmin(req)
+  if (!gate.ok) return gate.response
 
   try {
     const db = getAdminFirestore()
@@ -153,7 +164,12 @@ export async function DELETE() {
   }
 }
 
-export async function GET() {
+// Reads /_meta, which firestore.rules denies to ALL clients (`if false`) — so
+// serving it unauthenticated over the Admin SDK contradicted that intent.
+export async function GET(req: NextRequest) {
+  const gate = await requireSuperAdmin(req)
+  if (!gate.ok) return gate.response
+
   try {
     const db = getAdminFirestore()
     const meta = await db.collection('_meta').doc(SEED_DOC_ID).get()

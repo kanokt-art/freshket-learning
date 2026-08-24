@@ -1,17 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers, useMyTrainingRecords } from '@/hooks/useFirestore'
+import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { canAccess, ROLE_LABELS, type UserRole } from '@/types/user'
 import { STATUS_LABELS, STATUS_COLORS } from '@/types/tracking'
 import { formatDate } from '@/lib/utils/dateFormatter'
 import { getDemoMode } from '@/lib/demo/demoMode'
-import { useMyPoints, usePointsLedger } from '@/hooks/usePoints'
-import { getTier, getTierProgress } from '@/lib/utils/pointsCalc'
-import { POINT_TIERS, POINT_EVENT_LABELS } from '@/types/points'
 
 const DEMO_MODE = getDemoMode()
 
@@ -75,16 +73,21 @@ export default function UserReportPage() {
   const router = useRouter()
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState<'profile' | 'training' | 'roleplay' | 'shadow'>('profile')
-  const [showAdjust, setShowAdjust] = useState(false)
-  const [adjustPts, setAdjustPts] = useState('')
-  const [adjustReason, setAdjustReason] = useState('')
-  const [adjusting, setAdjusting] = useState(false)
-  const [adjustDone, setAdjustDone] = useState(false)
 
   const { data: allUsers, loading: usersLoading } = useAllUsers()
   const { data: records, loading: recordsLoading } = useMyTrainingRecords(userId)
-  const { data: userPoints } = useMyPoints(userId)
-  const { events: pointEvents } = usePointsLedger(userId)
+
+  const profile = allUsers.find((u) => u.uid === userId)
+
+  // Gate Shadow / Role Play tabs by the viewed member's department module access.
+  // Declared before the early returns below so hook order stays stable.
+  const { allowedModules, loading: moduleLoading } = useModuleAccess(profile?.role, profile?.department)
+  const showShadow = !moduleLoading && allowedModules.has('shadow')
+  const showRoleplay = !moduleLoading && allowedModules.has('roleplay')
+
+  useEffect(() => {
+    if ((activeTab === 'shadow' && !showShadow) || (activeTab === 'roleplay' && !showRoleplay)) setActiveTab('profile')
+  }, [activeTab, showShadow, showRoleplay])
 
   if (user && !canAccess(user.role, 'team_lead')) {
     router.replace('/sale')
@@ -92,7 +95,6 @@ export default function UserReportPage() {
   }
 
   const loading = usersLoading || recordsLoading
-  const profile = allUsers.find((u) => u.uid === userId)
 
   // Training stats
   const completed = records.filter((r) => r.status === 'completed').length
@@ -111,29 +113,6 @@ export default function UserReportPage() {
       setTimeout(() => setCopied(false), 2000)
     } catch {
       // fallback: select text
-    }
-  }
-
-  const handleAdjust = async () => {
-    const pts = parseInt(adjustPts, 10)
-    if (!pts || !adjustReason.trim()) return
-    setAdjusting(true)
-    try {
-      if (DEMO_MODE) {
-        await new Promise(r => setTimeout(r, 600))
-      } else {
-        const { getAuth } = await import('firebase/auth')
-        const idToken = await getAuth().currentUser?.getIdToken()
-        await fetch('/api/points/adjust', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken, targetUserId: userId, points: pts, reason: adjustReason }),
-        })
-      }
-      setAdjustDone(true)
-      setTimeout(() => { setAdjustDone(false); setShowAdjust(false); setAdjustPts(''); setAdjustReason('') }, 1500)
-    } finally {
-      setAdjusting(false)
     }
   }
 
@@ -168,8 +147,8 @@ export default function UserReportPage() {
   const TABS = [
     { id: 'profile' as const,   label: 'Profile' },
     { id: 'training' as const,  label: 'Training Record' },
-    { id: 'roleplay' as const,  label: 'Role Play' },
-    { id: 'shadow' as const,    label: 'Shadow' },
+    ...(showRoleplay ? [{ id: 'roleplay' as const, label: 'Role Play' }] : []),
+    ...(showShadow   ? [{ id: 'shadow'   as const, label: 'Shadow' }] : []),
   ]
 
   return (
@@ -284,125 +263,7 @@ export default function UserReportPage() {
                   bg="bg-gray-50"
                 />
               </div>
-
-              {/* ── Points widget ─────────────────────────────────────────── */}
-              {(() => {
-                const total = userPoints?.totalPoints ?? 0
-                const tier = getTier(total)
-                const t = POINT_TIERS[tier]
-                const prog = getTierProgress(total)
-                const recentEvents = pointEvents.slice(0, 3)
-                const isSA = user?.role === 'super_admin'
-                return (
-                  <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                    <div className="flex items-center justify-between mb-4">
-                      <p className="text-xs font-bold text-gray-400">คะแนนสะสม</p>
-                      {isSA && (
-                        <button
-                          onClick={() => setShowAdjust(true)}
-                          className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl bg-freshket-100 text-freshket-700 hover:bg-freshket-200 transition-colors"
-                        >
-                          <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                          </svg>
-                          ปรับคะแนน
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="flex items-end gap-3 mb-3">
-                      <span className="text-3xl font-bold text-gray-900 tabular-nums">{total.toLocaleString()}</span>
-                      <span className="text-sm text-gray-400 mb-0.5">pts</span>
-                      <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${t.bg} ${t.color} border ${t.border}`}>
-                        {t.icon} {t.labelTh}
-                      </span>
-                    </div>
-
-                    <div className="mb-4">
-                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${prog}%`, background: '#00ce7c' }} />
-                      </div>
-                    </div>
-
-                    {recentEvents.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs font-bold text-gray-400">ล่าสุด</p>
-                        {recentEvents.map(ev => (
-                          <div key={ev.id} className="flex items-center justify-between text-xs">
-                            <span className="text-gray-600 truncate flex-1 pr-2">{POINT_EVENT_LABELS[ev.type]}: {ev.description.substring(0, 40)}{ev.description.length > 40 ? '…' : ''}</span>
-                            <span className={`font-bold shrink-0 ${ev.points >= 0 ? 'text-freshket-600' : 'text-rose-500'}`}>
-                              {ev.points >= 0 ? '+' : ''}{ev.points} pts
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
             </>
-          )}
-
-          {/* ── Adjust Points Modal ────────────────────────────────────────────── */}
-          {showAdjust && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl animate-pop-in">
-                {adjustDone ? (
-                  <div className="text-center py-4">
-                    <div className="size-12 bg-freshket-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <svg className="size-6 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                      </svg>
-                    </div>
-                    <p className="font-bold text-gray-900">ปรับคะแนนสำเร็จ</p>
-                  </div>
-                ) : (
-                  <>
-                    <h3 className="font-bold text-gray-900 mb-1">ปรับคะแนน</h3>
-                    <p className="text-xs text-gray-500 mb-5">ปรับคะแนนสำหรับ {profile.displayName}</p>
-
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-xs font-bold text-gray-700 block mb-1.5">คะแนน (บวกหรือลบ)</label>
-                        <input
-                          type="number"
-                          value={adjustPts}
-                          onChange={e => setAdjustPts(e.target.value)}
-                          placeholder="เช่น 50 หรือ -20"
-                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-gray-700 block mb-1.5">เหตุผล (แสดงให้ user เห็น)</label>
-                        <textarea
-                          value={adjustReason}
-                          onChange={e => setAdjustReason(e.target.value)}
-                          placeholder="เช่น โบนัสพิเศษ Best Performer เดือน มิ.ย."
-                          rows={3}
-                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 resize-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex gap-3 mt-6">
-                      <button
-                        onClick={() => { setShowAdjust(false); setAdjustPts(''); setAdjustReason('') }}
-                        className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
-                      >
-                        ยกเลิก
-                      </button>
-                      <button
-                        onClick={handleAdjust}
-                        disabled={!adjustPts || !adjustReason.trim() || adjusting}
-                        className="flex-1 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        {adjusting ? 'กำลังบันทึก…' : 'ยืนยัน'}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
           )}
 
           {/* ── Training Record tab ── */}

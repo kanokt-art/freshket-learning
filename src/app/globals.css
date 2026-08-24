@@ -32,6 +32,35 @@
     color: #393d42;
   }
 
+  /* App-like feel: clicking a heading, label, or any UI text should NOT drop a
+     blinking text caret or show the I-beam cursor. Disable text selection app-wide
+     by default. Real form fields (input/textarea/select/contenteditable) — and
+     anything opted in with `.selectable` — keep normal selection so users can
+     still type and copy where it matters. */
+  body {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+    cursor: default;
+  }
+
+  input,
+  textarea,
+  select,
+  [contenteditable='true'],
+  .selectable,
+  .selectable * {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    user-select: text;
+  }
+
+  input,
+  textarea,
+  [contenteditable='true'] {
+    cursor: text;
+  }
+
   :focus-visible {
     @apply outline-none ring-2 ring-freshket-300 ring-offset-2;
   }
@@ -212,9 +241,14 @@
     font-feature-settings: 'tnum';
   }
 
-  /* Page entrance — float up */
+  /* Page entrance — float up. fill-mode is `backwards` (not `both`) on purpose:
+     `both`/`forwards` would leave `transform: translateY(0)` applied after the
+     animation ends, and any non-`none` transform makes the element a containing
+     block for `position: fixed` descendants — breaking every fixed-position
+     modal/panel nested inside it (they'd size to this element instead of the
+     viewport, leaving areas like the sidebar uncovered). */
   .animate-float-up {
-    animation: float-up 0.12s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: float-up 0.12s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   }
 }
 

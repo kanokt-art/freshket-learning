@@ -1,12 +1,107 @@
 export type CourseCategory = 'product' | 'sales_skill' | 'compliance' | 'onboarding' | 'leadership'
 
+// Difficulty level — set by admin on the course form, surfaced to learners in the
+// "My Course" table on their dashboard.
+export type CourseLevel = 'beginner' | 'intermediate' | 'expert'
+
+export const LEVEL_LABELS: Record<CourseLevel, string> = {
+  beginner:     'Beginner',
+  intermediate: 'Intermediate',
+  expert:       'Expert',
+}
+
+export const LEVEL_COLORS: Record<CourseLevel, string> = {
+  beginner:     'bg-freshket-100 text-freshket-700',
+  intermediate: 'bg-amber-100 text-amber-700',
+  expert:       'bg-rose-100 text-rose-700',
+}
+
 export type ResourceType = 'pdf' | 'video' | 'link' | 'document' | 'playbook' | 'sop'
+
+export type LessonType = 'video' | 'article' | 'file' | 'link' | 'quiz' | 'assignment'
+
+export interface CourseLesson {
+  id: string
+  title: string
+  type: LessonType
+  order: number
+  description?: string
+  // video
+  videoProvider?: 'youtube' | 'google_drive'
+  videoUrl?: string
+  // article
+  articleBody?: string
+  // file (URL only — no direct upload support; use Google Slides or a shared file link)
+  fileUrl?: string
+  // link
+  linkUrl?: string
+  // quiz — links an existing Assessment
+  assessmentId?: string
+  // assignment / homework
+  assignmentPrompt?: string
+}
+
+export interface CourseTopic {
+  id: string
+  title: string
+  order: number
+  lessons: CourseLesson[]
+}
+
+export const LESSON_TYPE_LABELS: Record<LessonType, string> = {
+  video:      'วิดีโอ',
+  article:    'บทความ',
+  file:       'ไฟล์',
+  link:       'ลิงก์ภายนอก',
+  quiz:       'แบบฝึกหัด',
+  assignment: 'การบ้าน',
+}
+
+export type QuizAnswerViewMode = 'per_question' | 'per_topic' | 'all_in_one'
+
+export interface GradeBand {
+  id: string
+  minPercent: number
+  maxPercent: number
+  label: string
+  color: string // key into the GRADE_COLORS palette (courses/page.tsx)
+}
+
+// Course-level quiz settings. antiCheatEnabled is enforced on the assessment-taking
+// page (src/app/(dashboard)/assessment/[id]/page.tsx) — fullscreen is forced, tab/window
+// switches are detected via the Page Visibility API, and the quiz auto-submits after
+// 3 warnings. cameraRequired and the reward fields are still stored as-is with no
+// enforcement/award logic wired up (no camera proctoring or automatic points-award
+// integration exists in this app today).
+export interface QuizSettings {
+  title?: string
+  timeLimitMinutes?: number
+  antiCheatEnabled?: boolean
+  cameraRequired?: boolean
+  description?: string
+  answerViewMode?: QuizAnswerViewMode
+  passThresholdPercent?: number
+  retryEnabled?: boolean
+  retryAfterDays?: number
+  maxRetries?: number
+  rewardEnabled?: boolean
+  rewardWithinAttempts?: number
+  rewardThresholdPercent?: number
+  gradeBands?: GradeBand[]
+}
+
+export const QUIZ_ANSWER_VIEW_LABELS: Record<QuizAnswerViewMode, string> = {
+  per_question: 'หน้าละ 1 คำถาม',
+  per_topic:    'หน้าละ 1 หัวข้อ',
+  all_in_one:   'ทุกคำถามในหน้าเดียว',
+}
 
 export interface Course {
   id: string
   title: string
   description: string
   category: CourseCategory
+  level?: CourseLevel
   durationMinutes: number
   thumbnailUrl?: string
   isRequired: boolean
@@ -17,6 +112,12 @@ export interface Course {
   slideUrl?: string
   formUrl?: string
   isPublished: boolean
+  instructorId?: string
+  courseAdminIds?: string[]
+  introVideoUrl?: string
+  hasCertificate?: boolean
+  allowRetake?: boolean
+  topics?: CourseTopic[]
   // Assessment config
   assessmentType?: 'self' | 'google_form'
   hasPreAssessment?: boolean
@@ -25,6 +126,7 @@ export interface Course {
   postAssessmentId?: string
   preFormUrl?: string
   postFormUrl?: string
+  quizSettings?: QuizSettings
   hasKeyTakeAway?: boolean
   keyTakeAwayPrompt?: string
   // Challenge course settings
@@ -70,20 +172,3 @@ export const CATEGORY_COLORS: Record<CourseCategory, string> = {
   leadership:  'bg-rose-100 text-rose-700',
 }
 
-export const RESOURCE_TYPE_LABELS: Record<ResourceType, string> = {
-  pdf:      'PDF',
-  video:    'Video',
-  link:     'Link',
-  document: 'Document',
-  playbook: 'Playbook',
-  sop:      'SOP',
-}
-
-export const RESOURCE_TYPE_COLORS: Record<ResourceType, string> = {
-  pdf:      'bg-red-100 text-red-700',
-  video:    'bg-rose-100 text-rose-700',
-  link:     'bg-blue-100 text-blue-700',
-  document: 'bg-slate-100 text-slate-700',
-  playbook: 'bg-freshket-100 text-freshket-700',
-  sop:      'bg-amber-100 text-amber-700',
-}

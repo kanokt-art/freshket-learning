@@ -4,7 +4,6 @@
 
 Internal web platform for Freshket sale team training tracking and enablement.
 
-- **Stack**: Next.js 14 App Router, TypeScript, Firebase Auth + Firestore, Tailwind CSS, Vercel
 - **Auth**: Google OAuth, `@freshket.co` domain only. Block all other domains immediately.
 - **RBAC**: `sale` < `team_lead` < `manager` < `super_admin`
 - **Demo mode**: `NEXT_PUBLIC_DEMO_MODE=true` bypasses Firebase entirely, serves mock data
@@ -17,10 +16,6 @@ Always use **inline SVG** icons — do NOT use icon libraries (lucide-react, her
 
 ### Font
 Use **Noto Sans Thai** as the primary font, with Inter as fallback.
-
-```css
-font-family: 'Noto Sans Thai', 'Inter', sans-serif;
-```
 
 Never use `text-[10px]` or `text-[11px]` — minimum label size is `text-xs` (12px).
 
@@ -47,23 +42,11 @@ Base = `white` + `gray-100` border; Freshket green = border, badge, icon, active
 | Slate BG | `#f8fafc` | Page backgrounds |
 | White | `#ffffff` | All cards, panels, nav |
 
-Add these to `tailwind.config.ts` under `extend.colors.freshket`:
-
-```js
-freshket: {
-  100: '#d6fdf0',
-  200: '#a7f3d0',
-  500: '#00ce7c',
-  600: '#00a862',
-  700: '#00804c',
-}
-```
-
 ### Logo
 
 ```jsx
 <img
-  src="https://ivpysunrulnrdykfaezk.supabase.co/storage/v1/object/public/logo-freshket/FRESHKET%20LOGO-01.png"
+  src="https://dwrbdsoumciwjszloluz.supabase.co/storage/v1/object/public/freshket%20AW/freshket-original.svg"
   className="h-7 w-auto object-contain"
   alt="Freshket"
 />
@@ -123,26 +106,6 @@ freshket: {
 | 3.0–3.9 | `text-amber-600` | `bg-amber-400` |
 | < 3.0 | `text-rose-600` | `bg-rose-400` |
 
-### Department Badge Palette (12-color rotating)
-
-```js
-const DEPT_COLORS = [
-  'bg-emerald-100 text-emerald-800',
-  'bg-blue-100 text-blue-800',
-  'bg-purple-100 text-purple-800',
-  'bg-amber-100 text-amber-800',
-  'bg-cyan-100 text-cyan-800',
-  'bg-rose-100 text-rose-800',
-  'bg-indigo-100 text-indigo-800',
-  'bg-teal-100 text-teal-800',
-  'bg-orange-100 text-orange-800',
-  'bg-pink-100 text-pink-800',
-  'bg-lime-100 text-lime-800',
-  'bg-sky-100 text-sky-800',
-]
-// index = hash(deptName) % 12
-```
-
 ---
 
 ## Page Templates
@@ -178,30 +141,6 @@ Entrance:  scale-95 opacity-0 → scale-100 opacity-100, 200ms
 | Focus ring | `focus:ring-2 focus:ring-freshket-300` (inputs) |
 | Disabled | `opacity-60 cursor-not-allowed` |
 | XSS safety | Always `.textContent =` not `.innerHTML =` for user strings |
-
----
-
-## Animation Catalog
-
-| Name | Effect | Use on |
-|---|---|---|
-| `pulse-ring` | box-shadow pulse outward | QR / badge |
-| `float` | translateY 0 → -9px → 0 | floating cards |
-| `fade-in` | opacity + translateY(18px) | page elements |
-| `slide-in-right` | opacity + translateX(24px) | list items |
-| `pop-in` | scale(0.88) opacity(0) → scale(1) | result card |
-| `shimmer` | bg-position sweep | skeleton loader |
-
----
-
-## Responsive Breakpoints
-
-| Breakpoint | Changes |
-|---|---|
-| Mobile (default) | Single column, compressed cards |
-| `sm:` 640px | 2-col cards, inline badges |
-| `lg:` 1024px | 12-col dashboard grid, sidebar visible |
-| `xl:` 1280px | Wider sidebars |
 
 ---
 

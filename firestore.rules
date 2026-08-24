@@ -7,6 +7,19 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // The @freshket.co restriction on Google sign-in (AuthContext's `hd` param)
+    // is a client-side UI hint only — Google doesn't hard-enforce it, and a
+    // valid Firebase ID token for this project can be obtained for ANY Google
+    // account regardless of domain. Every access-control gate below must check
+    // isStaff(), not bare isAuth(), or a non-employee account with a valid
+    // token can read/write everything an unauthenticated-role check allows.
+    function isStaff() {
+      return isAuth()
+             && request.auth.token.email != null
+             && request.auth.token.email_verified == true
+             && request.auth.token.email.matches('.*@freshket[.]co$');
+    }
+
     function uid() {
       return request.auth.uid;
     }
@@ -20,83 +33,243 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return isAuth() && role() == 'super_admin';
+      return isStaff() && role() == 'super_admin';
     }
 
     function isManagerOrAbove() {
-      return isAuth() && role() in ['manager', 'super_admin'];
+      return isStaff() && (role() == 'manager' || role() == 'super_admin');
+    }
+
+    function isTeamLeadOrAbove() {
+      return isStaff() && (role() == 'team_lead' || role() == 'manager' || role() == 'super_admin');
     }
 
     function isSelf(userId) {
-      return isAuth() && uid() == userId;
-    }
-
-    // Fields that only super_admin can change
-    function isSensitiveField(field) {
-      return field in ['role', 'teamId', 'managerId'];
+      return isStaff() && uid() == userId;
     }
 
     // ── /users ─────────────────────────────────────────────────────────────────
     match /users/{userId} {
-      // All authenticated users can read profiles (needed for target group transfer UI)
-      allow read: if isAuth();
+      allow read: if isStaff();
 
-      // First-time login: user can only create their own doc, role must default to 'sale'
-      allow create: if isSelf(userId)
-                    && request.resource.data.role == 'sale'
-                    && request.resource.data.uid == userId;
+      allow create: if isSuperAdmin()
+                    || (isSelf(userId)
+                        && request.resource.data.role == 'sale'
+                        && request.resource.data.uid == userId);
 
-      // User can update their own profile except sensitive fields
-      // super_admin can update anything
+      // `role` is the privilege boundary of this whole app — ONLY super_admin may
+      // change it. A manager may reassign org structure (teamId / managerId /
+      // visibleTeamIds) but must not be able to grant a role, including their own:
+      // the previous rule allowed any manager to write any user doc unrestricted,
+      // which let a manager set their own role to 'super_admin'.
       allow update: if isSuperAdmin()
+                    || (isManagerOrAbove()
+                        && !request.resource.data.diff(resource.data)
+                              .affectedKeys()
+                              .hasAny(['role']))
                     || (isSelf(userId)
                         && !request.resource.data.diff(resource.data)
                               .affectedKeys()
-                              .hasAny(['role', 'teamId', 'managerId']));
+                              .hasAny(['role', 'teamId', 'managerId', 'visibleTeamIds']));
 
       allow delete: if isSuperAdmin();
     }
 
     // ── /courses ───────────────────────────────────────────────────────────────
+    // Simplified: any auth user can read — isPublished filtering is done client-side.
+    // Collection queries require the query to filter on any field checked in rules,
+    // which we avoid by moving that logic to the app layer.
     match /courses/{courseId} {
-      // Authenticated users see published courses; super_admin sees all
-      allow read: if isAuth()
-                  && (isSuperAdmin() || resource.data.isPublished == true);
-
-      // Only super_admin can create / edit / delete courses
+      allow read: if isStaff();
       allow write: if isSuperAdmin();
     }
 
     // ── /assessments ───────────────────────────────────────────────────────────
+    // Answer keys live in these documents (`choices[].isCorrect`, and the
+    // `dragPairs` pairing itself), so reads are super_admin only — the authoring
+    // UI. This used to be `isStaff()`, which meant every employee could pull the
+    // key for any quiz — published or draft — straight out of Firestore before
+    // answering a single question.
+    //
+    // Learners never read this collection. They take a quiz through
+    // GET /api/assessment/[id]/take, which reads it with the Admin SDK and strips
+    // the key, and submit to POST /api/assessment/submit, which grades server-side.
     match /assessments/{assessmentId} {
-      // Any authenticated user can read (needed to take assessments)
-      allow read: if isAuth();
+      allow read: if isSuperAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // ── /assessmentAttempts ────────────────────────────────────────────────────
+    // Immutable audit trail of quiz submissions, written only by the Admin SDK in
+    // POST /api/assessment/submit. Denied to clients in both directions: it stores
+    // the submitted answers next to the grade, and the person being graded must
+    // not be able to read the key indirectly or rewrite their own history.
+    // Reviewing attempts is a future admin surface and will go through a server
+    // route, not direct client reads.
+    match /assessmentAttempts/{attemptId} {
+      allow read, write: if false;
+    }
+
+    // ── /tools ─────────────────────────────────────────────────────────────────
+    // Same shape as /courses: everyone signed in can read; isPublished +
+    // department targeting is filtered client-side. Only super_admin authors.
+    match /tools/{toolId} {
+      allow read: if isStaff();
       allow write: if isSuperAdmin();
     }
 
     // ── /resources ─────────────────────────────────────────────────────────────
     match /resources/{resourceId} {
-      allow read: if isAuth()
-                  && (isSuperAdmin() || resource.data.isPublished == true);
+      allow read: if isStaff();
+      allow write: if isSuperAdmin();
+    }
+
+    // ── /knowledgeDecks ──────────────────────────────────────────────────────────
+    // Department knowledge decks (Google Slides links) shown on the Tools → Q&A
+    // tab. Same shape as /tools: everyone signed in reads; only super_admin writes.
+    match /knowledgeDecks/{deckId} {
+      allow read: if isStaff();
+      allow write: if isSuperAdmin();
+    }
+
+    // ── /assessmentScores ──────────────────────────────────────────────────────
+    // Pre/Post scores imported from CSV. Everyone signed in can read (to render
+    // their own / their team's progress); only super_admin writes (the import).
+    match /assessmentScores/{docId} {
+      allow read: if isStaff();
       allow write: if isSuperAdmin();
     }
 
     // ── /trainingRecords ───────────────────────────────────────────────────────
     match /trainingRecords/{recordId} {
-      // User reads own records; manager/super_admin reads all
-      allow read: if isAuth()
-                  && (resource.data.userId == uid() || isManagerOrAbove());
+      allow read: if isStaff();
 
-      // User can create their own record
-      allow create: if isAuth()
-                    && request.resource.data.userId == uid();
+      // Assessment results are SERVER-OWNED. A learner may report their own
+      // lesson progress (status, completedLessonIds) but must never write
+      // `score`, `passScore` or `attemptCount` — those come from
+      // POST /api/assessment/submit after the server grades the answers, via the
+      // Admin SDK which bypasses these rules.
+      //
+      // Without this, the only check was `userId == uid()`: a learner could write
+      // {status:'completed', score:100} directly, and the fabricated score was
+      // indistinguishable from a graded one in every report.
+      //
+      // NOTE still open: `status` remains client-attested, because course
+      // completion is assembled from lesson ticks only the browser observes. So a
+      // learner can still mark a course complete — but not award themselves a score.
+      allow create: if isStaff()
+                    && request.resource.data.userId == uid()
+                    && !request.resource.data.keys()
+                          .hasAny(['score', 'passScore', 'attemptCount']);
 
-      // User can update their own record (no changing userId)
-      allow update: if isAuth()
+      allow update: if isStaff()
                     && resource.data.userId == uid()
-                    && request.resource.data.userId == uid();
+                    && request.resource.data.userId == uid()
+                    && !request.resource.data.diff(resource.data)
+                          .affectedKeys()
+                          .hasAny(['score', 'passScore', 'attemptCount']);
 
-      // Super_admin can write / delete anything
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── /userStats ─────────────────────────────────────────────────────────────
+    // Per-user training aggregate (one doc per uid). Everyone signed in reads it
+    // (leaderboard / team scores); a user maintains only their own summary, and
+    // super_admin (via the Admin SDK rebuild) can write any.
+    match /userStats/{userId} {
+      allow read:  if isStaff();
+      allow write: if isSelf(userId) || isSuperAdmin();
+    }
+
+    // ── /teams ─────────────────────────────────────────────────────────────────
+    match /teams/{teamId} {
+      allow read: if isStaff();
+      allow write: if isManagerOrAbove();
+    }
+
+    // ── /shadowRecords ─────────────────────────────────────────────────────────
+    // An observation is authored BY the observer, so the writer must stamp itself
+    // as observerUid (the field useShadowRecordsByUser queries on). Previously any
+    // signed-in employee could create or edit an evaluation attributed to someone
+    // else — including rewriting their own assessment.
+    match /shadowRecords/{recordId} {
+      allow read: if isStaff();
+      allow create: if isStaff() && request.resource.data.observerUid == uid();
+      allow update: if isSuperAdmin()
+                    || (isStaff() && resource.data.observerUid == uid()
+                        && request.resource.data.observerUid == uid());
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── /shadowAcknowledgments ─────────────────────────────────────────────────
+    // A team_lead/manager's sign-off on a member's shadow visit. Doc id = the
+    // shadowRecords id it acknowledges (one ack per visit). The reviewer (not
+    // the observer — shadowRecords' update rule already reserves that doc for
+    // its author) must stamp themselves as reviewerUid, mirroring the same
+    // self-attribution guard as shadowRecords.observerUid above.
+    match /shadowAcknowledgments/{recordId} {
+      allow read: if isStaff();
+      allow create, update: if isTeamLeadOrAbove() && request.resource.data.reviewerUid == uid();
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── /roleplayAssessments ───────────────────────────────────────────────────
+    // Scored assessments — populated only by the super_admin CSV import
+    // (/api/csv/roleplay, Admin SDK, bypasses these rules). No client write path
+    // exists, so allowing one only let a learner score their own roleplay.
+    match /roleplayAssessments/{recordId} {
+      allow read: if isStaff();
+      allow create, update: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── /notifications (subcollection per user) ────────────────────────────────
+    // Creates are SERVER-ONLY, via POST /api/notifications/push (Admin SDK, which
+    // bypasses these rules). This used to be `allow create: if isStaff()`, i.e.
+    // any signed-in employee could write into any other employee's feed with
+    // arbitrary title/body/link — a ready-made internal phishing channel. The API
+    // route now derives the sender from the verified ID token, restricts `type` to
+    // the known enum, and requires `refPath` to be an internal path.
+    //
+    // Recipients keep read + update (mark read) + delete on their own feed.
+    match /notifications/{userId}/items/{itemId} {
+      allow read:           if isStaff() && (request.auth.uid == userId || isSuperAdmin());
+      allow create:         if false;
+      allow update, delete: if isStaff() && (request.auth.uid == userId || isSuperAdmin());
+    }
+
+    // ── /takeaways (learner "key take away" reflections, readable by leads) ──────
+    // Doc id = {uid}_{courseId}. The learner writes their own; anyone signed in
+    // (their lead/manager) may read.
+    // The doc id must be checked too, not just the payload: validating only
+    // `data.uid == uid()` let user A write to doc `userB_course1` (with their own
+    // uid inside) and destroy B's reflection.
+    match /takeaways/{docId} {
+      allow read:  if isStaff();
+      allow write: if isStaff()
+                   && request.resource.data.uid == uid()
+                   && docId.split('_')[0] == uid();
+    }
+
+    // ── /courseFeedback (team-lead/manager comment + score on a member) ──────────
+    // Doc id = {memberUid}_{courseId}. A lead must sign their own feedback
+    // (leadUid == self), so one lead can't silently overwrite another's review.
+    // super_admin stays unrestricted because impersonation writes as the viewed user.
+    match /courseFeedback/{docId} {
+      allow read:  if isStaff();
+      allow write: if isSuperAdmin()
+                   || (isTeamLeadOrAbove() && request.resource.data.leadUid == uid());
+    }
+
+    // ── /announcements (news feed) ──────────────────────────────────────────────
+    match /announcements/{docId} {
+      allow read:  if isStaff();
+      allow write: if isSuperAdmin();
+    }
+
+    // ── /appConfig ─────────────────────────────────────────────────────────────
+    match /appConfig/{docId} {
+      allow read: if isStaff();
       allow write: if isSuperAdmin();
     }
 

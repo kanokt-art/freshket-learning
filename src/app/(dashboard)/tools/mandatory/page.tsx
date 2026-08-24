@@ -2,21 +2,16 @@
 
 import { useState, useMemo } from 'react'
 import { Header } from '@/components/layout/Header'
+import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
+import { FreshketToolTabs } from '@/components/layout/FreshketToolTabs'
 import { useAuth } from '@/hooks/useAuth'
 import { canAccess } from '@/types/user'
+import { MandatorySlideViewer } from '@/components/features/MandatorySlideViewer'
+import { SlidePreviewArea } from '@/components/features/MandatoryPreview'
+import { MandatoryArchiveRail, MandatoryMonthHeader } from '@/components/features/MandatoryArchive'
+import { DEMO_MANDATORY_ITEMS, formatDate, currentWeekLabel, groupByMonth, groupByYear, type MandatoryItem } from '@/lib/mandatory'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-interface MandatoryItem {
-  id: string
-  title: string
-  description: string
-  slidesUrl: string
-  weekLabel: string
-  isPublished: boolean
-  publishedAt: Date
-  createdAt: Date
-}
 
 type ViewMode = 'card' | 'list'
 
@@ -27,71 +22,6 @@ interface FormState {
   weekLabel: string
   isPublished: boolean
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function toEmbedUrl(url: string): string {
-  const m = url.match(/\/presentation\/d\/([a-zA-Z0-9_-]+)/)
-  if (!m) return url
-  return `https://docs.google.com/presentation/d/${m[1]}/embed?start=false&loop=false&delayms=0&rm=minimal`
-}
-
-function formatDate(d: Date): string {
-  return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' })
-}
-
-function currentWeekLabel(): string {
-  const now = new Date()
-  const onejan = new Date(now.getFullYear(), 0, 1)
-  const week = Math.ceil(((now.getTime() - onejan.getTime()) / 86400000 + onejan.getDay() + 1) / 7)
-  const month = now.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-  return `Week ${week} / ${month}`
-}
-
-// ── Demo Data ─────────────────────────────────────────────────────────────────
-
-const DEMO_ITEMS: MandatoryItem[] = [
-  {
-    id: 'mand-draft-01',
-    title: 'Dry Aged Beef — Product Knowledge',
-    description: 'อัปเดต Dry Aged Beef Grades A5/A4 สำหรับ High-End Restaurant, Positioning, ราคา และ Talking Point สำหรับ KA (กำลัง update...)',
-    slidesUrl: 'https://docs.google.com/presentation/d/1demoIDdraft001/edit',
-    weekLabel: 'Week 26 / Jun 2026',
-    isPublished: false,
-    publishedAt: new Date('2026-06-30T09:00:00'),
-    createdAt: new Date('2026-06-25T10:00:00'),
-  },
-  {
-    id: 'mand-03',
-    title: 'Premium Fresh Seafood — Product Line ใหม่ Q3',
-    description: 'อัปเดต Seafood ไลน์ใหม่: Salmon Atlantic, Seabass Norway, Prawn L-Size ราคาและ spec ครบ พร้อม Talking Point สำหรับ KA และ Stand-Alone',
-    slidesUrl: 'https://docs.google.com/presentation/d/1demoID003/edit',
-    weekLabel: 'Week 25 / Jun 2026',
-    isPublished: true,
-    publishedAt: new Date('2026-06-23T09:00:00'),
-    createdAt: new Date('2026-06-22T18:00:00'),
-  },
-  {
-    id: 'mand-02',
-    title: 'Objection Handling — ราคา & เจ้าอื่นถูกกว่า',
-    description: "Framework 4 ขั้น รับมือ Objection ด้านราคา, Script สำเร็จรูป 6 สถานการณ์, Do's & Don'ts ที่พบบ่อยในสนาม",
-    slidesUrl: 'https://docs.google.com/presentation/d/1demoID002/edit',
-    weekLabel: 'Week 24 / Jun 2026',
-    isPublished: true,
-    publishedAt: new Date('2026-06-16T09:00:00'),
-    createdAt: new Date('2026-06-15T15:00:00'),
-  },
-  {
-    id: 'mand-01',
-    title: 'ผักออร์แกนิก Certified — Update คุณสมบัติและราคา',
-    description: 'รายการผักออร์แกนิกที่ได้ใบรับรองใหม่ 12 รายการ, Positioning กับลูกค้า Premium, ข้อดีเทียบ Makro & Tops',
-    slidesUrl: 'https://docs.google.com/presentation/d/1demoID001/edit',
-    weekLabel: 'Week 23 / Jun 2026',
-    isPublished: true,
-    publishedAt: new Date('2026-06-09T09:00:00'),
-    createdAt: new Date('2026-06-08T14:00:00'),
-  },
-]
 
 const EMPTY_FORM: FormState = {
   title: '',
@@ -107,17 +37,26 @@ export default function MandatoryPage() {
   const { user } = useAuth()
   const isAdmin = canAccess(user?.role ?? 'sale', 'super_admin')
 
-  const [items, setItems]             = useState<MandatoryItem[]>(DEMO_ITEMS)
+  const [items, setItems]             = useState<MandatoryItem[]>(DEMO_MANDATORY_ITEMS)
   const [viewMode, setViewMode]       = useState<ViewMode>('card')
   const [viewing, setViewing]         = useState<MandatoryItem | null>(null)
   const [showAdd, setShowAdd]         = useState(false)
   const [editItem, setEditItem]       = useState<MandatoryItem | null>(null)
   const [showDrafts, setShowDrafts]   = useState(false)
+  const [activeKey, setActiveKey]     = useState<string | null>(null)
 
   const visibleItems = useMemo(() => {
     if (isAdmin && showDrafts) return items
     return items.filter(i => i.isPublished)
   }, [items, isAdmin, showDrafts])
+
+  const monthGroups = useMemo(() => groupByMonth(visibleItems), [visibleItems])
+  const yearGroups = useMemo(() => groupByYear(monthGroups), [monthGroups])
+
+  function jumpTo(key: string) {
+    setActiveKey(key)
+    document.getElementById(`mandatory-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   function handleAdd(form: FormState) {
     const now = new Date()
@@ -169,6 +108,8 @@ export default function MandatoryPage() {
           ) : undefined
         }
       />
+      <AdministrationTabs />
+      <FreshketToolTabs />
 
       <div className="flex-1 overflow-auto p-6 space-y-5 animate-float-up">
 
@@ -242,42 +183,53 @@ export default function MandatoryPage() {
           </div>
         )}
 
-        {/* ── Card View ────────────────────────────────────────────────────── */}
-        {viewMode === 'card' && visibleItems.length > 0 && (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {visibleItems.map(item => (
-              <MandatoryCard
-                key={item.id}
-                item={item}
-                isAdmin={isAdmin}
-                onView={() => setViewing(item)}
-                onEdit={() => setEditItem(item)}
-                onDelete={() => handleDelete(item.id)}
-                onTogglePublish={() => handleTogglePublish(item.id)}
-              />
-            ))}
-          </div>
-        )}
+        {/* ── Archive: rail + month-grouped sections ───────────────────────── */}
+        {visibleItems.length > 0 && (
+          <div className="flex gap-6 items-start">
+            <MandatoryArchiveRail years={yearGroups} activeKey={activeKey} onJump={jumpTo} />
 
-        {/* ── List View ────────────────────────────────────────────────────── */}
-        {viewMode === 'list' && visibleItems.length > 0 && (
-          <div className="space-y-2">
-            {visibleItems.map(item => (
-              <MandatoryRow
-                key={item.id}
-                item={item}
-                isAdmin={isAdmin}
-                onView={() => setViewing(item)}
-                onEdit={() => setEditItem(item)}
-                onDelete={() => handleDelete(item.id)}
-                onTogglePublish={() => handleTogglePublish(item.id)}
-              />
-            ))}
+            <div className="flex-1 min-w-0 space-y-6">
+              {monthGroups.map(group => (
+                <section key={group.key} id={`mandatory-${group.key}`} className="scroll-mt-4">
+                  <MandatoryMonthHeader group={group} />
+
+                  {viewMode === 'card' ? (
+                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 mt-3">
+                      {group.items.map(item => (
+                        <MandatoryCard
+                          key={item.id}
+                          item={item}
+                          isAdmin={isAdmin}
+                          onView={() => setViewing(item)}
+                          onEdit={() => setEditItem(item)}
+                          onDelete={() => handleDelete(item.id)}
+                          onTogglePublish={() => handleTogglePublish(item.id)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-2 mt-3">
+                      {group.items.map(item => (
+                        <MandatoryRow
+                          key={item.id}
+                          item={item}
+                          isAdmin={isAdmin}
+                          onView={() => setViewing(item)}
+                          onEdit={() => setEditItem(item)}
+                          onDelete={() => handleDelete(item.id)}
+                          onTogglePublish={() => handleTogglePublish(item.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              ))}
+            </div>
           </div>
         )}
       </div>
 
-      {viewing && <SlideViewerPanel item={viewing} onClose={() => setViewing(null)} />}
+      {viewing && <MandatorySlideViewer item={viewing} onClose={() => setViewing(null)} />}
       {showAdd && <MandatoryFormModal onClose={() => setShowAdd(false)} onSave={handleAdd} formTitle="เพิ่ม Mandatory Slide ใหม่" />}
       {editItem && <MandatoryFormModal initial={editItem} onClose={() => setEditItem(null)} onSave={handleEdit} formTitle="แก้ไข Mandatory Slide" />}
     </>
@@ -285,35 +237,6 @@ export default function MandatoryPage() {
 }
 
 // ── SlidePreviewArea ──────────────────────────────────────────────────────────
-
-function SlidePreviewArea({ isPublished, weekLabel }: { isPublished: boolean; weekLabel: string }) {
-  return (
-    <div
-      className="relative w-full rounded-xl overflow-hidden"
-      style={{ paddingTop: '56.25%', background: 'linear-gradient(135deg, #d6fdf0 0%, #a7f3d0 60%, #d6fdf0 100%)' }}
-    >
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="size-14 rounded-2xl bg-white/80 flex items-center justify-center shadow-sm">
-          <svg className="size-7 text-freshket-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6" />
-          </svg>
-        </div>
-      </div>
-      <div className="absolute top-3 left-3">
-        <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-white/90 text-freshket-700 shadow-sm">
-          {weekLabel}
-        </span>
-      </div>
-      {!isPublished && (
-        <div className="absolute top-3 right-3">
-          <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
-            Draft
-          </span>
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ── MandatoryCard ─────────────────────────────────────────────────────────────
 
@@ -477,80 +400,6 @@ function MandatoryRow({
         </button>
       </div>
     </div>
-  )
-}
-
-// ── SlideViewerPanel ──────────────────────────────────────────────────────────
-
-function SlideViewerPanel({ item, onClose }: { item: MandatoryItem; onClose: () => void }) {
-  const embedUrl = toEmbedUrl(item.slidesUrl)
-  return (
-    <>
-      <style>{`@keyframes panelSlideIn { from { transform: translateX(100%); opacity: 0 } to { transform: translateX(0); opacity: 1 } }`}</style>
-      <div className="fixed inset-0 z-40 flex">
-        <div
-          className="flex-1 bg-slate-900/60 backdrop-blur-sm"
-          onClick={onClose}
-        />
-        <aside
-          className="w-full sm:max-w-4xl bg-white shadow-2xl flex flex-col"
-          style={{ animation: 'panelSlideIn 0.22s cubic-bezier(0.16,1,0.3,1)' }}
-        >
-          {/* Header */}
-          <div className="shrink-0 flex items-center gap-4 px-6 py-4 border-b border-gray-100">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-freshket-100 text-freshket-700">
-                  {item.weekLabel}
-                </span>
-                {!item.isPublished && (
-                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600">Draft</span>
-                )}
-              </div>
-              <h2 className="text-base font-bold text-gray-900 truncate">{item.title}</h2>
-            </div>
-            <a
-              href={item.slidesUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 text-xs font-bold transition-colors shrink-0"
-            >
-              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-              </svg>
-              เปิดใน Google Slides
-            </a>
-            <button
-              type="button"
-              onClick={onClose}
-              className="size-8 rounded-xl border border-gray-200 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors shrink-0"
-            >
-              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Description */}
-          {item.description && (
-            <div className="px-6 py-3 bg-gray-50 border-b border-gray-100">
-              <p className="text-sm text-gray-600 leading-relaxed">{item.description}</p>
-            </div>
-          )}
-
-          {/* Iframe */}
-          <div className="flex-1 bg-gray-100 min-h-0">
-            <iframe
-              src={embedUrl}
-              className="w-full h-full border-0"
-              allowFullScreen
-              allow="autoplay"
-              title={item.title}
-            />
-          </div>
-        </aside>
-      </div>
-    </>
   )
 }
 

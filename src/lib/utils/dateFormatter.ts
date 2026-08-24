@@ -31,31 +31,3 @@ export function formatDateEN(date: DateLike): string {
   return `${day} ${mon} ${year}`
 }
 
-export function formatDateTime(date: DateLike): string {
-  const d = toDate(date)
-  if (!d) return '-'
-  return d.toLocaleString('th-TH', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-export function formatRelative(date: DateLike): string {
-  const d = toDate(date)
-  if (!d) return '-'
-  const diffMs = Date.now() - d.getTime()
-  const diffDays = Math.floor(diffMs / 86_400_000)
-
-  if (diffDays === 0) return 'วันนี้'
-  if (diffDays === 1) return 'เมื่อวาน'
-  if (diffDays < 7) return `${diffDays} วันที่แล้ว`
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)} สัปดาห์ที่แล้ว`
-  return formatDate(d)
-}
-
-export function toFirestoreTimestamp(date: Date): Timestamp {
-  return Timestamp.fromDate(date)
-}

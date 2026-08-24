@@ -1,11 +1,14 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc, setDoc } from 'firebase/firestore'
 import { getClientFirestore } from '@/lib/firebase/client'
 import { getDemoMode } from '@/lib/demo/demoMode'
+import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers } from '@/hooks/useFirestore'
-import { MODULE_REGISTRY, ALL_MODULE_IDS, DEFAULT_MODULES, type ModuleId, type ModuleAccessConfig } from '@/lib/modules'
+import { useModuleConfig } from '@/hooks/useModuleAccess'
+import { MODULE_REGISTRY, ALL_MODULE_IDS, DEFAULT_MODULES, type ModuleId } from '@/lib/modules'
+import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -16,7 +19,7 @@ interface DeptConfig {
 // ── Demo mock data ────────────────────────────────────────────────────────────
 
 const DEMO_CONFIG: DeptConfig = {
-  default: ['lms', 'points'],
+  default: ['lms', 'shadow'],
   Sale: ALL_MODULE_IDS,
   Logistic: ['lms'],
 }
@@ -24,13 +27,31 @@ const DEMO_CONFIG: DeptConfig = {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ModuleSettingsPage() {
-  const { data: allUsers } = useAllUsers()
+  const { user } = useAuth()
   const isDemo = getDemoMode()
+  // This page reads the whole employee roster (to derive the department list) and
+  // the org-wide module-access map, so it must be gated like every other /admin
+  // page. It previously had no role check at all: any signed-in employee who
+  // typed the URL got the RBAC editor. Writes were still refused by
+  // firestore.rules, but the roster and config were fully readable.
+  const isSuperAdmin = user?.role === 'super_admin'
+  const { data: allUsers } = useAllUsers(isSuperAdmin)
+  // Shared warm config from the SAME store useModuleAccess uses (null while the
+  // first snapshot is in flight). Seeding the editable copy from here means
+  // revisiting this page is instant — no per-mount getDoc round-trip / loading
+  // gate on every navigation into Settings.
+  const liveConfig = useModuleConfig()
 
   const [config, setConfig] = useState<DeptConfig>({})
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [loadError, setLoadError] = useState(false)
+  // Guard against saving before the initial fetch resolves — otherwise the empty
+  // starting config would overwrite the real one saved by another admin.
+  const [loaded, setLoaded] = useState(false)
+  // Unsaved-changes flag — drives the floating Save button that appears the
+  // moment an admin toggles a module.
+  const [dirty, setDirty] = useState(false)
 
   // Derive unique departments from users
   const departments = useMemo(() => {
@@ -39,23 +60,22 @@ export default function ModuleSettingsPage() {
     return Array.from(depts).sort()
   }, [allUsers])
 
-  // Load config from Firestore (or demo mock)
+  // Seed the editable copy ONCE from the shared warm config (or demo mock).
+  // Seed only once (guarded by `loaded`) so a later listener re-fire never
+  // clobbers the admin's in-progress edits. `liveConfig` is null until the first
+  // snapshot resolves, {} when the doc is absent — both handled below.
   useEffect(() => {
+    if (loaded) return
     if (isDemo) {
       setConfig(DEMO_CONFIG)
+      setLoaded(true)
       return
     }
-    const db = getClientFirestore()
-    getDoc(doc(db, 'appConfig', 'moduleAccess'))
-      .then(snap => {
-        if (snap.exists()) {
-          setConfig((snap.data() as ModuleAccessConfig).departments ?? {})
-        } else {
-          setConfig({})
-        }
-      })
-      .catch(() => setLoadError(true))
-  }, [isDemo])
+    if (liveConfig !== null) {
+      setConfig(liveConfig as DeptConfig)
+      setLoaded(true)
+    }
+  }, [isDemo, liveConfig, loaded])
 
   function getModulesForDept(dept: string): ModuleId[] {
     return config[dept] ?? config['default'] ?? DEFAULT_MODULES
@@ -70,20 +90,27 @@ export default function ModuleSettingsPage() {
       return { ...prev, [dept]: next }
     })
     setSaved(false)
+    setDirty(true)
   }
 
   function setAllModules(dept: string, enabled: boolean) {
     setConfig(prev => ({ ...prev, [dept]: enabled ? [...ALL_MODULE_IDS] : [] }))
     setSaved(false)
+    setDirty(true)
   }
 
   async function handleSave() {
-    if (isDemo) { setSaved(true); return }
+    if (isDemo) { setSaved(true); setDirty(false); return }
+    if (!loaded) return
     setSaving(true)
+    setLoadError(false)
     try {
       const db = getClientFirestore()
-      await setDoc(doc(db, 'appConfig', 'moduleAccess'), { departments: config })
+      // merge:true so we only touch `departments` and never clobber other fields
+      // that may exist on the doc.
+      await setDoc(doc(db, 'appConfig', 'moduleAccess'), { departments: config }, { merge: true })
       setSaved(true)
+      setDirty(false)
     } catch {
       setLoadError(true)
     } finally {
@@ -92,6 +119,16 @@ export default function ModuleSettingsPage() {
   }
 
   const allDepts = departments.length > 0 ? departments : Object.keys(config).filter(k => k !== 'default')
+
+  // Placed after every hook so the hook order stays stable across renders
+  // (the same shape the sibling /admin/announcements page uses).
+  if (user && !isSuperAdmin) {
+    return (
+      <div className="flex items-center justify-center h-full bg-slate-50">
+        <p className="text-sm text-gray-400">ไม่มีสิทธิ์เข้าถึงหน้านี้</p>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
@@ -102,7 +139,7 @@ export default function ModuleSettingsPage() {
           <p className="text-xs text-gray-400">ตั้งค่าว่าแผนกไหนเข้าถึง module ไหนได้บ้าง</p>
         </div>
         <div className="flex items-center gap-3">
-          {saved && (
+          {saved && !dirty && (
             <span className="flex items-center gap-1.5 text-xs text-freshket-600 font-bold">
               <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -110,27 +147,38 @@ export default function ModuleSettingsPage() {
               บันทึกแล้ว
             </span>
           )}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {saving ? (
-              <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-              </svg>
-            ) : (
-              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
-              </svg>
-            )}
-            บันทึก
-          </button>
         </div>
       </header>
+      <AdministrationTabs />
 
       <div className="flex-1 overflow-auto">
-        <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
+        {/* Floating Save — appears at top-left the moment there are unsaved
+            changes, and follows the scroll (sticky) so it's always reachable. */}
+        {dirty && (
+          <div className="sticky top-0 z-30 h-0 pointer-events-none">
+            <button
+              onClick={handleSave}
+              disabled={saving || !loaded}
+              title={!loaded ? 'กำลังโหลดการตั้งค่า...' : undefined}
+              className="pointer-events-auto absolute right-6 top-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold shadow-lg shadow-freshket-500/25 transition-all animate-pop-in disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {saving ? (
+                <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+              ) : (
+                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 21v-8H7v8" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 3v5h8" />
+                </svg>
+              )}
+              {saving ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}
+            </button>
+          </div>
+        )}
+
+        <div className="w-full px-6 py-6 space-y-6">
 
           {/* Error banner */}
           {loadError && (
@@ -210,25 +258,28 @@ export default function ModuleSettingsPage() {
               <p className="text-sm text-gray-400">ยังไม่มีข้อมูลแผนก — กรอกข้อมูล department ให้ users ก่อน</p>
             </div>
           ) : (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            // No overflow-hidden/overflow-x-auto on this card: either would become
+            // the sticky thead's scroll ancestor and stop it from pinning to the
+            // page. Horizontal overflow falls through to the page scroll area.
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
               <div className="px-6 py-4 border-b border-gray-50">
                 <h3 className="text-sm font-bold text-gray-900">ตั้งค่าต่อแผนก</h3>
                 <p className="text-xs text-gray-400 mt-0.5">แผนกที่มีการตั้งค่าจะ override ค่า default ด้านบน</p>
               </div>
 
-              {/* Table header */}
-              <div className="overflow-x-auto">
+              {/* Table */}
+              <div>
                 <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-50">
-                      <th className="text-left text-xs font-bold text-gray-500 px-6 py-3 w-48">แผนก</th>
+                  <thead className="sticky top-0 z-20">
+                    <tr>
+                      <th className="text-left text-xs font-bold text-gray-500 px-6 py-3 w-48 bg-white border-b border-gray-100">แผนก</th>
                       {MODULE_REGISTRY.map(m => (
-                        <th key={m.id} className="text-center text-xs font-bold text-gray-500 px-4 py-3 min-w-[100px]">
+                        <th key={m.id} className="text-center text-xs font-bold text-gray-500 px-4 py-3 min-w-[100px] bg-white border-b border-gray-100">
                           <div>{m.label}</div>
                           <div className="text-gray-400 font-normal mt-0.5">{m.description.split(' ').slice(0, 3).join(' ')}</div>
                         </th>
                       ))}
-                      <th className="text-center text-xs font-bold text-gray-400 px-4 py-3 w-24">ทั้งหมด</th>
+                      <th className="text-center text-xs font-bold text-gray-400 px-4 py-3 w-24 bg-white border-b border-gray-100">ทั้งหมด</th>
                     </tr>
                   </thead>
                   <tbody>

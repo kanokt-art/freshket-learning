@@ -1,26 +1,39 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useRouter, usePathname } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
+import { canAccess } from '@/types/user'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { BottomBar } from '@/components/layout/BottomBar'
 import { DemoRoleSwitcher } from '@/components/features/DemoRoleSwitcher'
 import { NavProgress } from '@/components/common/NavProgress'
 
-const PREFETCH_ROUTES = [
-  '/sale', '/courses', '/courses/roleplay', '/shadow',
-  '/tools', '/tools/mandatory', '/tools/new-joiner',
-  '/users', '/assessment', '/profile', '/notifications',
-]
+// Routes worth warming, split by who can actually reach them. Prefetching all 20
+// unconditionally pulled ~509 kB gzipped on layout mount — competing for bandwidth
+// with the Firebase auth handshake and the first Firestore reads, so the FIRST
+// screen after login got slower in order to speed up the second. It also warmed
+// /admin* and /users for learners who can never open them.
+//
+// <Link> still prefetches on hover/viewport, so a short list covers most of the win.
+const PREFETCH_COMMON = ['/sale', '/courses', '/tools']
+const PREFETCH_LEAD = ['/manager', '/users']
+const PREFETCH_ADMIN = ['/admin/settings']
 
+// NOTE: this deliberately does NOT key on pathname.
+//
+// It used to be `<div key={pathname} … animate-float-up>`, which forced React to
+// throw away and rebuild the ENTIRE page subtree on every navigation: every
+// component body re-ran from scratch (and the biggest pages here are 2,000-3,900
+// lines), all component state was discarded, and the entrance animation replayed —
+// so even when the data was already warm in the listener cache, switching tabs
+// still cost a full mount plus an animation before anything looked ready.
+//
+// The App Router already swaps this subtree when the route changes, so the key
+// added the teardown without buying anything. The animation is intentionally gone
+// with it: it was padding perceived latency on every single tab switch.
 function AnimatedContent({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
-  return (
-    <div key={pathname} className="flex-1 flex flex-col overflow-hidden animate-float-up">
-      {children}
-    </div>
-  )
+  return <div className="flex-1 flex flex-col overflow-hidden">{children}</div>
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -33,10 +46,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [user, loading, router])
 
-  // Eagerly prefetch all main routes so navigation feels instant
+  // Warm the likely-next routes, but only ones this user can reach, and only once
+  // the browser is idle — so prefetch never competes with first paint or the
+  // initial Firestore reads.
   useEffect(() => {
-    PREFETCH_ROUTES.forEach((r) => router.prefetch(r))
-  }, [router])
+    if (!user) return
+    const routes = [
+      ...PREFETCH_COMMON,
+      ...(canAccess(user.role, 'team_lead') ? PREFETCH_LEAD : []),
+      ...(user.role === 'super_admin' ? PREFETCH_ADMIN : []),
+    ]
+    const run = () => routes.forEach((r) => router.prefetch(r))
+    const ric = (window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+    }).requestIdleCallback
+    if (ric) {
+      const handle = ric(run, { timeout: 3000 })
+      return () => (window as unknown as { cancelIdleCallback?: (h: number) => void })
+        .cancelIdleCallback?.(handle)
+    }
+    // Safari has no requestIdleCallback — a short timeout is close enough.
+    const t = setTimeout(run, 1500)
+    return () => clearTimeout(t)
+  }, [router, user])
 
   if (loading) {
     return (

@@ -1,20 +1,24 @@
 'use client'
 
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
+import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 import { useAuth } from '@/hooks/useAuth'
-import { useAllUsers, useMyTrainingRecords, useTeams, useDepartments, saveLocalImportedUsers, saveLocalTeam, deleteLocalTeam, getLocalTeams, applyLocalUserPatch, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
-import { canAccess, ROLE_LABELS, type UserRole, type UserProfile, type Department } from '@/types/user'
+import { useAllUsers, useMyTrainingRecords, useTeams, useDepartments, saveLocalImportedUsers, saveLocalTeam, deleteLocalTeam, deleteLocalTeams, getLocalTeams, applyLocalUserPatch, migrateLocalUserPatches, getLocalUserPatches, clearDeletedTeamIds, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
+import { useModuleAccess } from '@/hooks/useModuleAccess'
+import { canAccess, ROLE_LABELS, getTeamManagerIds, type UserRole, type UserProfile, type Department, type Team, type EmploymentStatus } from '@/types/user'
 import type { ShadowRecord } from '@/types/shadow'
 import type { RoleplayAssessment } from '@/types/roleplay'
 import { STATUS_LABELS, STATUS_COLORS } from '@/types/tracking'
 import { formatDate, formatDateEN } from '@/lib/utils/dateFormatter'
-import { OrgBoard } from '@/components/features/OrgBoard'
-import { OrgTable } from '@/components/features/OrgTable'
+import { authedFetch } from '@/lib/api/authedFetch'
+import { ImportAssessmentModal } from '@/components/features/ImportAssessmentModal'
+import { OrgBoard, isRosterRole, PHASE1_DEPARTMENTS } from '@/components/features/OrgBoard'
 import { demoStore } from '@/lib/demo/demoStore'
 import { getDemoMode } from '@/lib/demo/demoMode'
 const DEMO_MODE = getDemoMode()
+const USERS_PAGE_SIZE = 50
 
 const ROLE_BADGE: Record<UserRole, string> = {
   super_admin: 'bg-orange-100 text-orange-700',
@@ -97,27 +101,67 @@ export default function UsersPage() {
   const [deptFilter, setDeptFilter] = useState('')
   const [sortField, setSortField] = useState<'name' | 'empId' | 'startDate'>('startDate')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [page, setPage] = useState(1)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [view, setView] = useState<'list' | 'teams'>('list')
-  const [teamSubView, setTeamSubView] = useState<'table' | 'board' | 'manage'>('manage')
+  const [view, setView] = useState<'list' | 'teams'>('teams')
   const [showAddEmployee, setShowAddEmployee] = useState(false)
+  const [showImportAssessment, setShowImportAssessment] = useState(false)
+  const [assessmentResult, setAssessmentResult] = useState<{ imported: number; unmatchedEmails: string[] } | null>(null)
   const [showCreateTeam, setShowCreateTeam] = useState(false)
-  const [importResult, setImportResult] = useState<{ added: number; skipped: number } | null>(null)
+  const [showDeleteOrphans, setShowDeleteOrphans] = useState(false)
+  const [fixingDepts, setFixingDepts] = useState(false)
+  const [fixedDeptsCount, setFixedDeptsCount] = useState<number | null>(null)
+  const [rebuildingStats, setRebuildingStats] = useState(false)
+  const [dedupRunning, setDedupRunning] = useState(false)
+  const [dedupResult, setDedupResult] = useState<{ mergedGroups: number; deletedDocs: number; uidMap?: Record<string, string> } | null>(null)
+  const [savingAssignments, setSavingAssignments] = useState(false)
+  const [savedAssignments, setSavedAssignments] = useState(false)
+  const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number; hidden: number } | null>(null)
+  const [undoDelete, setUndoDelete] = useState<{ team: Team; memberIds: string[] } | null>(null)
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshed, setRefreshed] = useState(false)
+  const [showRestartConfirm, setShowRestartConfirm] = useState(false)
+  const [restartResult, setRestartResult] = useState<{ unassignedCount: number; deletedTeams: number; totalMembers: number } | null>(null)
+  const [teamSearch, setTeamSearch] = useState('')
+  const [teamDeptFilter, setTeamDeptFilter] = useState<string[]>([])
+  const [showTeamDeptFilter, setShowTeamDeptFilter] = useState(false)
 
   const deptOptions = useMemo(() => {
-    const set = new Set(users.map(u => u.department).filter(Boolean) as string[])
+    // Phase 1 rollout — only these departments are onboarded so far; keep the
+    // filter dropdown decluttered to match. Remove PHASE1_DEPARTMENTS once
+    // other departments go live (see the same allowlist in OrgBoard.tsx).
+    const set = new Set(
+      users.map(u => u.department).filter((d): d is string => !!d && PHASE1_DEPARTMENTS.has(d)),
+    )
     return Array.from(set).sort()
   }, [users])
 
+  // Org board (team structure) shows only active employees — a resigned/exited
+  // person shouldn't keep sitting in a team card or "Unassigned" indefinitely.
+  // This is display-only: their teamId in Firestore is untouched, so they
+  // reappear correctly placed if their status is ever set back to Active.
+  // `users` itself stays unfiltered — CSV import matching (by employeeId/email)
+  // needs to see everyone, active or not, to update instead of duplicate them.
+  const activeUsers = useMemo(
+    () => users.filter(u => !u.employmentStatus || u.employmentStatus === 'Active'),
+    [users],
+  )
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
+    // Resigned / No-show employees are hidden from this list only — their
+    // training history, team membership, and org-board presence are untouched;
+    // this is purely a roster-view filter, not a data deletion.
+    const active = users.filter(u => !u.employmentStatus || u.employmentStatus === 'Active')
     let list = q
-      ? users.filter((u) =>
+      ? active.filter((u) =>
           u.displayName.toLowerCase().includes(q) ||
+          (u.displayNameEN?.toLowerCase() ?? '').includes(q) ||
           (u.nickname?.toLowerCase() ?? '').includes(q) ||
           (u.employeeId?.toLowerCase() ?? '').includes(q)
         )
-      : [...users]
+      : [...active]
     if (deptFilter) list = list.filter(u => u.department === deptFilter)
     return list.sort((a, b) => {
       let cmp = 0
@@ -134,6 +178,20 @@ export default function UsersPage() {
     })
   }, [users, search, deptFilter, sortField, sortDir])
 
+  // List view renders one page at a time — the active roster can run well into
+  // the thousands (a recent CSV import alone was ~2600 rows), and rendering
+  // every row as a live DOM node made the list view sluggish to scroll/filter.
+  const totalPages = Math.max(1, Math.ceil(filtered.length / USERS_PAGE_SIZE))
+  const pagedUsers = useMemo(
+    () => filtered.slice((page - 1) * USERS_PAGE_SIZE, page * USERS_PAGE_SIZE),
+    [filtered, page],
+  )
+  // Any change to what's being filtered/sorted invalidates the current page
+  // number (e.g. page 5 of an unfiltered list may not exist once a search
+  // narrows the result to one page).
+  useEffect(() => { setPage(1) }, [search, deptFilter, sortField, sortDir])
+  useEffect(() => { if (page > totalPages) setPage(totalPages) }, [page, totalPages])
+
   function handleSort(field: typeof sortField) {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortField(field); setSortDir('asc') }
@@ -149,43 +207,277 @@ export default function UsersPage() {
   const canManageTeams = !!user && canAccess(user.role, 'manager')
 
   function handleMoveUser(userId: string, teamId: string | undefined) {
-    if (DEMO_MODE) demoStore.moveUserToTeam(userId, teamId)
-    else applyLocalUserPatch(userId, { teamId })
+    if (DEMO_MODE) { demoStore.moveUserToTeam(userId, teamId); return }
+    applyLocalUserPatch(userId, { teamId })
+    // Persist to Firestore for EVERY user (not just csv-) via the super_admin
+    // Admin-SDK route — otherwise real Google-login users' team stays only in this
+    // browser's localStorage and vanishes on another device (the 0-members bug).
+    authedFetch('/api/users/save-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignments: [{ uid: userId, teamId: teamId ?? null }] }),
+    }).then(async res => {
+      if (!res.ok) { alert('บันทึกการย้ายพนักงานไม่สำเร็จ (server ปฏิเสธ) — การเปลี่ยนแปลงอาจไม่ถูกบันทึกถาวร'); return }
+      const json = await res.json()
+      if (json.skipped?.length > 0) {
+        alert('บันทึกไม่สำเร็จ: ไม่พบข้อมูลพนักงานคนนี้ใน Firestore แล้ว (อาจถูกรวม/ลบไปก่อนหน้านี้) — กรุณารีเฟรชหน้าเว็บ')
+      }
+    }).catch(err => {
+      console.error(err)
+      alert('บันทึกการย้ายพนักงานไม่สำเร็จ (เชื่อมต่อ server ไม่ได้) — การเปลี่ยนแปลงอาจไม่ถูกบันทึกถาวร')
+    })
   }
   function handleRenameTeam(teamId: string, newName: string) {
     if (DEMO_MODE) demoStore.updateTeam(teamId, { name: newName })
     else { const t = getLocalTeams().find(x => x.id === teamId); if (t) saveLocalTeam({ ...t, name: newName }) }
   }
   function handleDeleteTeam(teamId: string) {
-    if (DEMO_MODE) demoStore.deleteTeam(teamId)
-    else deleteLocalTeam(teamId)
+    if (DEMO_MODE) {
+      demoStore.deleteTeam(teamId)
+    } else {
+      const teamToDelete = teams.find(t => t.id === teamId)
+      const affected = users.filter(u => u.teamId === teamId)
+      // Snapshot for undo
+      if (teamToDelete) {
+        if (undoTimer.current) clearTimeout(undoTimer.current)
+        setUndoDelete({ team: teamToDelete, memberIds: affected.map(u => u.uid) })
+        undoTimer.current = setTimeout(() => setUndoDelete(null), 6000)
+      }
+      affected.forEach(u => handleMoveUser(u.uid, undefined))
+      deleteLocalTeam(teamId)
+    }
+  }
+  function handleUndoDeleteTeam() {
+    if (!undoDelete) return
+    if (undoTimer.current) clearTimeout(undoTimer.current)
+    saveLocalTeam(undoDelete.team)
+    undoDelete.memberIds.forEach(uid => handleMoveUser(uid, undoDelete.team.id))
+    setUndoDelete(null)
   }
   function handleAddTeam(deptId: string, name: string) {
     const team = { id: `team-${Date.now()}`, name, departmentId: deptId }
     if (DEMO_MODE) demoStore.addTeam(team)
     else saveLocalTeam(team)
   }
-  function handleSetTeamLead(teamId: string, uid: string | undefined) {
-    if (DEMO_MODE) demoStore.updateTeam(teamId, { teamLeadId: uid })
+  function handleSetTeamLeads(teamId: string, uids: string[]) {
+    if (DEMO_MODE) {
+      demoStore.updateTeam(teamId, { teamLeadIds: uids, teamLeadId: undefined })
+    } else {
+      const team = teams.find(t => t.id === teamId)
+      if (team) saveLocalTeam({ ...team, teamLeadIds: uids, teamLeadId: undefined })
+    }
+  }
+  function handleSetManagers(teamId: string, uids: string[]) {
+    const prevTeam = teams.find(t => t.id === teamId)
+    const prevIds = prevTeam ? getTeamManagerIds(prevTeam) : []
+    const added = uids.filter(id => !prevIds.includes(id))
+    if (DEMO_MODE) {
+      demoStore.updateTeam(teamId, { managerIds: uids, managerId: undefined })
+    } else {
+      const team = teams.find(t => t.id === teamId)
+      if (team) saveLocalTeam({ ...team, managerIds: uids, managerId: undefined })
+    }
+    // Newly added managers gain visibility into this team; removed managers keep
+    // whatever visibility they already had (matches the prior single-manager
+    // behavior, which never revoked visibility on removal either).
+    added.forEach(uid => {
+      const mgr = users.find(u => u.uid === uid)
+      if (mgr) {
+        const current = mgr.visibleTeamIds ?? []
+        if (!current.includes(teamId)) handleUpdateVisibility(uid, [...current, teamId])
+      }
+    })
   }
   function handleUpdateVisibility(uid: string, visibleTeamIds: string[] | undefined) {
-    if (DEMO_MODE) demoStore.updateUser(uid, { visibleTeamIds })
-    else applyLocalUserPatch(uid, { visibleTeamIds })
+    if (DEMO_MODE) { demoStore.updateUser(uid, { visibleTeamIds }); return }
+    applyLocalUserPatch(uid, { visibleTeamIds })
+    // Persist a manager's team visibility to Firestore for EVERY user, so it
+    // survives across browsers/devices and an impersonated manager resolves their
+    // members from real data — not just this browser's localStorage patch.
+    authedFetch('/api/users/save-assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignments: [{ uid, visibleTeamIds: visibleTeamIds ?? null }] }),
+    }).then(async res => {
+      if (!res.ok) { alert('บันทึกทีมที่ดูแลไม่สำเร็จ (server ปฏิเสธ) — การเปลี่ยนแปลงอาจไม่ถูกบันทึกถาวร'); return }
+      const json = await res.json()
+      if (json.skipped?.length > 0) {
+        alert('บันทึกไม่สำเร็จ: ไม่พบข้อมูลผู้ใช้นี้ใน Firestore แล้ว — กรุณารีเฟรชหน้าเว็บ')
+      }
+    }).catch(console.error)
   }
   function handleChangeRole(userId: string, newRole: UserRole) {
     if (DEMO_MODE) demoStore.updateUser(userId, { role: newRole })
     else applyLocalUserPatch(userId, { role: newRole })
   }
 
+  function handleRefreshOrgBoard() {
+    setRefreshing(true)
+    setRefreshed(false)
+    // Clear optimistic-deleted team IDs so Firestore snapshot takes full effect
+    clearDeletedTeamIds()
+    // Short delay to let state propagate, then show "done" feedback
+    setTimeout(() => {
+      setRefreshing(false)
+      setRefreshed(true)
+      setTimeout(() => setRefreshed(false), 2500)
+    }, 400)
+  }
+
   function handleCreateTeam(name: string, deptId?: string) {
-    const team = { id: `team-${Date.now()}`, name, departmentId: deptId }
+    const teamId = `team-${Date.now()}`
+    const team = { id: teamId, name, departmentId: deptId }
     if (DEMO_MODE) demoStore.addTeam(team)
     else saveLocalTeam(team)
+    if (user && user.role === 'super_admin') {
+      const current = user.visibleTeamIds ?? []
+      if (!current.includes(teamId)) handleUpdateVisibility(user.uid, [...current, teamId])
+    }
+  }
+
+  async function handleFixOrphanTeamDepts() {
+    const makeDeptId = (name: string) => `dept-${name.toLowerCase().replace(/[^a-z0-9ก-๙]/g, '-')}`
+    const deptIds = new Set(departments.map(d => d.id))
+    const orphanTeams = teams.filter(t => !t.departmentId || !deptIds.has(t.departmentId))
+    let fixed = 0
+    for (const team of orphanTeams) {
+      const members = users.filter(u => u.teamId === team.id && !!u.department)
+      if (members.length === 0) continue
+      const deptCount: Record<string, number> = {}
+      for (const m of members) {
+        const d = m.department!.trim()
+        deptCount[d] = (deptCount[d] ?? 0) + 1
+      }
+      const topDept = Object.entries(deptCount).sort(([, a], [, b]) => b - a)[0]?.[0]
+      if (!topDept) continue
+      const newDeptId = makeDeptId(topDept)
+      if (team.departmentId === newDeptId) continue
+      if (DEMO_MODE) demoStore.updateTeam(team.id, { departmentId: newDeptId })
+      else saveLocalTeam({ ...team, departmentId: newDeptId })
+      fixed++
+    }
+    setFixedDeptsCount(fixed)
+    setFixingDepts(false)
+  }
+
+  function handleDeleteOrphanTeams() {
+    const deptIds = new Set(departments.map(d => d.id))
+    const orphanIds = teams.filter(t => !t.departmentId || !deptIds.has(t.departmentId)).map(t => t.id)
+    if (orphanIds.length === 0) return
+    if (DEMO_MODE) {
+      for (const id of orphanIds) demoStore.deleteTeam(id)
+    } else {
+      deleteLocalTeams(orphanIds)
+    }
+    setShowDeleteOrphans(false)
+  }
+
+  function handleRestartTeamManagement() {
+    const roleUsers = users.filter(u => isRosterRole(u.role))
+    const assigned = roleUsers.filter(u => u.teamId)
+    assigned.forEach(u => handleMoveUser(u.uid, undefined))
+
+    const teamIds = teams.map(t => t.id)
+    if (DEMO_MODE) {
+      for (const id of teamIds) demoStore.deleteTeam(id)
+    } else if (teamIds.length > 0) {
+      deleteLocalTeams(teamIds)
+    }
+
+    setRestartResult({ unassignedCount: assigned.length, deletedTeams: teamIds.length, totalMembers: roleUsers.length })
+    setShowRestartConfirm(false)
+  }
+
+  async function handleRebuildStats() {
+    if (rebuildingStats) return
+    setRebuildingStats(true)
+    try {
+      const res = await authedFetch('/api/stats/rebuild', { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) { alert('อัปเดตสถิติไม่สำเร็จ: ' + (json.error ?? 'Unknown error')); return }
+      alert(`อัปเดตสถิติสำเร็จ — ${json.users} คน จาก ${json.records} รายการ`)
+    } catch (e) {
+      alert('อัปเดตสถิติไม่สำเร็จ: ' + String(e))
+    } finally {
+      setRebuildingStats(false)
+    }
+  }
+
+  async function handleDedup() {
+    setDedupRunning(true)
+    setDedupResult(null)
+    try {
+      const res = await authedFetch('/api/users/dedup', { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) { alert('Dedup failed: ' + (json.error ?? 'Unknown error')); return }
+
+      // Migrate localStorage patches from old UIDs to canonical UIDs
+      if (json.uidMap && Object.keys(json.uidMap).length > 0) {
+        migrateLocalUserPatches(json.uidMap)
+        // Persist migrated assignments to Firestore via Admin SDK
+        const allPatches = getLocalUserPatches()
+        const assignments = Object.entries(allPatches)
+          .filter(([uid]) => uid.startsWith('csv-'))
+          .map(([uid, p]) => ({ uid, ...p }))
+        if (assignments.length > 0) {
+          authedFetch('/api/users/save-assignments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ assignments }),
+          }).then(async r => {
+            const j = await r.json()
+            if (j.skipped?.length > 0) console.warn(`save-assignments after dedup: ${j.skipped.length} stale uid(s) skipped`, j.skipped)
+          }).catch(console.error)
+        }
+      }
+      setDedupResult(json)
+    } catch {
+      alert('Network error during dedup')
+    } finally {
+      setDedupRunning(false)
+    }
+  }
+
+  // One-off migration: push every locally-patched team binding to Firestore.
+  // Covers real (non-csv) users whose teamId/visibleTeamIds previously lived only
+  // in this browser's localStorage. `role` is intentionally never sent — patches
+  // may carry stale role garbage, and roles are changed through /api/users only.
+  async function handleSaveAssignments() {
+    setSavingAssignments(true)
+    setSavedAssignments(false)
+    try {
+      const allPatches = getLocalUserPatches()
+      const assignments = Object.entries(allPatches)
+        .map(([uid, p]) => {
+          const a: { uid: string; teamId?: string | null; visibleTeamIds?: string[] | null } = { uid }
+          if (p.teamId !== undefined) a.teamId = p.teamId ?? null
+          if (p.visibleTeamIds !== undefined) a.visibleTeamIds = p.visibleTeamIds ?? null
+          return a
+        })
+        .filter(a => 'teamId' in a || 'visibleTeamIds' in a)
+      if (assignments.length === 0) { setSavedAssignments(true); return }
+      const res = await authedFetch('/api/users/save-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignments }),
+      })
+      if (!res.ok) { alert('Save failed'); return }
+      const json = await res.json()
+      if (json.skipped?.length > 0) {
+        alert(`บันทึกสำเร็จบางส่วน: ข้าม ${json.skipped.length} คนที่ไม่พบข้อมูลใน Firestore แล้ว (อาจถูกรวม/ลบไปก่อนหน้านี้)`)
+      }
+      setSavedAssignments(true)
+    } catch {
+      alert('Network error when saving assignments')
+    } finally {
+      setSavingAssignments(false)
+    }
   }
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
-      <Header title="รายชื่อพนักงาน" subtitle={`ทั้งหมด ${users.length} คน`} />
+      <Header title="Members" subtitle={`${users.length} members`} />
+      <AdministrationTabs />
 
       <div className="flex-1 overflow-auto p-6">
         {/* View toggle */}
@@ -213,103 +505,177 @@ export default function UsersPage() {
               }`}
             >
               <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6" />
               </svg>
-              จัดการทีม
+              โครงสร้างทีม
             </button>
           </div>
         </div>
 
-        {/* ── Team View ──────────────────────────────────────────────────── */}
-        {view === 'teams' && (
-          <div className="mb-6">
-            {/* Toolbar */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl p-1">
-                <button
-                  onClick={() => setTeamSubView('manage')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-normal transition-all ${
-                    teamSubView === 'manage' ? 'bg-freshket-100 text-freshket-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+        {/* ── Team View (Org Board) ───────────────────────────────────────── */}
+        <div className={view === 'teams' ? 'mb-6' : 'hidden'}>
+            <div className="flex items-center gap-2 mb-4">
+              {/* Search employee across all departments */}
+              <div className="relative flex-1 max-w-xs">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" />
                   </svg>
-                  จัดการทีม
-                </button>
-                <button
-                  onClick={() => setTeamSubView('table')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-normal transition-all ${
-                    teamSubView === 'table' ? 'bg-freshket-100 text-freshket-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M13.125 12h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125M20.625 12c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5M12 14.625v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 14.625c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m0 1.5H3.375m0 0c-.621 0-1.125-.504-1.125-1.125V15.75c0-.621.504-1.125 1.125-1.125" />
-                  </svg>
-                  ตารางสรุป
-                </button>
-                {DEMO_MODE && canManageTeams && (
+                </span>
+                <input
+                  type="text"
+                  placeholder="ค้นหาพนักงาน..."
+                  value={teamSearch}
+                  onChange={e => setTeamSearch(e.target.value)}
+                  className="w-full pl-9 pr-8 py-2 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-400"
+                />
+                {teamSearch && (
                   <button
-                    onClick={() => setTeamSubView('board')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-normal transition-all ${
-                      teamSubView === 'board' ? 'bg-freshket-100 text-freshket-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                    }`}
+                    onClick={() => setTeamSearch('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-gray-300 hover:text-gray-500"
                   >
-                    <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
-                    โครงสร้างทีม
                   </button>
                 )}
               </div>
-              {canManageTeams && (
-                <button
-                  onClick={() => setShowCreateTeam(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 transition-all"
-                >
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                  สร้างทีม
-                </button>
-              )}
-            </div>
 
-            {teamSubView === 'manage' ? (
-              <TeamManagerPanel
-                teams={teams}
-                users={users}
-                canManage={canManageTeams}
-                canDelete={user?.role === 'super_admin'}
-                onAddMember={handleMoveUser}
-                onRemoveMember={(uid) => handleMoveUser(uid, undefined)}
-                onChangeRole={handleChangeRole}
-                onUpdateVisibility={handleUpdateVisibility}
-                onRenameTeam={handleRenameTeam}
-                onDeleteTeam={handleDeleteTeam}
-              />
-            ) : teamSubView === 'table' ? (
-              <OrgTable departments={departments} teams={teams} users={users} />
-            ) : (
-              <OrgBoard
-                departments={departments}
-                teams={teams}
-                users={users}
-                canManage={canManageTeams}
-                onRenameTeam={handleRenameTeam}
-                onDeleteTeam={handleDeleteTeam}
-                onAddTeam={handleAddTeam}
-                onMoveUser={handleMoveUser}
-                onSetTeamLead={handleSetTeamLead}
-                onUpdateVisibility={handleUpdateVisibility}
-              />
+              {/* Department checklist filter */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowTeamDeptFilter(v => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-sm font-normal rounded-xl border transition-all ${
+                    teamDeptFilter.length > 0
+                      ? 'border-freshket-300 bg-freshket-100 text-freshket-700 font-bold'
+                      : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 01-.659 1.591l-5.432 5.432a2.25 2.25 0 00-.659 1.591v2.927a2.25 2.25 0 01-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 00-.659-1.591L3.659 7.409A2.25 2.25 0 013 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0112 3z" />
+                  </svg>
+                  แผนก{teamDeptFilter.length > 0 ? ` (${teamDeptFilter.length})` : ''}
+                  <svg className="size-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                  </svg>
+                </button>
+                {showTeamDeptFilter && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowTeamDeptFilter(false)} />
+                    <div className="absolute left-0 top-full mt-1.5 z-20 bg-white rounded-xl border border-gray-200 shadow-lg py-2 min-w-56 max-h-72 overflow-y-auto">
+                      <div className="px-3 pb-1.5 mb-1 border-b border-gray-100 flex items-center justify-between">
+                        <span className="text-xs font-bold text-gray-500">เลือกแผนก</span>
+                        {teamDeptFilter.length > 0 && (
+                          <button onClick={() => setTeamDeptFilter([])} className="text-xs text-freshket-600 hover:underline">ล้างทั้งหมด</button>
+                        )}
+                      </div>
+                      {departments.map(d => (
+                        <label key={d.id} className="flex items-center gap-2.5 px-3 py-1.5 hover:bg-gray-50 cursor-pointer">
+                          <div
+                            onClick={() => setTeamDeptFilter(prev => prev.includes(d.name) ? prev.filter(n => n !== d.name) : [...prev, d.name])}
+                            className={`size-4 rounded border-2 flex items-center justify-center shrink-0 transition-all ${
+                              teamDeptFilter.includes(d.name) ? 'border-freshket-500 bg-freshket-500' : 'border-gray-300'
+                            }`}
+                          >
+                            {teamDeptFilter.includes(d.name) && (
+                              <svg className="size-2.5 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" />
+                              </svg>
+                            )}
+                          </div>
+                          <span className="text-sm text-gray-700 truncate">{d.name}</span>
+                        </label>
+                      ))}
+                      {departments.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">ยังไม่มีแผนกในระบบ</p>}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+            {canManageTeams && (
+              <div className="flex items-center justify-end mb-4">
+                <div className="flex items-center gap-2">
+                  {/* Migrate any browser-local team bindings into Firestore so they
+                      persist across devices (fixes managers showing 0 members). */}
+                  <button
+                    onClick={handleSaveAssignments}
+                    disabled={savingAssignments}
+                    title="บันทึกการผูกทีมของทุกคนลง Firestore (ให้ข้ามเบราว์เซอร์ได้)"
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all disabled:opacity-60"
+                  >
+                    {savedAssignments ? (
+                      <>
+                        <svg className="size-4 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                        บันทึกทีมแล้ว
+                      </>
+                    ) : (
+                      <>
+                        <svg className={`size-4 ${savingAssignments ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M17 21v-8H7v8M7 3v5h8" />
+                        </svg>
+                        {savingAssignments ? 'กำลังบันทึก...' : 'บันทึกทีมลง Firestore'}
+                      </>
+                    )}
+                  </button>
+                  {refreshed ? (
+                    <span className="text-xs text-freshket-600 font-bold px-3 py-2">✓ Synced</span>
+                  ) : (
+                    <button
+                      onClick={handleRefreshOrgBoard}
+                      disabled={refreshing}
+                      title="Sync employee data from Firestore"
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all disabled:opacity-60"
+                    >
+                      <svg className={`size-4 ${refreshing ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                      </svg>
+                      {refreshing ? 'Syncing...' : 'Sync'}
+                    </button>
+                  )}
+                </div>
+              </div>
             )}
-          </div>
-        )}
+            <OrgBoard
+              departments={departments}
+              teams={teams}
+              users={activeUsers}
+              canManage={canManageTeams}
+              searchQuery={teamSearch}
+              deptFilter={teamDeptFilter}
+              onRenameTeam={handleRenameTeam}
+              onDeleteTeam={handleDeleteTeam}
+              onAddTeam={handleAddTeam}
+              onMoveUser={handleMoveUser}
+              onSetTeamLeads={handleSetTeamLeads}
+              onSetManagers={handleSetManagers}
+              onUpdateVisibility={handleUpdateVisibility}
+            />
+        </div>
+
+        {/* ── Undo delete toast ─────────────────────────────────────────── */}
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-2xl bg-gray-900 text-white px-5 py-3 shadow-2xl transition-all duration-300 ${undoDelete ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
+          <svg className="size-4 text-rose-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+          </svg>
+          <span className="text-sm font-normal">
+            ลบทีม <span className="font-bold">&ldquo;{undoDelete?.team.name}&rdquo;</span>
+            {undoDelete && undoDelete.memberIds.length > 0 && (
+              <span className="text-gray-400 ml-1">({undoDelete.memberIds.length} คนถูกย้ายออก)</span>
+            )}
+          </span>
+          <button
+            onClick={handleUndoDeleteTeam}
+            className="ml-1 px-3 py-1 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-xs font-bold transition-colors shrink-0"
+          >
+            Undo
+          </button>
+        </div>
 
         {/* ── List View ─────────────────────────────────────────────────── */}
-        {view === 'list' && <>
+        <div className={view === 'list' ? '' : 'hidden'}>
 
         {/* Search + Dept Filter + Add */}
         <div className="flex flex-col sm:flex-row gap-3 mb-5">
@@ -350,6 +716,31 @@ export default function UsersPage() {
               </svg>
             </span>
           </div>
+          {user?.role === 'super_admin' && (
+            <button
+              onClick={() => setShowImportAssessment(true)}
+              title="นำเข้าคะแนนแบบทดสอบ (Pre/Post) จาก CSV"
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all whitespace-nowrap"
+            >
+              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+              </svg>
+              นำเข้าคะแนน
+            </button>
+          )}
+          {user?.role === 'super_admin' && (
+            <button
+              onClick={handleRebuildStats}
+              disabled={rebuildingStats}
+              title="คำนวณสถิติสรุป (userStats) ใหม่จาก trainingRecords ทั้งหมด — ใช้ครั้งแรกเพื่อสร้างข้อมูลสรุปให้ dashboard/leaderboard โหลดเร็ว"
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <svg className={`size-4 ${rebuildingStats ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
+              {rebuildingStats ? 'กำลังอัปเดต...' : 'อัปเดตสถิติ'}
+            </button>
+          )}
           {user && canAccess(user.role, 'manager') && (
             <button
               onClick={() => setShowAddEmployee(true)}
@@ -382,8 +773,13 @@ export default function UsersPage() {
             <div className="flex-1">
               <p className="text-sm font-bold text-freshket-700">นำเข้าสำเร็จ</p>
               <p className="text-xs text-freshket-600">
-                เพิ่มพนักงานใหม่ <span className="font-bold">{importResult.added}</span> คน
-                {importResult.skipped > 0 && <> · ข้ามรายการซ้ำ <span className="font-bold">{importResult.skipped}</span> คน</>}
+                {importResult.added > 0 && <>เพิ่มใหม่ <span className="font-bold">{importResult.added}</span> คน</>}
+                {importResult.added > 0 && (importResult.updated > 0 || importResult.skipped > 0) && ' · '}
+                {importResult.updated > 0 && <>อัปเดต <span className="font-bold">{importResult.updated}</span> คน</>}
+                {importResult.updated > 0 && importResult.skipped > 0 && ' · '}
+                {importResult.skipped > 0 && <>ข้ามซ้ำในไฟล์ <span className="font-bold">{importResult.skipped}</span> คน</>}
+                {(importResult.added > 0 || importResult.updated > 0 || importResult.skipped > 0) && importResult.hidden > 0 && ' · '}
+                {importResult.hidden > 0 && <>ซ่อนจากรายชื่อ (สถานะไม่ใช่ Active) <span className="font-bold">{importResult.hidden}</span> คน</>}
               </p>
             </div>
             <button
@@ -451,7 +847,7 @@ export default function UsersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((u, i) => (
+                {pagedUsers.map((u, i) => (
                   <tr
                     key={u.uid}
                     onClick={() => setSelectedId(u.uid)}
@@ -472,8 +868,8 @@ export default function UsersPage() {
                       <div className="flex items-center gap-1.5 min-w-0">
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-gray-900 truncate">{u.displayName}</span>
-                            <CopyBtn text={u.displayName} />
+                            <span className="font-bold text-gray-900 truncate">{u.displayNameEN || u.displayName}</span>
+                            <CopyBtn text={u.displayNameEN || u.displayName} />
                           </div>
                           {u.nickname && <span className="text-xs text-gray-400 block leading-tight">{u.nickname}</span>}
                         </div>
@@ -561,7 +957,35 @@ export default function UsersPage() {
           )}
         </div>
 
-        </> /* end list view */}
+        {/* Pagination */}
+        {!loading && filtered.length > USERS_PAGE_SIZE && (
+          <div className="flex items-center justify-between px-1">
+            <p className="text-xs text-gray-400">
+              แสดง {(page - 1) * USERS_PAGE_SIZE + 1}–{Math.min(page * USERS_PAGE_SIZE, filtered.length)} จาก {filtered.length} คน
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-600 bg-white border border-gray-200 hover:border-freshket-400 hover:text-freshket-600 disabled:opacity-40 disabled:hover:border-gray-200 disabled:hover:text-gray-600 transition-colors"
+              >
+                ก่อนหน้า
+              </button>
+              <span className="text-xs text-gray-500 tabular-nums">หน้า {page} / {totalPages}</span>
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-600 bg-white border border-gray-200 hover:border-freshket-400 hover:text-freshket-600 disabled:opacity-40 disabled:hover:border-gray-200 disabled:hover:text-gray-600 transition-colors"
+              >
+                ถัดไป
+              </button>
+            </div>
+          </div>
+        )}
+
+        </div> {/* end list view */}
       </div>
 
       {/* Modals */}
@@ -569,13 +993,13 @@ export default function UsersPage() {
         <AddEmployeeModal
           users={users}
           onClose={() => setShowAddEmployee(false)}
-          onImport={(newUsers, skipped) => {
+          onImport={(newUsers, updatedCount, skipped, hiddenCount) => {
             if (DEMO_MODE) {
               newUsers.forEach(u => demoStore.addUser(u))
             } else {
               saveLocalImportedUsers(newUsers)
             }
-            setImportResult({ added: newUsers.length, skipped })
+            setImportResult({ added: newUsers.length - updatedCount, updated: updatedCount, skipped, hidden: hiddenCount })
             setShowAddEmployee(false)
           }}
         />
@@ -587,7 +1011,28 @@ export default function UsersPage() {
           onCreate={handleCreateTeam}
         />
       )}
-
+      {showImportAssessment && (
+        <ImportAssessmentModal
+          users={users}
+          onClose={() => setShowImportAssessment(false)}
+          onDone={({ imported, unmatchedEmails }) => {
+            setAssessmentResult({ imported, unmatchedEmails })
+            setShowImportAssessment(false)
+          }}
+        />
+      )}
+      {assessmentResult && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-2xl bg-gray-900 text-white px-5 py-3 shadow-2xl">
+          <svg className="size-4 text-freshket-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+          <span className="text-sm font-normal">
+            นำเข้าคะแนน {assessmentResult.imported} รายการ
+            {assessmentResult.unmatchedEmails.length > 0 && ` · ข้าม ${assessmentResult.unmatchedEmails.length} อีเมลที่ไม่พบ`}
+          </span>
+          <button onClick={() => setAssessmentResult(null)} className="text-gray-400 hover:text-white ml-1">
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
       {/* Card overlay */}
       {selectedId && (
         <div
@@ -754,6 +1199,16 @@ function UserPanel({
   const { data: shadowRecords, loading: shadowLoading } = useShadowRecordsByUser(userId)
   const { data: roleplayAssessments, loading: roleplayLoading } = useRoleplayAssessmentsByUser(userId)
 
+  // Hide Shadow / Role Play tabs when this member's department has no access to
+  // those modules — same rule as the sidebar and the home-page profile card.
+  const { allowedModules, loading: moduleLoading } = useModuleAccess(profile?.role, profile?.department)
+  const showShadow = !moduleLoading && allowedModules.has('shadow')
+  const showRoleplay = !moduleLoading && allowedModules.has('roleplay')
+
+  useEffect(() => {
+    if ((activeTab === 'shadow' && !showShadow) || (activeTab === 'roleplay' && !showRoleplay)) setActiveTab('information')
+  }, [activeTab, showShadow, showRoleplay])
+
   const handleShare = async () => {
     const url = `${window.location.origin}/users/${userId}`
     try { await navigator.clipboard.writeText(url) } catch { /* ignore */ }
@@ -764,8 +1219,8 @@ function UserPanel({
   const TABS = [
     { id: 'information' as const, label: 'Information' },
     { id: 'training' as const,   label: 'Training' },
-    { id: 'roleplay' as const,   label: 'Role Play' },
-    { id: 'shadow' as const,     label: 'Shadow' },
+    ...(showRoleplay ? [{ id: 'roleplay' as const, label: 'Role Play' }] : []),
+    ...(showShadow   ? [{ id: 'shadow'   as const, label: 'Shadow' }] : []),
   ]
 
   return (
@@ -782,11 +1237,11 @@ function UserPanel({
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="size-11 rounded-2xl bg-freshket-100 border-2 border-freshket-200 flex items-center justify-center text-freshket-700 text-lg font-bold shrink-0">
-              {profile?.displayName.charAt(0) ?? '?'}
+              {(profile?.displayNameEN || profile?.displayName)?.charAt(0) ?? '?'}
             </div>
             <div className="min-w-0">
               <p className="font-bold text-gray-900 text-base leading-tight truncate">
-                {profile?.displayName ?? '—'}
+                {profile?.displayNameEN || profile?.displayName || '—'}
                 {profile?.nickname && <span className="text-sm text-gray-400 font-normal ml-1.5">({profile.nickname})</span>}
               </p>
               <p className="text-xs text-gray-400 mt-0.5">
@@ -853,6 +1308,11 @@ function UserPanel({
                 <InfoRow label="Email">
                   <span className="text-sm text-gray-700 truncate">{profile?.email ?? '—'}</span>
                 </InfoRow>
+                {profile?.displayNameEN && (
+                  <InfoRow label="Full Name (EN)">
+                    <span className="text-sm text-gray-700">{profile.displayNameEN}</span>
+                  </InfoRow>
+                )}
                 {profile?.nickname && (
                   <InfoRow label="Nickname">
                     <span className="text-sm text-gray-700">{profile.nickname}</span>
@@ -1120,27 +1580,54 @@ function parseCSVLine(line: string): string[] {
   return result
 }
 
+// Map Job Grade (JGn) to system role — used for new employees only; existing role is preserved
+function rankToRole(rank?: string): UserRole {
+  const m = rank?.match(/JG(\d+)/i)
+  if (!m) return 'sale'
+  const n = parseInt(m[1])
+  if (n >= 11) return 'super_admin' // Head of Dept, VP, C-Level, CEO
+  if (n >= 9)  return 'manager'     // Manager / Senior Manager
+  if (n >= 7)  return 'team_lead'   // Senior Supervisor / Assistant Manager
+  return 'sale'                      // Officer, Staff, Contract and below
+}
+
 // Freshket HR CSV export columns (16 cols):
 // ID(0), Status(1), Emp.ID(2), Title(3), Name-TH(4), Name-Eng(5),
 // Nick(6), Tel(7), Department(8), Rank(9), Position(10), Location(11),
 // Start Date(12), Last Date(13), Line Manager(14), Company Email(15)
 function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
   valid: UserProfile[]
+  updated: string[]
   duplicates: string[]
+  hidden: number
 } {
   const lines = text.replace(/^﻿/, '').replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean)
-  if (lines.length < 2) return { valid: [], duplicates: [] }
+  if (lines.length < 2) return { valid: [], updated: [], duplicates: [], hidden: 0 }
 
-  const existingEmpIds = new Set(existingUsers.map(u => u.employeeId).filter(Boolean))
-  const existingEmails = new Set(existingUsers.map(u => u.email?.toLowerCase()).filter(Boolean))
+  // Look up existing records to carry over uid (upsert uses existing uid)
+  const existingByEmpId = new Map(existingUsers.filter(u => u.employeeId).map(u => [u.employeeId!, u]))
+  const existingByEmail = new Map(existingUsers.map(u => [u.email?.toLowerCase() ?? '', u]))
+
+  // Track within-CSV duplicates only
+  const seenEmpIds = new Set<string>()
+  const seenEmails = new Set<string>()
 
   const valid: UserProfile[] = []
+  const updated: string[] = []
   const duplicates: string[] = []
+  let hidden = 0
 
   for (const line of lines.slice(1)) {
     const cols = parseCSVLine(line)
-    const status = cols[1]?.trim() ?? ''
-    if (status !== 'Active') continue
+    // Recorded (not skipped) so a previously-active employee who leaves still
+    // gets their status updated — the Employees list filters anyone whose
+    // status isn't exactly "Active" out by this field instead, keeping their
+    // training history intact. Any raw HR status string is kept as-is (not
+    // just a fixed allowlist) — the HR export has already introduced values
+    // like "Exit This Month" beyond the original Active/Resigned/No show set,
+    // and every one of them must still read as "not Active" here.
+    const statusRaw = cols[1]?.trim() ?? ''
+    const employmentStatus: EmploymentStatus | undefined = statusRaw || undefined
 
     const empId       = cols[2]?.trim() ?? ''
     const fullNameTH  = cols[4]?.trim() ?? ''
@@ -1156,503 +1643,53 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
     const displayName = fullNameTH || fullNameEN
     if (!displayName) continue
 
-    if (empId && existingEmpIds.has(empId)) {
-      duplicates.push(`${displayName} (รหัส ${empId} ซ้ำ)`)
+    // Dedup within this CSV only
+    if (empId && seenEmpIds.has(empId)) {
+      duplicates.push(`${displayName} (รหัส ${empId} ซ้ำในไฟล์)`)
       continue
     }
-    if (email && existingEmails.has(email.toLowerCase())) {
-      duplicates.push(`${displayName} (อีเมล ${email} ซ้ำ)`)
+    if (email && seenEmails.has(email.toLowerCase())) {
+      duplicates.push(`${displayName} (อีเมล ${email} ซ้ำในไฟล์)`)
       continue
     }
 
-    const uid = `csv-${empId || Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    // Reuse existing uid so saveLocalImportedUsers can upsert by uid.
+    // UID is deterministic: csv-{empId} — same employee always gets same UID
+    // across different browsers/sessions, preventing duplicate Firestore docs.
+    const existingMatch = (empId ? existingByEmpId.get(empId) : undefined) ?? (email ? existingByEmail.get(email.toLowerCase()) : undefined) ?? null
+    const uid = existingMatch?.uid ?? `csv-${empId || email.split('@')[0].replace(/[^a-z0-9]/gi, '-').toLowerCase()}`
+    if (existingMatch) updated.push(displayName)
+    if (employmentStatus && employmentStatus !== 'Active') hidden++
+
+    // A blank cell in this row means "not set in this export" — it must not
+    // erase a value the employee already had on file, so every optional field
+    // falls back to the existing record instead of being wiped to undefined.
     valid.push({
       uid,
-      email: email || `${empId || uid}@freshket.co`,
+      email: email || existingMatch?.email || `${empId || uid}@freshket.co`,
       displayName,
-      photoURL: null,
-      role: 'sale',
-      nickname: nickname || undefined,
-      employeeId: empId || undefined,
-      department: dept || undefined,
-      position: position || undefined,
-      rank: rank || undefined,
-      lineManager: lineManager || undefined,
-      startDate: parseCsvDate(startStr),
-      createdAt: new Date(),
+      displayNameEN: fullNameEN || existingMatch?.displayNameEN,
+      photoURL: existingMatch?.photoURL ?? null,
+      role: existingMatch?.role ?? rankToRole(rank),
+      teamId: existingMatch?.teamId,
+      nickname: nickname || existingMatch?.nickname,
+      employeeId: empId || existingMatch?.employeeId,
+      department: dept || existingMatch?.department,
+      position: position || existingMatch?.position,
+      rank: rank || existingMatch?.rank,
+      lineManager: lineManager || existingMatch?.lineManager,
+      startDate: parseCsvDate(startStr) ?? existingMatch?.startDate,
+      employmentStatus: employmentStatus ?? existingMatch?.employmentStatus,
+      createdAt: existingMatch?.createdAt ?? new Date(),
       updatedAt: new Date(),
     })
-    if (empId) existingEmpIds.add(empId)
-    if (email) existingEmails.add(email.toLowerCase())
+    if (empId) seenEmpIds.add(empId)
+    if (email) seenEmails.add(email.toLowerCase())
   }
 
-  return { valid, duplicates }
+  return { valid, updated, duplicates, hidden }
 }
 
-// ── Team Manager Panel ────────────────────────────────────────────────────────
-
-function TeamManagerPanel({
-  teams,
-  users,
-  canManage,
-  canDelete,
-  onAddMember,
-  onRemoveMember,
-  onChangeRole,
-  onUpdateVisibility,
-  onRenameTeam,
-  onDeleteTeam,
-}: {
-  teams: import('@/types/user').Team[]
-  users: UserProfile[]
-  canManage: boolean
-  canDelete?: boolean
-  onAddMember: (userId: string, teamId: string) => void
-  onRemoveMember: (userId: string) => void
-  onChangeRole: (userId: string, newRole: UserRole) => void
-  onUpdateVisibility: (uid: string, teamIds: string[] | undefined) => void
-  onRenameTeam: (teamId: string, name: string) => void
-  onDeleteTeam?: (teamId: string) => void
-}) {
-  const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set())
-  const [addingTo, setAddingTo] = useState<{ teamId: string; sectionRole: UserRole } | null>(null)
-  const [search, setSearch] = useState('')
-  const [deptFilter, setDeptFilter] = useState('all')
-  const [selectedUids, setSelectedUids] = useState<Set<string>>(new Set())
-  const [draggedUid, setDraggedUid] = useState<string | null>(null)
-  const [dragOverKey, setDragOverKey] = useState<string | null>(null)
-  const [renamingTeamId, setRenamingTeamId] = useState<string | null>(null)
-  const [renameValue, setRenameValue] = useState('')
-  const [deleteConfirmTeamId, setDeleteConfirmTeamId] = useState<string | null>(null)
-  const [openPill, setOpenPill] = useState<string | null>(null)
-  const router = useRouter()
-
-  // ── Helpers ──────────────────────────────────────────────────────────────────
-  const ROLE_GROUPS: { role: UserRole; label: string; lColor: string; dBg: string; aBg: string; aText: string; dropBg: string; dropBorder: string }[] = [
-    { role: 'super_admin', label: 'Super Admin', lColor: 'text-orange-500',    dBg: 'bg-orange-100',    aBg: 'bg-orange-100',    aText: 'text-orange-700',    dropBg: '#fff7ed', dropBorder: '#f97316' },
-    { role: 'manager',     label: 'Manager',     lColor: 'text-purple-500',    dBg: 'bg-purple-100',    aBg: 'bg-purple-100',    aText: 'text-purple-700',    dropBg: '#faf5ff', dropBorder: '#a855f7' },
-    { role: 'team_lead',   label: 'Team Lead',   lColor: 'text-blue-500',      dBg: 'bg-blue-100',      aBg: 'bg-blue-100',      aText: 'text-blue-700',      dropBg: '#eff6ff', dropBorder: '#3b82f6' },
-    { role: 'sale',        label: 'Member',      lColor: 'text-freshket-600',  dBg: 'bg-freshket-100',  aBg: 'bg-freshket-100',  aText: 'text-freshket-700',  dropBg: '#f0fdf9', dropBorder: '#00ce7c' },
-  ]
-
-  const isHighRole = (r: UserRole) => r === 'manager' || r === 'super_admin' || r === 'team_lead'
-
-  function isInTeam(u: UserProfile, teamId: string) {
-    if (u.teamId === teamId) return true
-    return isHighRole(u.role) && (u.visibleTeamIds?.includes(teamId) ?? false)
-  }
-
-  function handleRemoveMember(uid: string, teamId: string) {
-    const u = users.find(x => x.uid === uid)
-    if (!u) { onRemoveMember(uid); return }
-    if (isHighRole(u.role) && u.visibleTeamIds?.includes(teamId)) {
-      const next = u.visibleTeamIds!.filter(id => id !== teamId)
-      onUpdateVisibility(uid, next.length ? next : undefined)
-      if (u.teamId === teamId) onRemoveMember(uid)  // sync teamId with list view
-    } else {
-      onRemoveMember(uid)
-    }
-  }
-
-  function handleConfirmAdd(teamId: string, sectionRole: UserRole) {
-    for (const uid of Array.from(selectedUids)) {
-      const u = users.find(x => x.uid === uid)
-      if (!u) continue
-      if (sectionRole === 'sale') {
-        onAddMember(uid, teamId)
-      } else {
-        // super_admin / manager / team_lead: assign via visibleTeamIds + set teamId if unset
-        const current = u.visibleTeamIds ?? []
-        if (!current.includes(teamId)) onUpdateVisibility(uid, [...current, teamId])
-        if (!u.teamId) onAddMember(uid, teamId)
-        if (sectionRole !== 'super_admin' && u.role !== sectionRole) onChangeRole(uid, sectionRole)
-      }
-    }
-    setAddingTo(null); setSelectedUids(new Set()); setSearch(''); setDeptFilter('all')
-  }
-
-  function toggleExpand(teamId: string) {
-    setExpandedTeams(prev => {
-      const s = new Set(prev)
-      if (s.has(teamId)) { s.delete(teamId); if (addingTo?.teamId === teamId) { setAddingTo(null); setSelectedUids(new Set()) } }
-      else s.add(teamId)
-      return s
-    })
-  }
-
-  if (teams.length === 0) {
-    return (
-      <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400">
-        <svg className="size-10 mx-auto mb-3 text-gray-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-        </svg>
-        <p className="text-sm font-normal text-gray-500">ยังไม่มีทีม</p>
-        <p className="text-xs text-gray-400 mt-1">กดปุ่ม &ldquo;สร้างทีม&rdquo; เพื่อเริ่มต้น</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
-      {/* Backdrop to close pill popovers */}
-      {openPill && (
-        <div className="fixed inset-0 z-20" onClick={() => setOpenPill(null)} />
-      )}
-      {teams.map((team) => {
-        const members = users.filter(u => isInTeam(u, team.id))
-        const isExpanded = expandedTeams.has(team.id)
-        const saMembers = members.filter(m => m.role === 'super_admin')
-        const mMembers  = members.filter(m => m.role === 'manager')
-        const tlMembers = members.filter(m => m.role === 'team_lead')
-        const sMembers  = members.filter(m => m.role === 'sale')
-        const saCount = saMembers.length
-        const mCount  = mMembers.length
-        const tlCount = tlMembers.length
-        const sCount  = sMembers.length
-
-        const makePill = (
-          key: string, abbr: string, count: number, pillUsers: UserProfile[],
-          bg: string, text: string,
-        ) => {
-          if (count === 0) return null
-          const pillKey = `${team.id}:${key}`
-          const isOpen = openPill === pillKey
-          return (
-            <div key={key} className="relative">
-              <button
-                onClick={(e) => { e.stopPropagation(); setOpenPill(isOpen ? null : pillKey) }}
-                className={`text-xs font-bold px-1.5 py-0.5 rounded-full transition-colors hover:opacity-80 ${bg} ${text}`}
-              >
-                {count}{abbr}
-              </button>
-              {isOpen && (
-                <div
-                  className="absolute top-6 right-0 z-30 bg-white rounded-xl border border-gray-200 shadow-xl overflow-hidden min-w-44"
-                  onClick={e => e.stopPropagation()}
-                >
-                  <div className="px-3 py-1.5 border-b border-gray-100 text-xs text-gray-400 font-normal">{count} คน</div>
-                  {pillUsers.map(u => (
-                    <button
-                      key={u.uid}
-                      onClick={() => { router.push(`/users/${u.uid}`); setOpenPill(null) }}
-                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left transition-colors"
-                    >
-                      <div className={`size-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${bg} ${text}`}>
-                        {u.displayName.charAt(0)}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-gray-800 truncate">{u.displayName}</p>
-                        {u.nickname && <p className="text-xs text-gray-400 truncate">{u.nickname}</p>}
-                      </div>
-                      <svg className="size-3 text-gray-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                      </svg>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )
-        }
-
-        const RolePills = () => (
-          <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-            {makePill('SA', 'SA', saCount, saMembers, 'bg-orange-100', 'text-orange-700')}
-            {makePill('M',  'M',  mCount,  mMembers,  'bg-purple-100', 'text-purple-700')}
-            {makePill('TL', 'TL', tlCount, tlMembers, 'bg-blue-100',   'text-blue-700')}
-            {makePill('Mem','Mem',sCount,  sMembers,  'bg-freshket-100','text-freshket-700')}
-          </div>
-        )
-
-        const isRenaming = renamingTeamId === team.id
-        const PencilBtn = ({ onClick }: { onClick: (e: React.MouseEvent) => void }) => canManage ? (
-          <button
-            onClick={onClick}
-            className="shrink-0 p-1 rounded-lg text-gray-300 hover:text-freshket-500 hover:bg-freshket-50 transition-all opacity-0 group-hover:opacity-100"
-            title="เปลี่ยนชื่อทีม"
-          >
-            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
-            </svg>
-          </button>
-        ) : null
-
-        // ── Collapsed capsule ────────────────────────────────────────────────
-        if (!isExpanded) {
-          return (
-            <div
-              key={team.id}
-              onClick={() => !isRenaming && toggleExpand(team.id)}
-              className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-2.5 cursor-pointer hover:shadow-md hover:border-freshket-200 transition-all flex items-center gap-2 group"
-            >
-              <div className="flex-1 min-w-0">
-                {isRenaming ? (
-                  <input
-                    autoFocus
-                    value={renameValue}
-                    onChange={e => setRenameValue(e.target.value)}
-                    onClick={e => e.stopPropagation()}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && renameValue.trim()) { onRenameTeam(team.id, renameValue.trim()); setRenamingTeamId(null) }
-                      if (e.key === 'Escape') setRenamingTeamId(null)
-                    }}
-                    onBlur={() => { if (renameValue.trim()) onRenameTeam(team.id, renameValue.trim()); setRenamingTeamId(null) }}
-                    className="w-full text-sm font-bold text-gray-900 bg-transparent border-b border-freshket-400 outline-none"
-                  />
-                ) : (
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <p className="font-bold text-gray-900 text-sm truncate">{team.name}</p>
-                    <span className="text-xs text-gray-400 shrink-0">({members.length})</span>
-                  </div>
-                )}
-              </div>
-              <RolePills />
-              <PencilBtn onClick={e => { e.stopPropagation(); setRenamingTeamId(team.id); setRenameValue(team.name) }} />
-              <svg className="size-3.5 text-gray-300 group-hover:text-freshket-500 transition-colors shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-              </svg>
-            </div>
-          )
-        }
-
-        // ── Expanded card ────────────────────────────────────────────────────
-        return (
-          <div key={team.id} className="bg-white rounded-2xl border border-freshket-200 flex flex-col">
-            {/* Header */}
-            <div className="flex items-center gap-3 px-5 py-3.5 border-b border-gray-50 rounded-t-2xl group">
-              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => !isRenaming && toggleExpand(team.id)}>
-                {isRenaming ? (
-                  <input
-                    autoFocus
-                    value={renameValue}
-                    onChange={e => setRenameValue(e.target.value)}
-                    onClick={e => e.stopPropagation()}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && renameValue.trim()) { onRenameTeam(team.id, renameValue.trim()); setRenamingTeamId(null) }
-                      if (e.key === 'Escape') setRenamingTeamId(null)
-                    }}
-                    onBlur={() => { if (renameValue.trim()) onRenameTeam(team.id, renameValue.trim()); setRenamingTeamId(null) }}
-                    className="w-full text-sm font-bold text-gray-900 bg-transparent border-b-2 border-freshket-400 outline-none"
-                  />
-                ) : (
-                  <p className="font-bold text-gray-900 text-sm truncate">{team.name}</p>
-                )}
-                <p className="text-xs text-gray-400">{members.length} สมาชิก</p>
-              </div>
-              <RolePills />
-              <PencilBtn onClick={e => { e.stopPropagation(); setRenamingTeamId(team.id); setRenameValue(team.name) }} />
-              {canDelete && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); setDeleteConfirmTeamId(team.id) }}
-                  className="shrink-0 p-1 rounded-lg text-gray-300 hover:text-rose-400 hover:bg-rose-50 transition-all opacity-0 group-hover:opacity-100"
-                  title="ลบทีม"
-                >
-                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                  </svg>
-                </button>
-              )}
-              <svg className="size-4 text-freshket-500 shrink-0 cursor-pointer" onClick={() => !isRenaming && toggleExpand(team.id)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
-              </svg>
-            </div>
-
-            {/* Delete confirm */}
-            {deleteConfirmTeamId === team.id && (
-              <div className="mx-3 mt-2 p-3 bg-rose-50 rounded-xl border border-rose-200 text-xs">
-                <p className="text-rose-700 font-bold mb-1">ลบทีม &ldquo;{team.name}&rdquo; ใช่ไหม?</p>
-                <p className="text-rose-500 mb-2">สมาชิกจะถูกออกจากทีมนี้</p>
-                <div className="flex gap-2">
-                  <button onClick={() => { onDeleteTeam?.(team.id); setDeleteConfirmTeamId(null) }} className="px-3 py-1 bg-rose-500 text-white rounded-lg font-normal hover:bg-rose-600 transition-colors">ยืนยัน</button>
-                  <button onClick={() => setDeleteConfirmTeamId(null)} className="px-3 py-1 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors">ยกเลิก</button>
-                </div>
-              </div>
-            )}
-
-            {/* Role sections */}
-            <div className="px-3 py-3 space-y-2 max-h-[520px] overflow-y-auto">
-              {ROLE_GROUPS.map((group) => {
-                const dropKey = `${team.id}:${group.label}`
-                const isOver = dragOverKey === dropKey && !!draggedUid
-                const isAddingHere = addingTo?.teamId === team.id && addingTo?.sectionRole === group.role
-                const groupMembers = members.filter(m => m.role === group.role)
-
-                // Exclusive assignment + role promotion rules:
-                const sectionPool = users.filter(u => {
-                  if (group.role === 'super_admin') {
-                    if (u.role !== 'super_admin') return false
-                    return !isInTeam(u, team.id)
-                  }
-                  if (group.role === 'manager') {
-                    const hasManagerTitle = !!(u.position?.toLowerCase().includes('manager') || u.rank?.toLowerCase().includes('manager'))
-                    if (u.role !== 'manager' && u.role !== 'team_lead' && !hasManagerTitle) return false
-                    return !isInTeam(u, team.id)
-                  }
-                  if (group.role === 'team_lead') {
-                    if (u.role !== 'team_lead' && u.role !== 'sale') return false
-                    return !isInTeam(u, team.id)
-                  }
-                  // sale — only unassigned members (already in any team = taken)
-                  if (u.role !== 'sale') return false
-                  return !u.teamId
-                })
-                const depts = ['all', ...Array.from(new Set(sectionPool.flatMap(u => u.department ? [u.department] : [])))]
-                const filteredPool = sectionPool.filter(u => {
-                  const q = search.toLowerCase()
-                  const mSearch = !q || u.displayName.toLowerCase().includes(q) || (u.nickname?.toLowerCase() ?? '').includes(q) || (u.employeeId ?? '').includes(q)
-                  const mDept = deptFilter === 'all' || u.department === deptFilter
-                  return mSearch && mDept
-                })
-                const allSelected = filteredPool.length > 0 && filteredPool.every(u => selectedUids.has(u.uid))
-
-                return (
-                  <div key={group.label}>
-                    {/* Drop zone */}
-                    <div
-                      className="rounded-xl transition-all duration-150"
-                      style={isOver ? { outline: `1.5px dashed ${group.dropBorder}`, backgroundColor: group.dropBg, padding: '6px' } : { padding: '6px' }}
-                      onDragOver={(e) => { e.preventDefault(); setDragOverKey(dropKey) }}
-                      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverKey(null) }}
-                      onDrop={(e) => {
-                        e.preventDefault()
-                        if (draggedUid) {
-                          const d = members.find(m => m.uid === draggedUid)
-                          if (d && d.role !== group.role) {
-                            onChangeRole(draggedUid, group.role)
-                          }
-                        }
-                        setDraggedUid(null); setDragOverKey(null)
-                      }}
-                    >
-                      {/* Section header */}
-                      <div className="flex items-center gap-2 mb-1 px-1">
-                        <span className={`text-xs font-bold whitespace-nowrap ${group.lColor}`}>{group.label}</span>
-                        <div className={`flex-1 h-px ${group.dBg}`} />
-                        <span className="text-xs text-gray-300 tabular-nums mr-1">{groupMembers.length}</span>
-                        {canManage && !isAddingHere && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setAddingTo({ teamId: team.id, sectionRole: group.role }); setSearch(''); setDeptFilter('all'); setSelectedUids(new Set()) }}
-                            className={`shrink-0 flex items-center gap-0.5 text-xs font-bold px-2 py-0.5 rounded-full hover:bg-gray-100 transition-all ${group.lColor}`}
-                          >
-                            <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-                            เพิ่ม
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Empty zone */}
-                      {groupMembers.length === 0 && !isAddingHere && (
-                        <p className={`text-xs text-center py-1.5 transition-colors ${isOver ? group.lColor : 'text-gray-200'}`}>ลากมาวางที่นี่</p>
-                      )}
-
-                      {/* Members */}
-                      <div className="space-y-0.5">
-                        {groupMembers.map(m => (
-                          <div
-                            key={m.uid}
-                            draggable={canManage}
-                            onDragStart={(e) => { setDraggedUid(m.uid); e.dataTransfer.effectAllowed = 'move' }}
-                            onDragEnd={() => { setDraggedUid(null); setDragOverKey(null) }}
-                            className={`flex items-center py-1.5 px-2 rounded-xl transition-all ${draggedUid === m.uid ? 'opacity-30' : canManage ? 'hover:bg-white cursor-grab active:cursor-grabbing group/member' : 'group/member'}`}
-                          >
-                            {canManage && (
-                              <svg className="size-3 text-gray-200 shrink-0 mr-1" viewBox="0 0 10 16" fill="currentColor">
-                                <circle cx="2.5" cy="3" r="1.5"/><circle cx="7.5" cy="3" r="1.5"/><circle cx="2.5" cy="8" r="1.5"/><circle cx="7.5" cy="8" r="1.5"/><circle cx="2.5" cy="13" r="1.5"/><circle cx="7.5" cy="13" r="1.5"/>
-                              </svg>
-                            )}
-                            <div className={`size-7 rounded-full text-xs font-bold flex items-center justify-center shrink-0 mr-2 ${group.aBg} ${group.aText}`}>{m.displayName.charAt(0)}</div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs font-bold text-gray-800 truncate">{m.displayName}</p>
-                              <p className="text-xs text-gray-400 truncate leading-tight">{[m.nickname, m.position].filter(Boolean).join(' · ')}</p>
-                            </div>
-                            <button
-                              onClick={() => router.push(`/users/${m.uid}`)}
-                              className="shrink-0 p-1 rounded-lg text-gray-300 hover:text-blue-500 hover:bg-blue-50 opacity-0 group-hover/member:opacity-100 transition-all"
-                              title="ดูโปรไฟล์"
-                            >
-                              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                              </svg>
-                            </button>
-                            {canManage && draggedUid !== m.uid && (
-                              <button onClick={() => handleRemoveMember(m.uid, team.id)} className="shrink-0 p-1 rounded-lg text-gray-300 hover:text-rose-400 hover:bg-rose-50 opacity-0 group-hover/member:opacity-100 transition-all" title="นำออก">
-                                <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* ── Add panel (inline, per section) ──────────────────── */}
-                    {isAddingHere && (
-                      <div className="mt-1.5 border border-gray-200 rounded-xl p-3 bg-gray-50/50">
-                        {/* Search */}
-                        <div className="relative mb-2">
-                          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" /></svg>
-                          <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาชื่อ, ชื่อเล่น, รหัส..." className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-freshket-300" />
-                        </div>
-
-                        {/* Dept filter pills */}
-                        {depts.length > 2 && (
-                          <div className="flex gap-1 flex-wrap mb-2">
-                            {depts.map(d => (
-                              <button key={d} onClick={() => setDeptFilter(d)} className={`text-xs font-normal px-2 py-0.5 rounded-full border transition-all ${deptFilter === d ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
-                                {d === 'all' ? 'ทั้งหมด' : d}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Check all */}
-                        <label className="flex items-center gap-2 py-1 px-2 border-b border-gray-100 mb-1 cursor-pointer">
-                          <input type="checkbox" checked={allSelected} onChange={e => {
-                            setSelectedUids(prev => {
-                              const s = new Set(prev)
-                              filteredPool.forEach(u => e.target.checked ? s.add(u.uid) : s.delete(u.uid))
-                              return s
-                            })
-                          }} className="size-3.5 accent-freshket-500" />
-                          <span className="text-xs text-gray-500">เลือกทั้งหมด ({filteredPool.length} คน)</span>
-                        </label>
-
-                        {/* User list with checkboxes */}
-                        <div className="max-h-44 overflow-y-auto space-y-0.5">
-                          {filteredPool.length === 0 ? (
-                            <p className="text-xs text-gray-400 text-center py-3">ไม่พบพนักงาน</p>
-                          ) : filteredPool.map(u => (
-                            <label key={u.uid} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white cursor-pointer transition-colors">
-                              <input type="checkbox" checked={selectedUids.has(u.uid)} onChange={e => {
-                                setSelectedUids(prev => { const s = new Set(prev); e.target.checked ? s.add(u.uid) : s.delete(u.uid); return s })
-                              }} className="size-3.5 accent-freshket-500 shrink-0" />
-                              <div className={`size-6 rounded-full text-xs font-bold flex items-center justify-center shrink-0 ${group.aBg} ${group.aText}`}>{u.displayName.charAt(0)}</div>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-xs font-bold text-gray-800 truncate">{u.displayName}</p>
-                                <p className="text-xs text-gray-400 truncate">{[u.nickname, u.department, u.position].filter(Boolean).join(' · ')}</p>
-                              </div>
-                            </label>
-                          ))}
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex gap-2 mt-2 pt-2 border-t border-gray-100">
-                          <button onClick={() => { setAddingTo(null); setSelectedUids(new Set()); setSearch(''); setDeptFilter('all') }} className="flex-1 py-1.5 text-xs text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100 transition-colors">ยกเลิก</button>
-                          <button onClick={() => handleConfirmAdd(team.id, group.role)} disabled={selectedUids.size === 0} className="flex-1 py-1.5 text-xs font-bold rounded-lg bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                            เพิ่ม {selectedUids.size > 0 ? `${selectedUids.size} คน` : ''}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
 
 // ── Copy Button ───────────────────────────────────────────────────────────────
 
@@ -1691,7 +1728,7 @@ function AddEmployeeModal({
 }: {
   users: UserProfile[]
   onClose: () => void
-  onImport: (newUsers: UserProfile[], skipped: number) => void
+  onImport: (newUsers: UserProfile[], updatedCount: number, skipped: number, hiddenCount: number) => void
 }) {
   const [tab, setTab] = useState<'manual' | 'csv'>('manual')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -1700,7 +1737,7 @@ function AddEmployeeModal({
     department: '', position: '', role: 'sale' as UserRole, startDate: '',
   })
   const [manualError, setManualError] = useState('')
-  const [csvResult, setCsvResult] = useState<{ valid: UserProfile[]; duplicates: string[] } | null>(null)
+  const [csvResult, setCsvResult] = useState<{ valid: UserProfile[]; updated: string[]; duplicates: string[]; hidden: number } | null>(null)
   const [csvFileName, setCsvFileName] = useState('')
 
   function handleManualSubmit() {
@@ -1727,7 +1764,7 @@ function AddEmployeeModal({
       startDate,
       createdAt: new Date(),
       updatedAt: new Date(),
-    }], 0)
+    }], 0, 0, 0)
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1827,7 +1864,7 @@ function AddEmployeeModal({
                     <p className="text-xs text-gray-400 mt-1">Employee Main Data Export จาก HR (16 คอลัมน์)</p>
                   </div>
                 </button>
-                <p className="text-xs text-gray-400 mt-3 text-center">นำเข้าเฉพาะพนักงานที่มี Status = &quot;Active&quot; · ข้ามแถว Resigned / No show</p>
+                <p className="text-xs text-gray-400 mt-3 text-center">พนักงานที่ Status = &quot;Resigned&quot; / &quot;No show&quot; จะถูกบันทึกสถานะไว้ และซ่อนจากหน้ารายชื่อโดยอัตโนมัติ (ประวัติการอบรมยังอยู่ครบ)</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -1840,8 +1877,8 @@ function AddEmployeeModal({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <div>
-                    <p className="text-xs font-bold text-freshket-700">พร้อมนำเข้า <span className="text-base">{csvResult.valid.length}</span> คน</p>
-                    {csvResult.duplicates.length > 0 && <p className="text-xs text-amber-600 mt-0.5">ข้ามซ้ำ {csvResult.duplicates.length} คน</p>}
+                    <p className="text-xs font-bold text-freshket-700">พร้อมนำเข้า <span className="text-base">{csvResult.valid.length}</span> คน{csvResult.updated.length > 0 && <span className="font-normal text-amber-600"> (อัปเดต {csvResult.updated.length} คน)</span>}</p>
+                    {csvResult.duplicates.length > 0 && <p className="text-xs text-amber-600 mt-0.5">ข้ามซ้ำในไฟล์ {csvResult.duplicates.length} คน</p>}
                   </div>
                 </div>
                 {csvResult.duplicates.length > 0 && (
@@ -1861,6 +1898,7 @@ function AddEmployeeModal({
                           <th className="text-left px-3 py-2 font-bold text-gray-500">ชื่อเล่น</th>
                           <th className="text-left px-3 py-2 font-bold text-gray-500">รหัส</th>
                           <th className="text-left px-3 py-2 font-bold text-gray-500">แผนก</th>
+                          <th className="text-left px-3 py-2 font-bold text-gray-500">สถานะ</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
@@ -1870,10 +1908,19 @@ function AddEmployeeModal({
                             <td className="px-3 py-1.5 text-gray-500">{u.nickname ?? '—'}</td>
                             <td className="px-3 py-1.5 font-mono text-gray-500">{u.employeeId ?? '—'}</td>
                             <td className="px-3 py-1.5 text-gray-500 truncate max-w-24">{u.department ?? '—'}</td>
+                            <td className="px-3 py-1.5">
+                              {u.employmentStatus && u.employmentStatus !== 'Active' ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-600">
+                                  {u.employmentStatus} · จะซ่อนจากรายชื่อ
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">Active</span>
+                              )}
+                            </td>
                           </tr>
                         ))}
                         {csvResult.valid.length > 10 && (
-                          <tr><td colSpan={4} className="px-3 py-1.5 text-center text-gray-400">... และอีก {csvResult.valid.length - 10} คน</td></tr>
+                          <tr><td colSpan={5} className="px-3 py-1.5 text-center text-gray-400">... และอีก {csvResult.valid.length - 10} คน</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -1896,7 +1943,7 @@ function AddEmployeeModal({
               เพิ่มพนักงาน
             </button>
           ) : (
-            <button onClick={() => csvResult?.valid.length ? onImport(csvResult.valid, csvResult.duplicates.length) : undefined} disabled={!csvResult || csvResult.valid.length === 0} className="flex-1 px-4 py-2 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+            <button onClick={() => csvResult?.valid.length ? onImport(csvResult.valid, csvResult.updated.length, csvResult.duplicates.length, csvResult.hidden) : undefined} disabled={!csvResult || csvResult.valid.length === 0} className="flex-1 px-4 py-2 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
               นำเข้า {csvResult?.valid.length ?? 0} คน
             </button>
           )}

@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { Timestamp } from 'firebase-admin/firestore'
 import { getAdminFirestore } from '@/lib/firebase/admin'
+import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
 
 const SALE_TOOLS = [
   {
@@ -117,8 +118,11 @@ const SALE_TOOLS = [
   },
 ]
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
+    const gate = await requireSuperAdmin(req)
+    if (!gate.ok) return gate.response
+
     const db = getAdminFirestore()
     const now = Timestamp.now()
 

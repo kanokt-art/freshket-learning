@@ -9,19 +9,27 @@
       ]
     },
     {
-      "collectionGroup": "trainingRecords",
+      "collectionGroup": "shadowRecords",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "teamId",    "order": "ASCENDING" },
-        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+        { "fieldPath": "observerUid", "order": "ASCENDING" },
+        { "fieldPath": "createdAt",   "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "courses",
+      "collectionGroup": "assessmentScores",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "isPublished", "order": "ASCENDING" },
-        { "fieldPath": "createdAt",   "order": "DESCENDING" }
+        { "fieldPath": "uid",     "order": "ASCENDING" },
+        { "fieldPath": "takenAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "roleplayAssessments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "subjectUid", "order": "ASCENDING" },
+        { "fieldPath": "createdAt",  "order": "DESCENDING" }
       ]
     }
   ],
