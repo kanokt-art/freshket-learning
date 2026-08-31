@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import type { UserStats } from '@/types/stats'
-import { CATEGORY_LABELS, type CourseCategory } from '@/types/course'
+import { CATEGORY_LABELS, type Course, type CourseCategory } from '@/types/course'
 import { STATUS_LABELS, type TrainingRecord, type TrainingStatus } from '@/types/tracking'
 import { ROLE_LABELS, canAccess, type UserProfile } from '@/types/user'
 import { formatDateEN } from '@/lib/utils/dateFormatter'
@@ -256,10 +256,28 @@ export default function SaleDashboardPage() {
       .sort((a, b) => a.daysLeft - b.daysLeft)
   }, [courses, user, recordMap])
 
-  const pendingCourseCount = useMemo(
-    () => forYouCourses.filter((c) => !recordMap[c.id] || recordMap[c.id].status !== 'completed').length,
-    [forYouCourses, recordMap],
-  )
+  // Courses assigned to me that aren't finished. Sorted so the ones already
+  // started come first (finishing something in progress beats starting something
+  // new), then by nearest deadline, then by title for a stable order.
+  const pendingCourses = useMemo(() => {
+    const withDeadline = (c: Course) => {
+      if (!c.endDate) return Number.POSITIVE_INFINITY
+      const d = c.endDate instanceof Date ? c.endDate : new Date(c.endDate as unknown as string)
+      return isNaN(d.getTime()) ? Number.POSITIVE_INFINITY : d.getTime()
+    }
+    return forYouCourses
+      .filter((c) => recordMap[c.id]?.status !== 'completed')
+      .sort((a, b) => {
+        const aStarted = recordMap[a.id]?.status === 'in_progress' ? 0 : 1
+        const bStarted = recordMap[b.id]?.status === 'in_progress' ? 0 : 1
+        if (aStarted !== bStarted) return aStarted - bStarted
+        const dd = withDeadline(a) - withDeadline(b)
+        if (dd !== 0) return dd
+        return a.title.localeCompare(b.title, 'th')
+      })
+  }, [forYouCourses, recordMap])
+
+  const pendingCourseCount = pendingCourses.length
 
   // Training Status donut — real backend state. Each assigned+published course
   // falls into exactly one bucket (priority: completed → failed → overdue →
@@ -375,27 +393,16 @@ export default function SaleDashboardPage() {
               Sale-role only — super_admin's overview has no personal course schedule to show. */}
           {!isAdmin && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-              {continueRecords.length === 0 && forYouCourses.length === 0 && (
-                <div className="card-ds p-10 flex flex-col items-center text-center">
-                  <div className="size-20 rounded-full bg-freshket-100 flex items-center justify-center mb-4">
-                    <svg className="size-10 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <h2 className="text-base font-bold text-gray-900 mb-1">ไม่มีหลักสูตรคงค้าง</h2>
-                  <p className="text-sm font-normal text-gray-500 max-w-sm">
-                    ตอนนี้คุณเรียนครบทุกหลักสูตรที่ได้รับมอบหมายแล้ว หากมีหลักสูตรใหม่ จะแสดงขึ้นที่นี่
-                  </p>
-                  <button
-                    onClick={() => router.push('/courses')}
-                    className="mt-5 px-4 py-2 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all duration-150"
-                  >
-                    ดูหลักสูตรทั้งหมด
-                  </button>
-                </div>
-              )}
-              {/* Pinned to column 2 so Calendar stays on the right even when the
-                  empty-state card above doesn't render (outstanding courses exist). */}
+              {/* Left column always has a card now. It used to render only when
+                  the learner had NOTHING assigned at all, so the normal case —
+                  courses assigned, none outstanding — left a blank half-width gap
+                  beside the calendar. */}
+              <PendingCoursesCard
+                courses={pendingCourses}
+                recordMap={recordMap}
+                onOpenCourse={(id) => router.push(`/courses/${id}`)}
+                onSeeAll={() => router.push('/courses')}
+              />
               <div className="lg:col-start-2">
                 <CalendarCard demoMode={DEMO_MODE} />
               </div>
@@ -584,6 +591,137 @@ export default function SaleDashboardPage() {
             onClose={() => setSelectedUser(null)}
           />
         </div>
+      )}
+    </div>
+  )
+}
+
+// ── Pending courses (left of the calendar) ────────────────────────────────────
+// Fills the slot that used to go blank whenever the learner had courses assigned
+// but none outstanding. Two states, one card: the work left to do, or a clear
+// "you're done" — never nothing.
+function PendingCoursesCard({
+  courses,
+  recordMap,
+  onOpenCourse,
+  onSeeAll,
+}: {
+  courses: Course[]
+  recordMap: Record<string, { status: string; score?: number }>
+  onOpenCourse: (courseId: string) => void
+  onSeeAll: () => void
+}) {
+  const VISIBLE = 4
+  const shown = courses.slice(0, VISIBLE)
+  const hidden = courses.length - shown.length
+
+  function daysLeft(c: Course): number | null {
+    if (!c.endDate) return null
+    const end = c.endDate instanceof Date ? c.endDate : new Date(c.endDate as unknown as string)
+    if (isNaN(end.getTime())) return null
+    return Math.ceil((end.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+  }
+
+  if (courses.length === 0) {
+    return (
+      <div className="card-ds p-10 flex flex-col items-center text-center">
+        <div className="size-20 rounded-full bg-freshket-100 flex items-center justify-center mb-4">
+          <svg className="size-10 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <h2 className="text-base font-bold text-gray-900 mb-1">ไม่มีหลักสูตรคงค้าง</h2>
+        <p className="text-sm font-normal text-gray-500 max-w-sm">
+          ตอนนี้คุณเรียนครบทุกหลักสูตรที่ได้รับมอบหมายแล้ว หากมีหลักสูตรใหม่ จะแสดงขึ้นที่นี่
+        </p>
+        <button
+          onClick={onSeeAll}
+          className="mt-5 px-4 py-2 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all duration-150"
+        >
+          ดูหลักสูตรทั้งหมด
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card-ds p-5">
+      <div className="flex items-center justify-between gap-2 mb-4">
+        <div className="flex items-center gap-2 min-w-0">
+          <h2 className="text-base font-bold text-gray-900">หลักสูตรคงค้าง</h2>
+          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 tabular-nums">
+            {courses.length}
+          </span>
+        </div>
+        <button onClick={onSeeAll} className="text-xs font-bold text-freshket-600 hover:text-freshket-700 transition-colors shrink-0">
+          ดูทั้งหมด →
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {shown.map((c) => {
+          const started = recordMap[c.id]?.status === 'in_progress'
+          const left = daysLeft(c)
+          const overdue = left != null && left < 0
+          const urgent = left != null && left >= 0 && left <= 7
+          return (
+            <button
+              key={c.id}
+              onClick={() => onOpenCourse(c.id)}
+              className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-100 bg-white text-left hover:border-freshket-200 hover:shadow-sm transition-all duration-150 group"
+            >
+              <span className={`size-9 rounded-xl flex items-center justify-center shrink-0 ${
+                started ? 'bg-freshket-100 text-freshket-700' : 'bg-gray-100 text-gray-400'
+              }`}>
+                {started ? (
+                  <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+                  </svg>
+                ) : (
+                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                  </svg>
+                )}
+              </span>
+
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm font-bold text-gray-800 truncate group-hover:text-freshket-700 transition-colors">
+                  {c.title}
+                </span>
+                <span className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${
+                    started ? 'bg-freshket-100 text-freshket-700' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {started ? 'กำลังเรียน' : 'ยังไม่เริ่ม'}
+                  </span>
+                  {overdue && (
+                    <span className="text-xs font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700">
+                      เกินกำหนด
+                    </span>
+                  )}
+                  {urgent && (
+                    <span className="text-xs font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                      เหลือ {left} วัน
+                    </span>
+                  )}
+                  {c.durationMinutes > 0 && (
+                    <span className="text-xs text-gray-400">{c.durationMinutes} นาที</span>
+                  )}
+                </span>
+              </span>
+
+              <svg className="size-4 text-gray-300 group-hover:text-freshket-500 transition-colors shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+            </button>
+          )
+        })}
+      </div>
+
+      {hidden > 0 && (
+        <button onClick={onSeeAll} className="mt-3 w-full text-xs font-bold text-gray-400 hover:text-freshket-600 transition-colors">
+          และอีก {hidden} หลักสูตร
+        </button>
       )}
     </div>
   )

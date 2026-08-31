@@ -1,8 +1,24 @@
 import os from 'node:os'
 import path from 'node:path'
 
+// `next dev` and `next build` both write to .next by default, so running a build
+// while a dev server is up replaces the chunks that server is still handing out:
+// the HTML keeps returning 200 while main-app.js starts 404ing, so the page loads
+// and then just hangs blank. That is indistinguishable from "the app got slow",
+// and it cost real debugging time — the symptom points at the app, the cause is
+// the toolchain.
+//
+// Giving each mode its own directory removes the interference entirely. Anything
+// that shells out to `next build` (CI, `vercel build`, a local sanity check) is now
+// safe to run with the dev server alive.
+//
+// Vercel is unaffected: it runs its own build in a clean checkout, and reads
+// distDir from this same config.
+const isDev = process.env.NODE_ENV === 'development'
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: isDev ? '.next-dev' : '.next',
   images: {
     remotePatterns: [
       {

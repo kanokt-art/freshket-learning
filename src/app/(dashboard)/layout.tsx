@@ -15,9 +15,19 @@ import { NavProgress } from '@/components/common/NavProgress'
 // screen after login got slower in order to speed up the second. It also warmed
 // /admin* and /users for learners who can never open them.
 //
-// <Link> still prefetches on hover/viewport, so a short list covers most of the win.
-const PREFETCH_COMMON = ['/sale', '/courses', '/tools']
-const PREFETCH_LEAD = ['/manager', '/users']
+// Trimmed further after measuring on the population that actually matters —
+// warehouse/rider staff on a mid-range phone over mobile data. There, /sale took
+// 3.9s to become usable and the JS spent ~15s of cumulative download time, while
+// on desktop the same page was ready in 0.5s. Prefetch runs at idle so it doesn't
+// block first paint, but on a phone "idle" still competes for one slow radio, and
+// the two heaviest route chunks were being pulled on every single dashboard load:
+//   /courses  186 kB parse (the 3,700-line page, most of it the admin editor)
+//   /users    160 kB parse (admin only)
+// Those are now warmed by <Link prefetch> on hover/viewport instead — the sidebar
+// links do it the moment the pointer approaches, which covers the real journey
+// without taxing every page load. Cheap routes stay on the eager list.
+const PREFETCH_COMMON = ['/sale', '/tools']
+const PREFETCH_LEAD = ['/manager']
 const PREFETCH_ADMIN = ['/admin/settings']
 
 // NOTE: this deliberately does NOT key on pathname.
