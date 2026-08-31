@@ -13,6 +13,12 @@ import type { Question, DragPair } from '@/types/assessment'
 
 const DEMO_MODE = getDemoMode()
 
+/** mm:ss, clamped at zero so a late tick never shows a negative clock. */
+function formatCountdown(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
 // What GET /api/assessment/[id]/take returns — the assessment minus its key.
 interface TakeAssessment {
   id: string
@@ -66,6 +72,13 @@ export default function TakeAssessmentPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [returnCtx, setReturnCtx] = useState<ReturnCtx | null>(null)
+
+  // Timed attempt. The deadline is the SERVER's (from POST /api/assessment/start);
+  // this countdown only displays it and triggers the auto-submit. Reloading the
+  // page does not reset it, because the server keeps the start time.
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [deadlineAt, setDeadlineAt] = useState<number | null>(null)
+  const [msLeft, setMsLeft] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -177,6 +190,42 @@ export default function TakeAssessmentPage() {
   const total = questions.length
   const current = questions[currentIndex]
 
+  // Open the server-side session once the learner can actually start answering —
+  // i.e. after the anti-cheat gate when there is one, so the clock doesn't run
+  // while they read the warning screen.
+  const readyToStart = !!assessment && !submitted && (!antiCheatEnabled || started)
+  useEffect(() => {
+    if (DEMO_MODE || !readyToStart || sessionId || !user) return
+    let cancelled = false
+    authedFetch('/api/assessment/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assessmentId: id, ...(returnCtx ? { courseId: returnCtx.courseId } : {}) }),
+    })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return
+        const json = await res.json()
+        setSessionId(json.sessionId)
+        setDeadlineAt(json.deadlineAt ?? null)
+      })
+      .catch(() => { /* no session → submit still works, just untimed */ })
+    return () => { cancelled = true }
+  }, [readyToStart, sessionId, user, id, returnCtx])
+
+  // Tick the countdown and auto-submit at zero.
+  useEffect(() => {
+    if (deadlineAt == null || submitted) return
+    const tick = () => {
+      const left = deadlineAt - Date.now()
+      setMsLeft(left)
+      if (left <= 0) void handleSubmit()
+    }
+    tick()
+    const iv = setInterval(tick, 1000)
+    return () => clearInterval(iv)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deadlineAt, submitted])
+
   function setAnswer(questionId: string, value: string | Record<string, string>) {
     setAnswers((prev) => ({ ...prev, [questionId]: value }))
   }
@@ -229,7 +278,8 @@ export default function TakeAssessmentPage() {
           assessmentId: id,
           answers,
           ...(returnCtx ? { courseId: returnCtx.courseId, step: returnCtx.step } : {}),
-          autoSubmitted: violations >= MAX_VIOLATIONS,
+          ...(sessionId ? { sessionId } : {}),
+          autoSubmitted: violations >= MAX_VIOLATIONS || (deadlineAt != null && Date.now() >= deadlineAt),
         }),
       })
 
@@ -330,6 +380,25 @@ export default function TakeAssessmentPage() {
           <p className="text-sm font-bold text-gray-800 truncate">{assessment.title}</p>
           <p className="text-xs text-gray-400 mt-0.5">ข้อ {currentIndex + 1} จาก {total}</p>
         </div>
+        {/* Countdown — turns amber under 5 minutes and red under 1, then the
+            attempt auto-submits at zero. */}
+        {msLeft != null && (
+          <div
+            aria-live="polite"
+            className={`shrink-0 flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-full border tabular-nums ${
+              msLeft <= 60_000
+                ? 'text-rose-600 bg-rose-50 border-rose-200'
+                : msLeft <= 300_000
+                  ? 'text-amber-700 bg-amber-50 border-amber-200'
+                  : 'text-gray-600 bg-gray-50 border-gray-200'
+            }`}
+          >
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {formatCountdown(msLeft)}
+          </div>
+        )}
         {antiCheatEnabled && (
           <div className="shrink-0 flex items-center gap-1.5 text-xs font-bold text-rose-600 bg-rose-50 px-3 py-1.5 rounded-full border border-rose-100">
             <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>

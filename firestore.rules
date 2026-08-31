@@ -110,6 +110,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── /assessmentSessions ────────────────────────────────────────────────────
+    // Server-held clock for a timed attempt: POST /api/assessment/start stamps
+    // startedAt, POST /api/assessment/submit refuses a submission that arrives
+    // after startedAt + the course's timeLimitMinutes. Denied to clients — if a
+    // learner could read or rewrite this, the time limit would be advisory again.
+    match /assessmentSessions/{sessionId} {
+      allow read, write: if false;
+    }
+
     // ── /tools ─────────────────────────────────────────────────────────────────
     // Same shape as /courses: everyone signed in can read; isPublished +
     // department targeting is filtered client-side. Only super_admin authors.

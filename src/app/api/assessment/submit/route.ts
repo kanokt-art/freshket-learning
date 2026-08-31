@@ -30,6 +30,11 @@ const MAX_ANSWERS = 200
 const MAX_ANSWER_LEN = 5000
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/
 
+// Allowance for the round trip between the browser auto-submitting at 00:00 and
+// the request landing here. Generous enough for a slow mobile connection, far too
+// small to answer anything with.
+const DEADLINE_GRACE_MS = 20_000
+
 function bad(message: string) {
   return NextResponse.json({ error: message }, { status: 400 })
 }
@@ -75,17 +80,81 @@ export async function POST(req: NextRequest) {
   const assessmentId = body.assessmentId
   const courseId = body.courseId
   const step = body.step
+  const sessionId = body.sessionId
   const autoSubmitted = body.autoSubmitted === true
 
   if (typeof assessmentId !== 'string' || !ID_RE.test(assessmentId)) return bad('Invalid assessmentId')
   if (courseId !== undefined && (typeof courseId !== 'string' || !ID_RE.test(courseId))) return bad('Invalid courseId')
   if (step !== undefined && step !== 'pre' && step !== 'post') return bad('Invalid step')
+  if (sessionId !== undefined && (typeof sessionId !== 'string' || !ID_RE.test(sessionId))) return bad('Invalid sessionId')
 
   const answers = parseAnswers(body.answers)
   if (!answers) return bad('Invalid answers payload')
 
   try {
     const db = getAdminFirestore()
+
+    // ── Timed-attempt enforcement ────────────────────────────────────────────
+    // The session holds the server's own start time, so a reloaded page or an
+    // edited client clock can't buy extra time. Three ways a session is refused:
+    // not the caller's, already used (replay), or past its deadline.
+    let timedOutSession: { ref: FirebaseFirestore.DocumentReference; elapsedMs: number; limitMs: number } | null = null
+    let sessionRef: FirebaseFirestore.DocumentReference | null = null
+
+    if (typeof sessionId === 'string') {
+      const sRef = db.collection('assessmentSessions').doc(sessionId)
+      const sSnap = await sRef.get()
+      if (!sSnap.exists) return NextResponse.json({ error: 'ไม่พบรอบการทำแบบทดสอบนี้' }, { status: 409 })
+
+      const s = sSnap.data() as {
+        uid?: string; assessmentId?: string; timeLimitMinutes?: number
+        startedAt?: { toDate(): Date }; submittedAt?: unknown
+      }
+      if (s.uid !== uid || s.assessmentId !== assessmentId) {
+        return NextResponse.json({ error: 'รอบการทำแบบทดสอบไม่ถูกต้อง' }, { status: 403 })
+      }
+      if (s.submittedAt) {
+        return NextResponse.json({ error: 'รอบนี้ถูกส่งคำตอบไปแล้ว' }, { status: 409 })
+      }
+
+      const limitMin = Number(s.timeLimitMinutes ?? 0)
+      if (limitMin > 0 && s.startedAt?.toDate) {
+        const elapsedMs = Date.now() - s.startedAt.toDate().getTime()
+        const limitMs = limitMin * 60_000
+        if (elapsedMs > limitMs + DEADLINE_GRACE_MS) {
+          timedOutSession = { ref: sRef, elapsedMs, limitMs }
+        }
+      }
+      sessionRef = sRef
+    }
+
+    // Past the deadline: record the attempt for audit (so "they ran out of time"
+    // is visible, not silent) but grade nothing and write NO score. A learner who
+    // stalls past the limit has to retake — which is what a time limit means.
+    if (timedOutSession) {
+      await timedOutSession.ref.set(
+        { submittedAt: FieldValue.serverTimestamp(), timedOut: true },
+        { merge: true },
+      )
+      await db.collection('assessmentAttempts').doc().set({
+        uid,
+        assessmentId,
+        ...(typeof courseId === 'string' ? { courseId } : {}),
+        ...(step ? { step } : {}),
+        score: 0,
+        passed: false,
+        timedOut: true,
+        elapsedMs: timedOutSession.elapsedMs,
+        limitMs: timedOutSession.limitMs,
+        answers: [],
+        autoSubmitted,
+        createdAt: FieldValue.serverTimestamp(),
+      })
+      return NextResponse.json(
+        { error: 'หมดเวลาทำแบบทดสอบ — คำตอบนี้ไม่ถูกบันทึก กรุณาเริ่มทำใหม่', timedOut: true },
+        { status: 409 },
+      )
+    }
 
     const aSnap = await db.collection('assessments').doc(assessmentId).get()
     if (!aSnap.exists) return NextResponse.json({ error: 'ไม่พบแบบทดสอบนี้' }, { status: 404 })
@@ -125,6 +194,11 @@ export async function POST(req: NextRequest) {
       autoSubmitted,
       createdAt: FieldValue.serverTimestamp(),
     })
+
+    // Burn the session so the same one can't be replayed for a second attempt.
+    if (sessionRef) {
+      await sessionRef.set({ submittedAt: FieldValue.serverTimestamp(), timedOut: false }, { merge: true })
+    }
 
     // When the quiz was launched from a course, the score belongs on that
     // learner's training record — written here, never by the client.

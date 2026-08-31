@@ -1600,9 +1600,8 @@ function QuizPreviewModal({ quiz, assessment, onClose }: {
                 {quiz.antiCheatEnabled && (
                   <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-600">Anti-Cheat</span>
                 )}
-                {quiz.cameraRequired && (
-                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">ต้องเปิดกล้อง</span>
-                )}
+                {/* No "ต้องเปิดกล้อง" badge: camera proctoring is not implemented,
+                    and showing it implied an enforcement that never ran. */}
               </div>
               {questions.length === 0 ? (
                 <p className="text-xs text-gray-400">ชุดคำถามนี้ยังไม่มีคำถาม</p>
@@ -3482,9 +3481,13 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                     <SettingToggleRow label="ระบบป้องกันการทุจริต (Anti-Cheat)"
                       hint="เมื่อเปิด: บังคับเข้าโหมดเต็มจอ ห้ามสลับแท็บ/หน้าต่างระหว่างทำแบบทดสอบ ระบบแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และส่งคำตอบอัตโนมัติเมื่อแจ้งเตือนครบ 3 ครั้ง"
                       checked={form.quiz.antiCheatEnabled} onChange={() => setQuiz('antiCheatEnabled', !form.quiz.antiCheatEnabled)} />
-                    <SettingToggleRow label="ต้องเปิดกล้องระหว่างการทดสอบ"
-                      hint="ผู้เรียนต้องอนุญาตให้เข้าถึงกล้องก่อนเริ่มทำแบบทดสอบ ใช้เป็นข้อมูลอ้างอิงสำหรับผู้ดูแล — ยังไม่มีการบันทึกวิดีโอหรือระบบตรวจสอบอัตโนมัติ"
-                      checked={form.quiz.cameraRequired} onChange={() => setQuiz('cameraRequired', !form.quiz.cameraRequired)} />
+                    {/* The camera toggle was removed, not implemented: it wrote
+                        `cameraRequired` to Firestore but nothing ever read it, so an
+                        admin who switched it on believed the exam was proctored when
+                        no camera check, recording or review existed anywhere. A
+                        setting that silently does nothing is worse than an absent
+                        one. The field is kept in the type for stored documents;
+                        bring the toggle back together with real proctoring. */}
 
                     <div>
                       <label className="text-xs font-bold text-gray-600 block mb-1.5">คำอธิบายแบบทดสอบ</label>

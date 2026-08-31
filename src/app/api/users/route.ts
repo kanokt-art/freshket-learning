@@ -15,8 +15,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing idToken' }, { status: 400 })
     }
 
-    // Verify token server-side — prevents fake uid/email injection
-    const decoded = await getAdminAuth().verifyIdToken(idToken)
+    // Token verification gets its OWN try/catch so a bad or expired token answers
+    // 401, not 500. It used to share the outer catch, which reported every auth
+    // failure as "Internal server error" — and because this route is what creates
+    // the user document on a first-ever login, a new joiner who hit an expired
+    // token saw a server-fault message and the logs pointed at the server instead
+    // of at the token. Sibling route /api/auth/verify already got this right.
+    let decoded
+    try {
+      decoded = await getAdminAuth().verifyIdToken(idToken)
+    } catch {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
+    }
+
     const { uid, email } = decoded
 
     if (!email?.endsWith(`@${ALLOWED_DOMAIN}`)) {
@@ -83,21 +94,15 @@ export async function GET(req: NextRequest) {
 
 // ── PATCH /api/users — update role / profile (super_admin only) ──────────────
 export async function PATCH(req: NextRequest) {
+  // Was a hand-rolled copy of requireSuperAdmin whose verifyIdToken sat inside the
+  // outer try, so an expired token answered 500 instead of 401. Using the shared
+  // gate fixes the status codes and removes the duplicated logic — one place now
+  // decides what "verified super_admin" means for every privileged route.
+  const gate = await requireSuperAdmin(req)
+  if (!gate.ok) return gate.response
+
   try {
-    // Verify caller is super_admin via idToken
-    const authHeader = req.headers.get('authorization') ?? ''
-    const callerToken = authHeader.replace('Bearer ', '')
-    if (!callerToken) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const caller = await getAdminAuth().verifyIdToken(callerToken)
     const db = getAdminFirestore()
-    const callerSnap = await db.collection('users').doc(caller.uid).get()
-    if (!callerSnap.exists || callerSnap.data()?.role !== 'super_admin') {
-      return NextResponse.json({ error: 'Forbidden: super_admin only' }, { status: 403 })
-    }
-
     const body = await req.json()
     const { uid, role, teamId, managerId, department, position, nickname, employeeId } = body
 

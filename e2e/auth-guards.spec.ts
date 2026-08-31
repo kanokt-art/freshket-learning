@@ -34,8 +34,11 @@ test.describe('super_admin-only pages reject lower roles', () => {
   test('/assessment redirects a learner away from quiz authoring', async ({ page }) => {
     await gotoAsUser(page, 'sale', '/assessment')
 
-    // The page replaces the route rather than rendering a deny panel.
-    await expect(page).not.toHaveURL(/\/assessment$/)
+    // The page replaces the route rather than rendering a deny panel. The
+    // redirect only fires once the component renders, and this route pulls in the
+    // whole authoring UI, so on a cold dev server it needs more than the default
+    // assertion window.
+    await expect(page).not.toHaveURL(/\/assessment$/, { timeout: 30_000 })
   })
 
   test('/log denies a learner', async ({ page }) => {
@@ -54,12 +57,19 @@ test.describe('team_lead+ pages reject a learner', () => {
     test(`${path} denies sale`, async ({ page }) => {
       await gotoAsUser(page, 'sale', path)
 
-      // /users and /users/[id] redirect to /sale; /manager and /team-lead render
-      // a deny panel. Either is a pass — what must NOT happen is the roster
-      // rendering for a learner.
-      const denied = await page.getByText(DENY).count()
-      const redirected = !new RegExp(`${path}$`).test(new URL(page.url()).pathname)
-      expect(denied > 0 || redirected).toBeTruthy()
+      // /users redirects to /sale; /manager and /team-lead render a deny panel.
+      // Either is a pass — what must NOT happen is the page rendering for a learner.
+      //
+      // Wrapped in toPass() because `locator.count()` does NOT auto-wait the way
+      // `expect(locator)` does: it answers immediately, so on a cold dev server
+      // (these two pages pull in recharts) it returned 0 before React had
+      // rendered the panel and the test failed without ever waiting. That made a
+      // correct guard look broken.
+      await expect(async () => {
+        const denied = await page.getByText(DENY).count()
+        const redirected = !new RegExp(`${path}$`).test(new URL(page.url()).pathname)
+        expect(denied > 0 || redirected).toBeTruthy()
+      }).toPass({ timeout: 30_000 })
     })
   }
 })
@@ -72,6 +82,10 @@ test.describe('learner-reachable pages stay reachable', () => {
     test(`${path} allows sale`, async ({ page }) => {
       await gotoAsUser(page, 'sale', path)
 
+      // Give the page a chance to finish rendering before asserting the ABSENCE
+      // of a deny panel — otherwise this passes for the wrong reason (nothing has
+      // rendered yet) and would not catch an over-gated page.
+      await expect(page.locator('main, [role="main"], body > div').first()).toBeVisible()
       await expect(page.getByText(DENY)).toHaveCount(0)
       expect(new URL(page.url()).pathname).toBe(path)
     })

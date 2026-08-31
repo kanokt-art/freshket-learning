@@ -67,12 +67,25 @@ export interface GradeBand {
   color: string // key into the GRADE_COLORS palette (courses/page.tsx)
 }
 
-// Course-level quiz settings. antiCheatEnabled is enforced on the assessment-taking
-// page (src/app/(dashboard)/assessment/[id]/page.tsx) — fullscreen is forced, tab/window
-// switches are detected via the Page Visibility API, and the quiz auto-submits after
-// 3 warnings. cameraRequired and the reward fields are still stored as-is with no
-// enforcement/award logic wired up (no camera proctoring or automatic points-award
-// integration exists in this app today).
+// Course-level quiz settings.
+//
+// ENFORCED:
+//  - timeLimitMinutes — anchored server-side. POST /api/assessment/start stamps the
+//    start time in `assessmentSessions`; the browser counts down against that
+//    deadline and auto-submits, and POST /api/assessment/submit refuses anything
+//    arriving after it (plus a short network grace).
+//  - antiCheatEnabled — fullscreen is forced, tab/window switches are detected via
+//    the Page Visibility API, and the quiz auto-submits after 3 warnings.
+//  - passThresholdPercent — gates the certificate and is copied to
+//    TrainingRecord.passScore.
+//
+// STORED BUT NOT ENFORCED — do not assume these do anything:
+//  - cameraRequired: no proctoring exists. The admin toggle was REMOVED so it can
+//    no longer be switched on; the field remains only for documents already saved.
+//  - retryEnabled / retryAfterDays / maxRetries: retakes are neither blocked nor
+//    limited. (attemptCount IS now counted correctly, from real attempt records.)
+//  - rewardEnabled / rewardWithinAttempts / rewardThresholdPercent: no award engine.
+//  - gradeBands / answerViewMode: affect the admin preview modal only.
 export interface QuizSettings {
   title?: string
   timeLimitMinutes?: number
