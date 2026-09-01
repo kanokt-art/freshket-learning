@@ -644,6 +644,7 @@ export default function UsersPage() {
               teams={teams}
               users={activeUsers}
               canManage={canManageTeams}
+              showRoleBadges={user?.role === 'super_admin'}
               searchQuery={teamSearch}
               deptFilter={teamDeptFilter}
               onRenameTeam={handleRenameTeam}

@@ -12,6 +12,8 @@ interface OrgBoardProps {
   teams: Team[]
   users: UserProfile[]
   canManage: boolean
+  /** Role/rank badges are sensitive org info — only super_admin sees them. */
+  showRoleBadges: boolean
   searchQuery?: string
   deptFilter?: string[]
   onRenameTeam:   (teamId: string, name: string) => void
@@ -275,6 +277,7 @@ function MemberRow({
   teams,
   currentTeamId,
   canEdit,
+  showRoleBadges,
   isTeamLead,
   isManager,
   onMove,
@@ -285,6 +288,7 @@ function MemberRow({
   teams: Team[]
   currentTeamId: string
   canEdit: boolean
+  showRoleBadges: boolean
   isTeamLead?: boolean
   isManager?: boolean
   onMove: (uid: string, teamId: string | undefined) => void
@@ -329,9 +333,13 @@ function MemberRow({
           {user.nickname && <span className="text-gray-400 font-normal ml-1">({user.nickname})</span>}
         </p>
         <div className="flex items-center gap-1 min-w-0 mt-0.5">
-          <RolePill role={isManager ? 'manager' : isTeamLead ? 'teamLead' : 'member'} />
-          {user.rank && (
-            <span className={`shrink-0 text-xs font-bold px-1.5 py-0.5 rounded-full ${rankColor(user.rank)}`}>{user.rank}</span>
+          {showRoleBadges && (
+            <>
+              <RolePill role={isManager ? 'manager' : isTeamLead ? 'teamLead' : 'member'} />
+              {user.rank && (
+                <span className={`shrink-0 text-xs font-bold px-1.5 py-0.5 rounded-full ${rankColor(user.rank)}`}>{user.rank}</span>
+              )}
+            </>
           )}
           {user.position && <p className="text-xs text-gray-400 truncate">{user.position}</p>}
         </div>
@@ -489,6 +497,7 @@ function TeamCard({
   users,
   allTeams,
   canManage,
+  showRoleBadges,
   accent,
   deptName,
   sourceNames,
@@ -506,6 +515,7 @@ function TeamCard({
   users: UserProfile[]
   allTeams: Team[]
   canManage: boolean
+  showRoleBadges: boolean
   accent: ReturnType<typeof deptAccent>
   deptName: string
   sourceNames: string[]
@@ -1070,6 +1080,7 @@ function TeamCard({
             teams={allTeams.filter(t => t.id !== team.id)}
             currentTeamId={team.id}
             canEdit={canEdit}
+            showRoleBadges={showRoleBadges}
             isTeamLead={teamLeadIds.includes(m.uid)}
             isManager={managerIds.includes(m.uid)}
             onMove={onMoveUser}
@@ -1127,6 +1138,7 @@ function DeptCard({
   users,
   allTeams,
   canManage,
+  showRoleBadges,
   onRenameTeam,
   onDeleteTeam,
   onAddTeam,
@@ -1144,6 +1156,7 @@ function DeptCard({
   users: UserProfile[]
   allTeams: Team[]
   canManage: boolean
+  showRoleBadges: boolean
   onRenameTeam: (teamId: string, name: string) => void
   onDeleteTeam: (teamId: string) => void
   onAddTeam: (deptId: string, name: string) => void
@@ -1330,6 +1343,7 @@ function DeptCard({
               users={users}
               allTeams={allTeams}
               canManage={canManage}
+              showRoleBadges={showRoleBadges}
               accent={accent}
               deptName={dept.name}
               sourceNames={sourceNames}
@@ -1419,6 +1433,7 @@ export function OrgBoard({
   teams,
   users,
   canManage,
+  showRoleBadges,
   searchQuery,
   deptFilter,
   onRenameTeam,
@@ -1525,6 +1540,7 @@ export function OrgBoard({
           users={users}
           allTeams={teams}
           canManage={canManage}
+          showRoleBadges={showRoleBadges}
           searchQuery={searchQuery}
           onRenameTeam={onRenameTeam}
           onDeleteTeam={onDeleteTeam}
