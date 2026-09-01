@@ -372,10 +372,12 @@ export default function ManagerPage() {
                             </div>
                             <div className="min-w-0">
                               <div className="flex items-center gap-1.5">
-                                <p className="text-sm font-bold text-gray-900 truncate">{enName(u)}</p>
+                                <p className="text-sm font-bold text-gray-900 truncate">
+                                  {enName(u)}
+                                  {u.nickname && <span className="text-gray-400 font-normal"> ({u.nickname})</span>}
+                                </p>
                                 {unread && <span className="text-xs font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded-full leading-none shrink-0">ใหม่</span>}
                               </div>
-                              {u.nickname && <p className="text-xs text-gray-400 leading-tight">{u.nickname}</p>}
                             </div>
                           </div>
                         </td>

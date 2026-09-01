@@ -6,7 +6,7 @@ import type { AppNotification, NotifType } from '@/types/notification'
 // full /notifications page and the bell popover (BottomBar / Header) so the
 // two never drift apart.
 
-function relativeTime(date: Date): string {
+export function relativeTime(date: Date): string {
   const diff = (Date.now() - date.getTime()) / 1000
   if (diff < 60) return 'เมื่อกี้'
   if (diff < 3600) return `${Math.floor(diff / 60)} นาทีที่แล้ว`
@@ -68,6 +68,14 @@ const NOTIF_ICON: Record<NotifType, { bg: string; icon: React.ReactNode }> = {
     icon: (
       <svg className="size-5 text-rose-600" viewBox="0 0 24 24" fill="currentColor" stroke="none">
         <path d="M11.645 20.91l-.007-.003-.022-.012a15.247 15.247 0 01-.383-.218 25.18 25.18 0 01-4.244-3.17C4.688 15.36 2.25 12.174 2.25 8.25 2.25 5.322 4.714 3 7.688 3A5.5 5.5 0 0112 5.052 5.5 5.5 0 0116.313 3c2.973 0 5.437 2.322 5.437 5.25 0 3.925-2.438 7.111-4.739 9.256a25.175 25.175 0 01-4.244 3.17 15.247 15.247 0 01-.383.219l-.022.012-.007.004-.003.001a.752.752 0 01-.704 0l-.003-.001z" />
+      </svg>
+    ),
+  },
+  assessment_completed: {
+    bg: 'bg-freshket-100',
+    icon: (
+      <svg className="size-5 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 017.231-4.41 60.46 60.46 0 00-.491-6.347m-14.48 0a60.699 60.699 0 00-.987-4.482A50.003 50.003 0 0112 4.5c2.29 0 4.53.201 6.707.585a59.98 59.98 0 00-.987 4.482m-14.48 0L12 13.5l7.24-3.353" />
       </svg>
     ),
   },

@@ -1698,14 +1698,72 @@ function QuizPreviewModal({ quiz, assessment, onClose }: {
   )
 }
 
+// ── Searchable filter dropdown (department/position pickers) ──────────────────
+function FilterCombobox({ value, onChange, options, placeholder }: {
+  value: string; onChange: (v: string) => void; options: string[]; placeholder: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [])
+
+  const filtered = query.trim()
+    ? options.filter((o) => o.toLowerCase().includes(query.toLowerCase()))
+    : options
+
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between gap-2 text-xs rounded-lg border border-gray-200 px-2.5 py-2 bg-white text-gray-600 hover:border-gray-300 transition-colors">
+        <span className={`truncate ${value ? 'text-gray-700 font-bold' : 'text-gray-400'}`}>{value || placeholder}</span>
+        <svg className={`size-3.5 shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-gray-100">
+            <input type="text" autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
+              placeholder="ค้นหา..."
+              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-1 focus:ring-freshket-300 placeholder:text-gray-300"
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto py-1">
+            <button type="button" onClick={() => { onChange(''); setOpen(false); setQuery('') }}
+              className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${!value ? 'bg-freshket-50 text-freshket-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}>
+              {placeholder}
+            </button>
+            {filtered.length === 0
+              ? <p className="text-xs text-gray-400 text-center py-3">ไม่พบ</p>
+              : filtered.map((o) => (
+                <button key={o} type="button" onClick={() => { onChange(o); setOpen(false); setQuery('') }}
+                  className={`w-full text-left px-3 py-1.5 text-xs truncate transition-colors ${value === o ? 'bg-freshket-50 text-freshket-700 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}>
+                  {o}
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Side Panel shell (slide-over from the right) ──────────────────────────────
 function SidePanel({ title, subtitle, onClose, footer, children }: {
   title: string; subtitle?: string; onClose: () => void; footer?: React.ReactNode; children: React.ReactNode
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-white shadow-2xl flex flex-col animate-slide-in-right">
+      <div className="relative w-[80vw] h-[80vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden" style={{ animation: 'orgModalIn 0.18s cubic-bezier(0.16,1,0.3,1)' }}>
+        <style>{`@keyframes orgModalIn { from { opacity:0; transform:scale(0.96) } to { opacity:1; transform:scale(1) } }`}</style>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
           <div className="min-w-0">
             <h3 className="text-sm font-bold text-gray-900 truncate">{title}</h3>
@@ -1770,6 +1828,7 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
 }) {
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
+  const [positionFilter, setPositionFilter] = useState('')
   const [sortByStartDate, setSortByStartDate] = useState<'none' | 'asc' | 'desc'>('none')
   const [draft, setDraft] = useState<Set<string>>(() => new Set(assignedIds))
 
@@ -1787,10 +1846,12 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
   )
 
   const departments = useMemo(() => Array.from(new Set(activeUsers.map((u) => u.department).filter(Boolean))).sort() as string[], [activeUsers])
+  const positions = useMemo(() => Array.from(new Set(activeUsers.map((u) => u.position).filter(Boolean))).sort() as string[], [activeUsers])
 
   const filtered = useMemo(() => {
     let list = activeUsers
     if (deptFilter) list = list.filter((u) => u.department === deptFilter)
+    if (positionFilter) list = list.filter((u) => u.position === positionFilter)
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter((u) =>
@@ -1809,7 +1870,7 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
       })
     }
     return list
-  }, [activeUsers, search, deptFilter, sortByStartDate])
+  }, [activeUsers, search, deptFilter, positionFilter, sortByStartDate])
 
   const filteredIds = useMemo(() => filtered.map((u) => u.uid), [filtered])
   const selectAllState = computeGroupState(filteredIds, draft, enrolledUserIds)
@@ -1829,22 +1890,27 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
       footer={<PanelFooter selectedCount={draft.size} onCancel={onClose} onConfirm={() => { onConfirm(Array.from(draft)); onClose() }} />}
     >
       <div className="p-3 border-b border-gray-100 sticky top-0 bg-white z-10 space-y-2">
-        <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" />
-          </svg>
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="ค้นหาชื่อ, รหัสพนักงาน หรือตำแหน่ง..."
-            className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1 min-w-0">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" />
+            </svg>
+            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="ค้นหาชื่อ, รหัสพนักงาน หรือตำแหน่ง..."
+              className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
+            />
+          </div>
+          {departments.length > 0 && (
+            <div className="w-52 shrink-0">
+              <FilterCombobox value={deptFilter} onChange={setDeptFilter} options={departments} placeholder="ทุกแผนก" />
+            </div>
+          )}
+          {positions.length > 0 && (
+            <div className="w-52 shrink-0">
+              <FilterCombobox value={positionFilter} onChange={setPositionFilter} options={positions} placeholder="ทุกตำแหน่ง" />
+            </div>
+          )}
         </div>
-        {departments.length > 0 && (
-          <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}
-            className="w-full text-xs rounded-lg border border-gray-200 px-2.5 py-2 focus:outline-none focus:ring-1 focus:ring-freshket-300 bg-white text-gray-600">
-            <option value="">ทุกแผนก</option>
-            {departments.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-        )}
         <div className="flex items-center justify-between gap-2">
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <GroupCheckbox state={selectAllState} onChange={toggleSelectAllFiltered} />
@@ -1864,36 +1930,60 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
       </div>
       {filtered.length === 0 ? (
         <p className="text-xs text-gray-400 text-center py-8">ไม่พบพนักงาน</p>
-      ) : filtered.map((u) => {
-        const isEnrolled = enrolledUserIds.has(u.uid)
-        const checked = draft.has(u.uid) || isEnrolled
-        return (
-          <label key={u.uid}
-            className={`flex items-center gap-3 px-4 py-2.5 border-b border-gray-50 transition-colors ${isEnrolled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50'}`}>
-            <input type="checkbox" checked={checked} disabled={isEnrolled} onChange={() => toggleDraft(u.uid)}
-              className="rounded border-gray-300 text-freshket-500 focus:ring-freshket-300 size-4 shrink-0 disabled:opacity-40"
-            />
-            <div className="size-8 rounded-full bg-gray-100 shrink-0 overflow-hidden flex items-center justify-center">
-              {u.photoURL
-                ? <img src={u.photoURL} alt={u.displayName} className="size-full object-cover" />
-                : <span className="text-xs font-bold text-gray-500">{u.displayName[0]}</span>}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-gray-800 truncate">
-                {u.displayNameEN || u.displayName}
-                {u.nickname && <span className="text-gray-400 font-normal"> ({u.nickname})</span>}
-              </p>
-              <p className="text-xs text-gray-400 truncate">
-                {[u.position, u.department].filter(Boolean).join(' · ') || '—'}
-                {u.startDate && <span className="text-gray-300"> · เริ่มงาน {formatDateEN(u.startDate)}</span>}
-              </p>
-            </div>
-            {isEnrolled && (
-              <span className="text-xs font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 shrink-0">เรียนแล้ว</span>
-            )}
-          </label>
-        )
-      })}
+      ) : (
+        <table className="w-full text-left border-collapse">
+          <thead className="sticky top-0 bg-white z-[5]">
+            <tr className="border-b border-gray-100">
+              <th className="w-10 px-4 py-2.5"></th>
+              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">ชื่อ</th>
+              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">รหัสพนักงาน</th>
+              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">ตำแหน่ง</th>
+              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">แผนก</th>
+              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">วันเริ่มงาน</th>
+              <th className="w-24 px-4 py-2.5"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((u) => {
+              const isEnrolled = enrolledUserIds.has(u.uid)
+              const checked = draft.has(u.uid) || isEnrolled
+              return (
+                <tr key={u.uid}
+                  onClick={() => !isEnrolled && toggleDraft(u.uid)}
+                  className={`border-b border-gray-50 transition-colors ${isEnrolled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50'}`}>
+                  <td className="px-4 py-2.5">
+                    <input type="checkbox" checked={checked} disabled={isEnrolled} onChange={() => toggleDraft(u.uid)} onClick={(e) => e.stopPropagation()}
+                      className="rounded border-gray-300 text-freshket-500 focus:ring-freshket-300 size-4 shrink-0 disabled:opacity-40"
+                    />
+                  </td>
+                  <td className="px-2 py-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="size-8 rounded-full bg-gray-100 shrink-0 overflow-hidden flex items-center justify-center">
+                        {u.photoURL
+                          ? <img src={u.photoURL} alt={u.displayName} className="size-full object-cover" />
+                          : <span className="text-xs font-bold text-gray-500">{u.displayName[0]}</span>}
+                      </div>
+                      <p className="text-xs font-bold text-gray-800 truncate">
+                        {u.displayNameEN || u.displayName}
+                        {u.nickname && <span className="text-gray-400 font-normal"> ({u.nickname})</span>}
+                      </p>
+                    </div>
+                  </td>
+                  <td className="px-2 py-2.5 text-xs text-gray-500 whitespace-nowrap font-mono">{u.employeeId ?? '—'}</td>
+                  <td className="px-2 py-2.5 text-xs text-gray-600 truncate max-w-48">{u.position ?? '—'}</td>
+                  <td className="px-2 py-2.5 text-xs text-gray-600 truncate max-w-48">{u.department ?? '—'}</td>
+                  <td className="px-2 py-2.5 text-xs text-gray-600 whitespace-nowrap">{u.startDate ? formatDateEN(u.startDate) : '—'}</td>
+                  <td className="px-4 py-2.5 text-right">
+                    {isEnrolled && (
+                      <span className="text-xs font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">เรียนแล้ว</span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
     </SidePanel>
   )
 }
@@ -2297,7 +2387,7 @@ function CourseAdminPicker({ users, selectedIds, onChange }: {
             <span className="size-5 rounded-full bg-white overflow-hidden flex items-center justify-center shrink-0 text-xs">
               {u.photoURL ? <img src={u.photoURL} alt={u.displayName} className="size-full object-cover" /> : u.displayName[0]}
             </span>
-            {u.displayName}
+            {formatInstructorName(u)}
             <button type="button" onClick={() => removeChip(u.uid)} className="text-freshket-500 hover:text-rose-600 transition-colors">
               <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -2340,7 +2430,7 @@ function CourseAdminPicker({ users, selectedIds, onChange }: {
                       {u.photoURL ? <img src={u.photoURL} alt={u.displayName} className="size-full object-cover" /> : u.displayName[0]}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-gray-800 truncate">{u.displayName}</p>
+                      <p className="text-xs font-bold text-gray-800 truncate">{formatInstructorName(u)}</p>
                       <p className="text-xs text-gray-400 truncate">{u.department ?? u.email}</p>
                     </span>
                   </button>
@@ -2363,10 +2453,11 @@ function CourseAdminPicker({ users, selectedIds, onChange }: {
   )
 }
 
-// "ชื่อจริง นามสกุล (ชื่อเล่น)" — displayName is already "Firstname Lastname",
-// so only the nickname needs appending.
+// "Firstname Lastname (nickname)" — same English-name-first convention as
+// IndividualAssignmentPanel's roster, since Thai display names aren't useful
+// for matching against the HR system / English-language reporting.
 function formatInstructorName(u: UserProfile): string {
-  const full = (u.displayName ?? '').trim() || u.email
+  const full = (u.displayNameEN ?? '').trim() || u.displayName || u.email
   return u.nickname ? `${full} (${u.nickname})` : full
 }
 

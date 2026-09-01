@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers, useAllTrainingRecords, useUserStats, useMyTrainingRecords, useCourses, useAnnouncements, useTeams } from '@/hooks/useFirestore'
 import { useNotifications } from '@/hooks/useNotifications'
+import { relativeTime } from '@/components/features/NotificationList'
 import type { NotifType } from '@/types/notification'
 import { isAnnouncementVisibleTo } from '@/types/announcement'
 import { canViewByLevel } from '@/lib/jobLevel'
@@ -359,14 +360,15 @@ function TeamScoresCard({ scores, onOpenTeam }: {
 
 // ── Notifications (labels) ────────────────────────────────────────────────────
 const NOTIF_LABEL: Record<NotifType, { text: string; cls: string }> = {
-  shadow_pending_ack:  { text: 'รอประเมิน', cls: 'bg-orange-100 text-orange-600' },
-  shadow_ack_received: { text: 'รับรองแล้ว', cls: 'bg-freshket-100 text-freshket-700' },
-  new_course:          { text: 'คอร์สใหม่', cls: 'bg-blue-100 text-blue-600' },
-  heart_received:      { text: 'ได้รับใจ', cls: 'bg-rose-100 text-rose-600' },
+  shadow_pending_ack:   { text: 'รอประเมิน', cls: 'bg-orange-100 text-orange-600' },
+  shadow_ack_received:  { text: 'รับรองแล้ว', cls: 'bg-freshket-100 text-freshket-700' },
+  new_course:           { text: 'คอร์สใหม่', cls: 'bg-blue-100 text-blue-600' },
+  heart_received:       { text: 'ได้รับใจ', cls: 'bg-rose-100 text-rose-600' },
+  assessment_completed: { text: 'เรียนจบ', cls: 'bg-freshket-100 text-freshket-700' },
 }
 
 function NotificationsCard({ notifications, onOpen }: {
-  notifications: { id: string; type: NotifType; title: string; body: string; read: boolean; refPath: string }[]
+  notifications: { id: string; type: NotifType; title: string; body: string; read: boolean; refPath: string; createdAt: Date }[]
   onOpen: (refPath: string) => void
 }) {
   const unread = notifications.filter((n) => !n.read).length
@@ -388,7 +390,10 @@ function NotificationsCard({ notifications, onOpen }: {
               <button key={n.id} type="button" onClick={() => onOpen(n.refPath)}
                 className="w-full text-left flex items-start gap-2 rounded-xl p-2 hover:bg-gray-50 transition-colors">
                 <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${label.cls}`}>{label.text}</span>
-                <span className={`text-xs flex-1 min-w-0 truncate ${n.read ? 'text-gray-400' : 'text-gray-700 font-bold'}`}>{n.title}</span>
+                <span className="flex-1 min-w-0">
+                  <span className={`block text-xs truncate ${n.read ? 'text-gray-400' : 'text-gray-700 font-bold'}`}>{n.title}</span>
+                  <span className="block text-xs text-gray-400">{relativeTime(n.createdAt)}</span>
+                </span>
               </button>
             )
           })}

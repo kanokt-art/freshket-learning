@@ -6,6 +6,7 @@ import { gradeSubmission, type GivenAnswers } from '@/lib/assessment/grade'
 import { computeUserStats } from '@/types/stats'
 import type { Assessment, Question } from '@/types/assessment'
 import type { Course } from '@/types/course'
+import type { UserProfile } from '@/types/user'
 
 // Authoritative quiz grading.
 //
@@ -37,6 +38,62 @@ const DEADLINE_GRACE_MS = 20_000
 
 function bad(message: string) {
   return NextResponse.json({ error: message }, { status: 400 })
+}
+
+/**
+ * Best-effort notification to the learner's manager (or, absent a managerId,
+ * every team_lead+ — same fallback shadow/page.tsx uses for the same reason:
+ * an unassigned learner shouldn't go unseen). Never throws — a notification
+ * failure must not undo an already-graded, already-recorded submission.
+ */
+async function notifyManagerOfCompletion(
+  db: FirebaseFirestore.Firestore,
+  uid: string,
+  courseTitle: string,
+  score: number,
+  passed: boolean,
+  courseId: string,
+) {
+  try {
+    const learnerSnap = await db.collection('users').doc(uid).get()
+    if (!learnerSnap.exists) return
+    const learner = learnerSnap.data() as Partial<UserProfile>
+
+    const name = (learner.displayNameEN?.trim() || learner.displayName || learner.email || 'พนักงาน')
+      + (learner.nickname ? ` (${learner.nickname})` : '')
+    const roleLine = [learner.position, learner.department].filter(Boolean).join(' · ')
+    const title = `${name} เรียนจบ "${courseTitle}"`
+    const body = `${roleLine ? roleLine + ' — ' : ''}${passed ? 'ทำแบบทดสอบผ่านแล้ว' : 'ทำแบบทดสอบแล้ว แต่ยังไม่ผ่านเกณฑ์'} ได้คะแนน ${score} คะแนน`
+
+    let targetUids: string[]
+    if (learner.managerId) {
+      targetUids = [learner.managerId]
+    } else {
+      // canAccess('team_lead') passes for team_lead, manager, and super_admin —
+      // an `in` query needs those roles spelled out instead.
+      const leadsSnap = await db.collection('users').where('role', 'in', ['team_lead', 'manager', 'super_admin']).get()
+      targetUids = leadsSnap.docs.map((d) => d.id)
+    }
+
+    const now = new Date()
+    await Promise.all(targetUids.map((targetUid) =>
+      db.collection('notifications').doc(targetUid).collection('items')
+        .doc(`assessment_completed_${uid}_${courseId}_${now.getTime()}`)
+        .set({
+          type: 'assessment_completed',
+          title,
+          body,
+          refId: courseId,
+          refPath: `/courses/${courseId}`,
+          read: false,
+          createdAt: now,
+          createdByUid: uid,
+        }),
+    ))
+  } catch (err) {
+    // Same fire-and-forget contract as the client-side pushNotification.
+    console.error('notifyManagerOfCompletion failed', err)
+  }
 }
 
 /** Reject payload shapes we won't grade, before touching Firestore. */
@@ -244,6 +301,13 @@ export async function POST(req: NextRequest) {
         { ...stats, updatedAt: FieldValue.serverTimestamp() },
         { merge: true },
       )
+
+      // "จบแล้ว" means the course is actually done — that's the post-assessment
+      // (or a plain lesson-quiz with no pre/post concept at all), never the
+      // pre-assessment, which only means the learner is just starting out.
+      if (step !== 'pre') {
+        await notifyManagerOfCompletion(db, uid, payload.courseTitle as string, graded.score, passed, courseId)
+      }
     }
 
     // The per-question breakdown is returned only AFTER grading, so the reveal on
