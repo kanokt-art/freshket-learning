@@ -848,7 +848,8 @@ function LessonTypeIcon({ type, className }: { type: LessonType; className?: str
   )
   if (type === 'file') return (
     <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+      <rect x="2.75" y="5.75" width="18.5" height="12.5" rx="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21h9M12 18.25V21" />
     </svg>
   )
   if (type === 'link') return (
@@ -1012,10 +1013,18 @@ function LessonBrowserStep({
               )}
 
               {selectedLesson.type === 'file' && selectedLesson.fileUrl && (
-                <a href={selectedLesson.fileUrl} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
-                  เปิดเอกสาร
-                </a>
+                toEmbedUrl(selectedLesson.fileUrl) ? (
+                  <div className="rounded-xl overflow-hidden border border-gray-100" style={{ aspectRatio: '16/9' }}>
+                    <iframe src={toEmbedUrl(selectedLesson.fileUrl)!.embedUrl} className="w-full h-full" allowFullScreen title={selectedLesson.title} style={{ border: 'none' }} />
+                  </div>
+                ) : (
+                  // Not a Google Slides/Drive link — e.g. a plain publicly-shared file — so
+                  // there's no embeddable URL to build; open it in a new tab instead.
+                  <a href={selectedLesson.fileUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
+                    เปิดเอกสาร
+                  </a>
+                )
               )}
 
               {selectedLesson.type === 'link' && selectedLesson.linkUrl && (

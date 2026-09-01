@@ -51,7 +51,7 @@ export interface CourseTopic {
 export const LESSON_TYPE_LABELS: Record<LessonType, string> = {
   video:      'วิดีโอ',
   article:    'บทความ',
-  file:       'ไฟล์',
+  file:       'Google Slide',
   link:       'ลิงก์ภายนอก',
   quiz:       'แบบฝึกหัด',
   assignment: 'การบ้าน',

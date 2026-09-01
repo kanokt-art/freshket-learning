@@ -38,6 +38,7 @@ import { STATUS_LABELS, STATUS_COLORS, recordProgressPercent, type TrainingStatu
 import type { Assessment } from '@/types/assessment'
 import type { UserProfile, UserRole, Department, Team } from '@/types/user'
 import { getClientFirestore } from '@/lib/firebase/client'
+import { formatDateEN } from '@/lib/utils/dateFormatter'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
@@ -1769,16 +1770,26 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
 }) {
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
+  const [sortByStartDate, setSortByStartDate] = useState<'none' | 'asc' | 'desc'>('none')
   const [draft, setDraft] = useState<Set<string>>(() => new Set(assignedIds))
 
   function toggleDraft(uid: string) {
     setDraft((p) => { const n = new Set(p); n.has(uid) ? n.delete(uid) : n.add(uid); return n })
   }
 
-  const departments = useMemo(() => Array.from(new Set(users.map((u) => u.department).filter(Boolean))).sort() as string[], [users])
+  // Same "only the literal 'Active' counts as inactive" rule as the Employees
+  // list (src/app/(dashboard)/users/page.tsx) — a resigned person shouldn't be
+  // assignable to a new course, but an undefined status predates the HR sync
+  // and is still treated as active.
+  const activeUsers = useMemo(
+    () => users.filter((u) => !u.employmentStatus || u.employmentStatus === 'Active'),
+    [users],
+  )
+
+  const departments = useMemo(() => Array.from(new Set(activeUsers.map((u) => u.department).filter(Boolean))).sort() as string[], [activeUsers])
 
   const filtered = useMemo(() => {
-    let list = users
+    let list = activeUsers
     if (deptFilter) list = list.filter((u) => u.department === deptFilter)
     if (search.trim()) {
       const q = search.toLowerCase()
@@ -1790,8 +1801,15 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
         (u.position?.toLowerCase() ?? '').includes(q),
       )
     }
+    if (sortByStartDate !== 'none') {
+      list = [...list].sort((a, b) => {
+        const at = a.startDate?.getTime() ?? 0
+        const bt = b.startDate?.getTime() ?? 0
+        return sortByStartDate === 'asc' ? at - bt : bt - at
+      })
+    }
     return list
-  }, [users, search, deptFilter])
+  }, [activeUsers, search, deptFilter, sortByStartDate])
 
   const filteredIds = useMemo(() => filtered.map((u) => u.uid), [filtered])
   const selectAllState = computeGroupState(filteredIds, draft, enrolledUserIds)
@@ -1827,10 +1845,22 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
             {departments.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
         )}
-        <label className="flex items-center gap-2 pt-1 cursor-pointer select-none">
-          <GroupCheckbox state={selectAllState} onChange={toggleSelectAllFiltered} />
-          <span className="text-xs font-bold text-gray-600">เลือกทั้งหมด ({filteredIds.length} คน)</span>
-        </label>
+        <div className="flex items-center justify-between gap-2">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <GroupCheckbox state={selectAllState} onChange={toggleSelectAllFiltered} />
+            <span className="text-xs font-bold text-gray-600">เลือกทั้งหมด ({filteredIds.length} คน)</span>
+          </label>
+          <button type="button"
+            onClick={() => setSortByStartDate((s) => s === 'asc' ? 'desc' : 'asc')}
+            className={`shrink-0 flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-lg transition-colors ${
+              sortByStartDate !== 'none' ? 'text-freshket-600 bg-freshket-50' : 'text-gray-400 hover:bg-gray-50'
+            }`}>
+            วันเริ่มงาน
+            <svg className={`size-3 transition-transform ${sortByStartDate === 'desc' ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l4-4 4 4M8 15l4 4 4-4" />
+            </svg>
+          </button>
+        </div>
       </div>
       {filtered.length === 0 ? (
         <p className="text-xs text-gray-400 text-center py-8">ไม่พบพนักงาน</p>
@@ -1849,8 +1879,14 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
                 : <span className="text-xs font-bold text-gray-500">{u.displayName[0]}</span>}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-gray-800 truncate">{u.displayName}</p>
-              <p className="text-xs text-gray-400 truncate">{u.employeeId ?? u.department ?? u.email}</p>
+              <p className="text-xs font-bold text-gray-800 truncate">
+                {u.displayNameEN || u.displayName}
+                {u.nickname && <span className="text-gray-400 font-normal"> ({u.nickname})</span>}
+              </p>
+              <p className="text-xs text-gray-400 truncate">
+                {[u.position, u.department].filter(Boolean).join(' · ') || '—'}
+                {u.startDate && <span className="text-gray-300"> · เริ่มงาน {formatDateEN(u.startDate)}</span>}
+              </p>
             </div>
             {isEnrolled && (
               <span className="text-xs font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 shrink-0">เรียนแล้ว</span>
@@ -2184,7 +2220,8 @@ function LessonTypeIcon({ type, className }: { type: LessonType; className?: str
   )
   if (type === 'file') return (
     <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+      <rect x="2.75" y="5.75" width="18.5" height="12.5" rx="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21h9M12 18.25V21" />
     </svg>
   )
   if (type === 'link') return (
@@ -2501,12 +2538,12 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
 
       {lesson.type === 'file' && (
         <div className="space-y-2">
-          <label className="text-xs font-bold text-gray-600 block">URL เอกสาร (Google Slides หรือไฟล์ที่แชร์ลิงก์แล้ว)</label>
+          <label className="text-xs font-bold text-gray-600 block">Google Slide URL</label>
           <input type="url" value={lesson.fileUrl ?? ''} onChange={(e) => onChange({ fileUrl: e.target.value })}
             placeholder="https://docs.google.com/presentation/d/..."
             className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 font-mono"
           />
-          <p className="text-xs text-gray-400">ระบบไม่รองรับการอัปโหลดไฟล์วิดีโอ/PDF/PowerPoint โดยตรง — ใช้ลิงก์ Google Slides หรือไฟล์ที่แชร์แบบสาธารณะแทน</p>
+          <p className="text-xs text-gray-400">วางลิงก์ Google Slides (ตั้งค่าแชร์เป็น "ทุกคนที่มีลิงก์" ก่อน) ระบบจะฝังสไลด์แสดงในหน้าเรียนโดยตรง — ไฟล์ประเภทอื่นที่แชร์ลิงก์แบบสาธารณะยังเปิดได้ แต่จะเปิดเป็นแท็บใหม่แทน</p>
         </div>
       )}
 
@@ -2529,13 +2566,27 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
           <div className="max-h-48 overflow-y-auto space-y-1 border border-gray-100 rounded-xl p-1.5 bg-gray-50/50">
             {filteredAssessments.length === 0
               ? <p className="text-xs text-gray-400 text-center py-4">ไม่พบแบบฝึกหัด</p>
-              : filteredAssessments.map((a) => (
-                <button key={a.id} type="button" onClick={() => onChange({ assessmentId: a.id })}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-all ${lesson.assessmentId === a.id ? 'bg-freshket-100 text-freshket-700 font-bold' : 'bg-white hover:bg-gray-100 text-gray-700'}`}>
-                  {a.title} <span className="ml-1.5 text-gray-400">({a.questions.length} ข้อ)</span>
-                </button>
-              ))}
+              : filteredAssessments.map((a) => {
+                const active = lesson.assessmentId === a.id
+                return (
+                  <button key={a.id} type="button" onClick={() => onChange({ assessmentId: a.id })}
+                    className={`w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg text-xs transition-all border ${
+                      active ? 'bg-freshket-100 text-freshket-700 font-bold border-freshket-300' : 'bg-white hover:bg-gray-100 text-gray-700 border-transparent'
+                    }`}>
+                    <span className={`shrink-0 size-4 rounded-full border-2 flex items-center justify-center ${active ? 'border-freshket-500 bg-freshket-500' : 'border-gray-300'}`}>
+                      {active && <svg className="size-2.5 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" /></svg>}
+                    </span>
+                    <span className="flex-1 truncate">{a.title}</span>
+                    <span className="text-gray-400 shrink-0">({a.questions.length} ข้อ)</span>
+                  </button>
+                )
+              })}
           </div>
+          <p className="text-xs text-gray-400">
+            {lesson.assessmentId
+              ? <>เลือกอยู่: <span className="font-bold text-freshket-600">{assessments.find((a) => a.id === lesson.assessmentId)?.title ?? '(ไม่พบแบบฝึกหัดนี้แล้ว)'}</span></>
+              : 'ยังไม่ได้เลือกแบบฝึกหัด'}
+          </p>
         </div>
       )}
 
