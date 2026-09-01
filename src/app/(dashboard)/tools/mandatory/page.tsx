@@ -10,6 +10,7 @@ import { MandatorySlideViewer } from '@/components/features/MandatorySlideViewer
 import { SlidePreviewArea } from '@/components/features/MandatoryPreview'
 import { MandatoryArchiveRail, MandatoryMonthHeader } from '@/components/features/MandatoryArchive'
 import { DEMO_MANDATORY_ITEMS, formatDate, currentWeekLabel, groupByMonth, groupByYear, type MandatoryItem } from '@/lib/mandatory'
+import { confirmAction } from '@/lib/ui/alert'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -79,8 +80,14 @@ export default function MandatoryPage() {
     setEditItem(null)
   }
 
-  function handleDelete(id: string) {
-    if (!window.confirm('ลบ Slide นี้?')) return
+  async function handleDelete(id: string) {
+    const ok = await confirmAction({
+      title: 'ลบ Slide นี้?',
+      text: 'การลบไม่สามารถย้อนกลับได้',
+      confirmText: 'ลบ',
+      danger: true,
+    })
+    if (!ok) return
     setItems(prev => prev.filter(i => i.id !== id))
   }
 

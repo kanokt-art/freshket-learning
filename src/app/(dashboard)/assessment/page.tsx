@@ -18,6 +18,7 @@ import {
 } from '@/types/assessment'
 import { getClientFirestore } from '@/lib/firebase/client'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
+import { alertError } from '@/lib/ui/alert'
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
 
@@ -91,7 +92,7 @@ export default function AssessmentPage() {
       setLocalDeleted((p) => { const s = new Set(p); s.add(a.id); return s })
       setConfirmDelete(null)
     } catch (e) {
-      alert('ลบไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+      void alertError('ลบไม่สำเร็จ', e instanceof Error ? e.message : String(e))
     } finally {
       setDeleting(false)
     }

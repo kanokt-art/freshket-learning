@@ -13,6 +13,7 @@ import { canAccess, ROLE_LABELS, getTeamManagerIds, getTeamLeadIds, type UserPro
 import type { AssessmentScore } from '@/types/assessmentScore'
 import { canViewByLevel } from '@/lib/jobLevel'
 import { formatDateEN } from '@/lib/utils/dateFormatter'
+import { alertError } from '@/lib/ui/alert'
 
 // ── Dept color palette ─────────────────────────────────────────────────────────
 const DEPT_COLORS = [
@@ -535,7 +536,7 @@ function EmployeeSidebar({
       }, { merge: true })
     } catch (e) {
       console.error('saveFeedback', e)
-      alert('บันทึกความคิดเห็นไม่สำเร็จ')
+      void alertError('บันทึกความคิดเห็นไม่สำเร็จ', 'กรุณาลองอีกครั้ง')
     }
   }
 

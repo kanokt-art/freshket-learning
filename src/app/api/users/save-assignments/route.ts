@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminFirestore } from '@/lib/firebase/admin'
-import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
+import { requireManager } from '@/lib/firebase/requireManager'
 
 type Assignment = {
   uid: string
@@ -16,7 +16,12 @@ const VALID_ROLES = ['sale', 'team_lead', 'manager', 'super_admin']
 // Body: { assignments: Assignment[] }
 export async function POST(req: NextRequest) {
   try {
-    const gate = await requireSuperAdmin(req)
+    // manager+, not super_admin only. Team assignment is a manager action in both
+    // the UI (`canAccess(role, 'manager')` on /users) and firestore.rules
+    // (`allow write: if isManagerOrAbove()` on /teams); this route was the odd one
+    // out, so a manager dragging someone into a team got "server ปฏิเสธ" and the
+    // move never persisted. Changing someone's ROLE stays super_admin-only below.
+    const gate = await requireManager(req)
     if (!gate.ok) return gate.response
 
     const { assignments } = (await req.json()) as { assignments: Assignment[] }
@@ -37,6 +42,7 @@ export async function POST(req: NextRequest) {
 
     const batch = db.batch()
     const skipped: string[] = []
+    const roleChangesDenied: string[] = []
     let saved = 0
 
     for (const a of targets) {
@@ -44,7 +50,16 @@ export async function POST(req: NextRequest) {
       const update: Record<string, unknown> = {}
       if ('teamId' in a) update.teamId = a.teamId ?? null
       if (a.visibleTeamIds !== undefined) update.visibleTeamIds = a.visibleTeamIds
-      if (a.role !== undefined && VALID_ROLES.includes(a.role)) update.role = a.role
+
+      // Role changes stay super_admin-only. Without this the widened gate would
+      // hand every manager a privilege-escalation primitive: this route uses the
+      // Admin SDK, so it bypasses the firestore.rules clause that stops a manager
+      // from touching `role` — a manager could promote themselves to super_admin.
+      if (a.role !== undefined && VALID_ROLES.includes(a.role)) {
+        if (gate.isSuperAdmin) update.role = a.role
+        else roleChangesDenied.push(a.uid)
+      }
+
       if (Object.keys(update).length > 0) {
         batch.update(db.collection('users').doc(a.uid), update)
         saved++
@@ -52,7 +67,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (saved > 0) await batch.commit()
-    return NextResponse.json({ saved, skipped })
+    return NextResponse.json({ saved, skipped, roleChangesDenied })
   } catch (e) {
     console.error('POST /api/users/save-assignments', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

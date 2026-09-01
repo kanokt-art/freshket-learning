@@ -233,7 +233,14 @@ export function applyLocalUserPatch(uid: string, patch: UserPatch): void {
           // localStorage patch kept the UI looking correct until the next
           // Firestore snapshot rolled it back, which read as "member vanished".
           console.error(err)
-          alert(`บันทึกการย้ายพนักงานไม่สำเร็จ: ${err?.message ?? err}\n(พนักงานคนนี้อาจถูกรวม/ลบไปแล้ว ลองรีเฟรชหน้าเว็บ)`)
+          // Imported lazily: this module is pulled in by nearly every page, so a
+          // static import would put SweetAlert2 in the shared first-load bundle
+          // for a dialog that only ever appears when a write fails.
+          void import('@/lib/ui/alert').then(({ alertError }) =>
+            alertError(
+              'บันทึกการย้ายพนักงานไม่สำเร็จ',
+              `${err?.message ?? err} — พนักงานคนนี้อาจถูกรวม/ลบไปแล้ว กรุณารีเฟรชหน้าเว็บ`,
+            ))
         })
     })
   }

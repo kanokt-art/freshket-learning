@@ -13,6 +13,7 @@ import type { RoleplayAssessment } from '@/types/roleplay'
 import { STATUS_LABELS, STATUS_COLORS } from '@/types/tracking'
 import { formatDate, formatDateEN } from '@/lib/utils/dateFormatter'
 import { authedFetch } from '@/lib/api/authedFetch'
+import { alertError, alertSuccess, alertWarning } from '@/lib/ui/alert'
 import { ImportAssessmentModal } from '@/components/features/ImportAssessmentModal'
 import { OrgBoard, isRosterRole, PHASE1_DEPARTMENTS } from '@/components/features/OrgBoard'
 import { demoStore } from '@/lib/demo/demoStore'
@@ -217,14 +218,14 @@ export default function UsersPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ assignments: [{ uid: userId, teamId: teamId ?? null }] }),
     }).then(async res => {
-      if (!res.ok) { alert('บันทึกการย้ายพนักงานไม่สำเร็จ (server ปฏิเสธ) — การเปลี่ยนแปลงอาจไม่ถูกบันทึกถาวร'); return }
+      if (!res.ok) { void alertError('บันทึกการย้ายพนักงานไม่สำเร็จ', 'เซิร์ฟเวอร์ปฏิเสธคำขอ — การเปลี่ยนแปลงอาจไม่ถูกบันทึกถาวร'); return }
       const json = await res.json()
       if (json.skipped?.length > 0) {
-        alert('บันทึกไม่สำเร็จ: ไม่พบข้อมูลพนักงานคนนี้ใน Firestore แล้ว (อาจถูกรวม/ลบไปก่อนหน้านี้) — กรุณารีเฟรชหน้าเว็บ')
+        void alertError('บันทึกไม่สำเร็จ', 'ไม่พบข้อมูลพนักงานคนนี้ใน Firestore แล้ว (อาจถูกรวม/ลบไปก่อนหน้านี้) — กรุณารีเฟรชหน้าเว็บ')
       }
     }).catch(err => {
       console.error(err)
-      alert('บันทึกการย้ายพนักงานไม่สำเร็จ (เชื่อมต่อ server ไม่ได้) — การเปลี่ยนแปลงอาจไม่ถูกบันทึกถาวร')
+      void alertError('บันทึกการย้ายพนักงานไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — การเปลี่ยนแปลงอาจไม่ถูกบันทึกถาวร')
     })
   }
   function handleRenameTeam(teamId: string, newName: string) {
@@ -299,10 +300,10 @@ export default function UsersPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ assignments: [{ uid, visibleTeamIds: visibleTeamIds ?? null }] }),
     }).then(async res => {
-      if (!res.ok) { alert('บันทึกทีมที่ดูแลไม่สำเร็จ (server ปฏิเสธ) — การเปลี่ยนแปลงอาจไม่ถูกบันทึกถาวร'); return }
+      if (!res.ok) { void alertError('บันทึกทีมที่ดูแลไม่สำเร็จ', 'เซิร์ฟเวอร์ปฏิเสธคำขอ — การเปลี่ยนแปลงอาจไม่ถูกบันทึกถาวร'); return }
       const json = await res.json()
       if (json.skipped?.length > 0) {
-        alert('บันทึกไม่สำเร็จ: ไม่พบข้อมูลผู้ใช้นี้ใน Firestore แล้ว — กรุณารีเฟรชหน้าเว็บ')
+        void alertError('บันทึกไม่สำเร็จ', 'ไม่พบข้อมูลผู้ใช้นี้ใน Firestore แล้ว — กรุณารีเฟรชหน้าเว็บ')
       }
     }).catch(console.error)
   }
@@ -394,10 +395,10 @@ export default function UsersPage() {
     try {
       const res = await authedFetch('/api/stats/rebuild', { method: 'POST' })
       const json = await res.json()
-      if (!res.ok) { alert('อัปเดตสถิติไม่สำเร็จ: ' + (json.error ?? 'Unknown error')); return }
-      alert(`อัปเดตสถิติสำเร็จ — ${json.users} คน จาก ${json.records} รายการ`)
+      if (!res.ok) { void alertError('อัปเดตสถิติไม่สำเร็จ', json.error ?? 'Unknown error'); return }
+      void alertSuccess('อัปเดตสถิติสำเร็จ', `${json.users} คน จาก ${json.records} รายการ`)
     } catch (e) {
-      alert('อัปเดตสถิติไม่สำเร็จ: ' + String(e))
+      void alertError('อัปเดตสถิติไม่สำเร็จ', String(e))
     } finally {
       setRebuildingStats(false)
     }
@@ -409,7 +410,7 @@ export default function UsersPage() {
     try {
       const res = await authedFetch('/api/users/dedup', { method: 'POST' })
       const json = await res.json()
-      if (!res.ok) { alert('Dedup failed: ' + (json.error ?? 'Unknown error')); return }
+      if (!res.ok) { void alertError('รวมข้อมูลซ้ำไม่สำเร็จ', json.error ?? 'Unknown error'); return }
 
       // Migrate localStorage patches from old UIDs to canonical UIDs
       if (json.uidMap && Object.keys(json.uidMap).length > 0) {
@@ -432,7 +433,7 @@ export default function UsersPage() {
       }
       setDedupResult(json)
     } catch {
-      alert('Network error during dedup')
+      void alertError('รวมข้อมูลซ้ำไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
     } finally {
       setDedupRunning(false)
     }
@@ -461,14 +462,14 @@ export default function UsersPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assignments }),
       })
-      if (!res.ok) { alert('Save failed'); return }
+      if (!res.ok) { void alertError('บันทึกไม่สำเร็จ', 'เซิร์ฟเวอร์ปฏิเสธคำขอ'); return }
       const json = await res.json()
       if (json.skipped?.length > 0) {
-        alert(`บันทึกสำเร็จบางส่วน: ข้าม ${json.skipped.length} คนที่ไม่พบข้อมูลใน Firestore แล้ว (อาจถูกรวม/ลบไปก่อนหน้านี้)`)
+        void alertWarning('บันทึกสำเร็จบางส่วน', `ข้าม ${json.skipped.length} คนที่ไม่พบข้อมูลใน Firestore แล้ว (อาจถูกรวม/ลบไปก่อนหน้านี้)`)
       }
       setSavedAssignments(true)
     } catch {
-      alert('Network error when saving assignments')
+      void alertError('บันทึกไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
     } finally {
       setSavingAssignments(false)
     }

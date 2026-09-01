@@ -49,6 +49,7 @@ import { getDemoMode, FRESHKET_LOGO_URL } from '@/lib/demo/demoMode'
 import { demoStore } from '@/lib/demo/demoStore'
 import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
+import { alertError } from '@/lib/ui/alert'
 const DEMO_MODE = getDemoMode()
 const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS) as CourseCategory[]
 
@@ -310,7 +311,7 @@ export default function CoursesPage() {
       }
       setConfirmDelete(null)
     } catch (e) {
-      alert('ลบไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+      void alertError('ลบไม่สำเร็จ', e instanceof Error ? e.message : String(e))
     } finally {
       setDeleting(false)
     }

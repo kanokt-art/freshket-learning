@@ -76,3 +76,28 @@ test('POST /api/users with no idToken → 400, and the message says which field'
   expect(res.status()).toBe(400)
   expect((await res.json()).error).toMatch(/idToken/i)
 })
+
+// Team assignment is a MANAGER action — it was gated on super_admin while both
+// the /users UI and firestore.rules said manager, so a manager moving someone
+// between teams got "server ปฏิเสธ" and the change never persisted.
+// These assert the gate still refuses anonymous/bad-token callers; the
+// manager-can / manager-cannot-change-role split needs a real token and belongs
+// to the live suite.
+test.describe('save-assignments gate', () => {
+  test('rejects an unauthenticated caller', async ({ request }) => {
+    const res = await request.post('/api/users/save-assignments', {
+      data: { assignments: [{ uid: 'csv-x', teamId: 't1' }] },
+      failOnStatusCode: false,
+    })
+    expect(res.status()).toBe(401)
+  })
+
+  test('rejects a malformed token with 401, not 500', async ({ request }) => {
+    const res = await request.post('/api/users/save-assignments', {
+      headers: { Authorization: 'Bearer not-a-token' },
+      data: { assignments: [{ uid: 'csv-x', teamId: 't1' }] },
+      failOnStatusCode: false,
+    })
+    expect(res.status()).toBe(401)
+  })
+})

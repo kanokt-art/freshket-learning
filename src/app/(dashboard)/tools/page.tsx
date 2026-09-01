@@ -12,6 +12,7 @@ import { SEED_TOOLS, isToolVisibleTo, type SaleTool } from '@/lib/tools'
 import { markToolSeen } from '@/hooks/useUnseenTools'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
+import { confirmAction } from '@/lib/ui/alert'
 
 const DEMO_MODE = getDemoMode()
 
@@ -322,7 +323,8 @@ export default function ToolsPage() {
 
   const deleteDeck = useCallback(async (id: string) => {
     if (DEMO_MODE) return
-    if (!window.confirm('ลบสไลด์นี้?')) return
+    const okDeck = await confirmAction({ title: 'ลบสไลด์นี้?', text: 'การลบไม่สามารถย้อนกลับได้', confirmText: 'ลบ', danger: true })
+    if (!okDeck) return
     const { getClientFirestore, doc, deleteDoc } = await import('@/lib/firebase/client')
     await deleteDoc(doc(getClientFirestore(), 'knowledgeDecks', id))
   }, [])
@@ -373,7 +375,8 @@ export default function ToolsPage() {
 
   const deleteTool = useCallback(async (id: string) => {
     if (DEMO_MODE) return
-    if (!window.confirm('ลบ Tool นี้?')) return
+    const okTool = await confirmAction({ title: 'ลบ Tool นี้?', text: 'การลบไม่สามารถย้อนกลับได้', confirmText: 'ลบ', danger: true })
+    if (!okTool) return
     const { getClientFirestore, doc, deleteDoc } = await import('@/lib/firebase/client')
     await deleteDoc(doc(getClientFirestore(), 'tools', id))
   }, [])
