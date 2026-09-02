@@ -3,7 +3,6 @@ import { FieldValue } from 'firebase-admin/firestore'
 import { getAdminFirestore } from '@/lib/firebase/admin'
 import { requireStaff } from '@/lib/firebase/requireStaff'
 import type { Assessment } from '@/types/assessment'
-import type { Course } from '@/types/course'
 
 // Opens a timed attempt session.
 //
@@ -14,8 +13,9 @@ import type { Course } from '@/types/course'
 // after it. The browser countdown becomes a display of the server's deadline
 // rather than the thing being enforced.
 //
-// `timeLimitMinutes` is a COURSE-level setting (Course.quizSettings), so a quiz
-// opened outside a course has no limit — matching the existing data model.
+// `timeLimitMinutes` lives on the Assessment itself — the same quiz keeps the
+// same timer whether it's used as a course's pre-test, post-test, or a
+// standalone lesson quiz, instead of being re-specified per course.
 
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/
 
@@ -44,18 +44,14 @@ export async function POST(req: NextRequest) {
 
     const aSnap = await db.collection('assessments').doc(assessmentId).get()
     if (!aSnap.exists) return NextResponse.json({ error: 'ไม่พบแบบทดสอบนี้' }, { status: 404 })
-    if ((aSnap.data() as Partial<Assessment>).isPublished !== true) {
+    const assessmentData = aSnap.data() as Partial<Assessment>
+    if (assessmentData.isPublished !== true) {
       return NextResponse.json({ error: 'แบบทดสอบนี้ยังไม่เผยแพร่' }, { status: 403 })
     }
 
-    let timeLimitMinutes = 0
-    if (typeof courseId === 'string') {
-      const cSnap = await db.collection('courses').doc(courseId).get()
-      const qs = cSnap.exists ? (cSnap.data() as Partial<Course>).quizSettings : undefined
-      const raw = Number(qs?.timeLimitMinutes ?? 0)
-      // Guard against a nonsense stored value (negative, NaN, absurdly large).
-      timeLimitMinutes = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 600) : 0
-    }
+    // Guard against a nonsense stored value (negative, NaN, absurdly large).
+    const rawLimit = Number(assessmentData.timeLimitMinutes ?? 0)
+    const timeLimitMinutes = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 600) : 0
 
     const startedAt = new Date()
     const ref = db.collection('assessmentSessions').doc()

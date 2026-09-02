@@ -9,6 +9,14 @@ export interface TrainingRecord {
   status: TrainingStatus
   score?: number             // 0-100
   passScore?: number         // minimum pass threshold
+  // Scores for the course's designated pre-test/post-test quiz lessons (see
+  // CourseLesson.quizRole) — separate from `score`, which is whichever
+  // assessment's own take-flow last graded (a lesson quiz with no pre/post
+  // role, or the legacy course-level assessment before that concept was
+  // removed). Set only by a super_admin manual override today
+  // (POST /api/training-records/override); nothing else writes them yet.
+  preTestScore?: number
+  postTestScore?: number
   startedAt?: Date
   completedAt?: Date
   updatedAt?: Date           // last write (set by CSV import / status change)

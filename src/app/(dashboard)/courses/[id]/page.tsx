@@ -15,13 +15,16 @@ import { syncTrainingRecord, countCourseLessons } from '@/lib/progress'
 import { progKey, statusKey, takeawayKey, readScoped } from '@/lib/courseProgressKeys'
 
 // ── Progress tracking via localStorage (mirrored to Firestore, see persist()) ──
+// preDone/postDone/preScore/postScore were dropped along with the course-level
+// pre/post-test concept — a course now only ever has a 'slide' and/or
+// 'takeaway' step (see buildSteps). Lesson-level quizzes report their own
+// completion via completedLessonIds, not through this Progress shape.
 type Progress = {
-  preDone: boolean; slideDone: boolean; postDone: boolean; takeawayDone: boolean
-  preScore?: number; postScore?: number
+  slideDone: boolean; takeawayDone: boolean
   completedLessonIds?: string[]
 }
 
-const EMPTY_PROG: Progress = { preDone: false, slideDone: false, postDone: false, takeawayDone: false, completedLessonIds: [] }
+const EMPTY_PROG: Progress = { slideDone: false, takeawayDone: false, completedLessonIds: [] }
 
 function loadProgress(uid: string, courseId: string): Progress {
   if (typeof window === 'undefined' || !uid) return EMPTY_PROG
@@ -68,39 +71,26 @@ function saveTakeAway(courseId: string, text: string, uid?: string, courseTitle?
 // Derive overall course status from step progress and persist for the list page
 function checkAndSaveStatus(uid: string, courseId: string, course: Course, prog: Progress): TrainingStatus {
   const steps = buildSteps(course)
-  const allDone = steps.every((s) => {
-    if (s.id === 'pre')      return prog.preDone
-    if (s.id === 'slide')    return prog.slideDone
-    if (s.id === 'takeaway') return prog.takeawayDone
-    return prog.postDone
-  })
-  const anyDone = prog.preDone || prog.slideDone || prog.postDone || prog.takeawayDone
-    || (prog.completedLessonIds?.length ?? 0) > 0
+  const allDone = steps.every((s) => (s.id === 'slide' ? prog.slideDone : prog.takeawayDone))
+  const anyDone = prog.slideDone || prog.takeawayDone || (prog.completedLessonIds?.length ?? 0) > 0
   const status: TrainingStatus = allDone ? 'completed' : anyDone ? 'in_progress' : 'not_started'
   if (uid) localStorage.setItem(statusKey(uid, courseId), status)
   return status
 }
 
-// Certificate eligibility: gated on the quiz pass-threshold (if the course has a quiz
-// with passThresholdPercent set) once all course steps are done. Courses with no quiz
-// score to gate on (e.g. Google Form assessments) fall back to "earned on completion".
-type CertificateStatus = 'none' | 'locked' | 'earned' | 'below_threshold'
+// Certificate eligibility: once all course steps are done. There is no more
+// course-level pre/post-test score to gate the certificate on — that concept
+// was removed along with course-level pre/post-assessments (lesson-level
+// quizzes have their own pass/fail, scoped to that lesson, not the course
+// certificate). So completion is now the only gate: 'locked' until every step
+// is done, then 'earned'.
+type CertificateStatus = 'none' | 'locked' | 'earned'
 
 function getCertificateStatus(course: Course, prog: Progress): CertificateStatus {
   if (!course.hasCertificate) return 'none'
   const steps = buildSteps(course)
-  const allDone = steps.every((s) => {
-    if (s.id === 'pre')      return prog.preDone
-    if (s.id === 'slide')    return prog.slideDone
-    if (s.id === 'takeaway') return prog.takeawayDone
-    return prog.postDone
-  })
-  if (!allDone) return 'locked'
-  const threshold = course.quizSettings?.passThresholdPercent
-  if (threshold == null) return 'earned'
-  const relevantScore = course.hasPostAssessment ? prog.postScore : course.hasPreAssessment ? prog.preScore : undefined
-  if (relevantScore == null) return 'earned'
-  return relevantScore >= threshold ? 'earned' : 'below_threshold'
+  const allDone = steps.every((s) => (s.id === 'slide' ? prog.slideDone : prog.takeawayDone))
+  return allDone ? 'earned' : 'locked'
 }
 
 // ── Media URL detection & conversion ─────────────────────────────────────────
@@ -112,16 +102,6 @@ function detectMediaType(url: string): MediaType {
   if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube'
   if (url.includes('drive.google.com')) return 'google_drive'
   return 'unknown'
-}
-
-function toFormEmbedUrl(url: string): string | null {
-  if (!url || url.includes('example-') || url.includes('forms.gle')) return null
-  if (url.includes('docs.google.com/forms')) {
-    const base = url.split('?')[0].replace(/\/(edit|pub|closedform)$/, '/viewform')
-    const viewBase = base.endsWith('/viewform') ? base : `${base}/viewform`
-    return `${viewBase}?embedded=true`
-  }
-  return null
 }
 
 function toEmbedUrl(url: string): { embedUrl: string; type: MediaType } | null {
@@ -162,7 +142,7 @@ function toEmbedUrl(url: string): { embedUrl: string; type: MediaType } | null {
 }
 
 // ── Step types ────────────────────────────────────────────────────────────────
-type StepId = 'pre' | 'slide' | 'post' | 'takeaway'
+type StepId = 'slide' | 'takeaway'
 
 interface StepDef {
   id: StepId
@@ -192,7 +172,7 @@ export default function CourseDetailPage() {
   const [tab, setTab] = useState<'results' | 'content'>('results')
 
   const [progress, setProgress] = useState<Progress>(EMPTY_PROG)
-  const [activeStep, setActiveStep] = useState<StepId>('pre')
+  const [activeStep, setActiveStep] = useState<StepId>('slide')
 
   // Load progress from localStorage on mount. Keyed by uid, so it has to wait
   // for auth to resolve — an anonymous first paint would read nothing.
@@ -236,13 +216,12 @@ export default function CourseDetailPage() {
   useEffect(() => {
     if (!course || !user?.uid) return
     const prog: Progress = JSON.parse(progressKey)
-    const started = prog.preDone || prog.slideDone || prog.postDone || prog.takeawayDone
+    const started = prog.slideDone || prog.takeawayDone
       || (prog.completedLessonIds?.length ?? 0) > 0
     if (!started) return
     const status = checkAndSaveStatus(user.uid, course.id, course, prog)
     void syncTrainingRecord(user.uid, user.displayName, course, {
       status,
-      score: prog.postScore ?? prog.preScore,
       completedLessonIds: prog.completedLessonIds ?? [],
       totalLessons: countCourseLessons(course),
     })
@@ -292,21 +271,14 @@ export default function CourseDetailPage() {
   const catColor = CATEGORY_COLORS[course.category]
 
   function isDone(stepId: StepId, prog = progress): boolean {
-    if (stepId === 'pre')      return prog.preDone
     if (stepId === 'slide')    return prog.slideDone
-    if (stepId === 'post')     return prog.postDone
     if (stepId === 'takeaway') return prog.takeawayDone
     return false
   }
 
   function isLocked(stepId: StepId): boolean {
-    if (stepId === 'pre') return false
-    if (stepId === 'slide') return !!(course!.hasPreAssessment && !progress.preDone)
-    if (stepId === 'post') return !progress.slideDone
-    if (stepId === 'takeaway') {
-      const lastRequired = course!.hasPostAssessment ? 'postDone' : course!.slideUrl ? 'slideDone' : 'preDone'
-      return !progress[lastRequired as keyof Progress]
-    }
+    if (stepId === 'slide') return false
+    if (stepId === 'takeaway') return !progress.slideDone
     return false
   }
 
@@ -331,32 +303,12 @@ export default function CourseDetailPage() {
   function markSlideDone() {
     const next = { ...progress, slideDone: true }
     persist(next)
-    if (course!.hasPostAssessment) setActiveStep('post')
-    else if (course!.hasKeyTakeAway) setActiveStep('takeaway')
+    if (course!.hasKeyTakeAway) setActiveStep('takeaway')
   }
 
   function markTakeAwayDone(text: string) {
     saveTakeAway(id, text, user?.uid, course?.title)
     persist({ ...progress, takeawayDone: true })
-  }
-
-  function startAssessment(assessmentId: string, step: 'pre' | 'post') {
-    sessionStorage.setItem('assessment_return', JSON.stringify({ courseId: id, step }))
-    router.push(`/assessment/${assessmentId}`)
-  }
-
-  function openGoogleForm(url: string, step: 'pre' | 'post') {
-    window.open(url, '_blank', 'noopener,noreferrer')
-    // Mark done after user opens it (optimistic — they can mark manually)
-  }
-
-  function markFormDone(step: 'pre' | 'post') {
-    const field = step === 'pre' ? 'preDone' : 'postDone'
-    const next = { ...progress, [field]: true }
-    persist(next)
-    if (step === 'pre' && course!.slideUrl) setActiveStep('slide')
-    else if (step === 'pre' && course!.hasKeyTakeAway) setActiveStep('takeaway')
-    if (step === 'post' && course!.hasKeyTakeAway) setActiveStep('takeaway')
   }
 
   const currentStep = steps.find((s) => s.id === activeStep) ?? steps[0]
@@ -499,7 +451,7 @@ export default function CourseDetailPage() {
           {/* Course info */}
           <div className="mt-auto pt-4 border-t border-gray-100 space-y-2">
             {course.hasCertificate && (
-              <CertificateStatusBadge status={getCertificateStatus(course, progress)} passThresholdPercent={course.quizSettings?.passThresholdPercent} />
+              <CertificateStatusBadge status={getCertificateStatus(course, progress)} />
             )}
             <p className="text-sm text-gray-400 px-2">{course.description}</p>
           </div>
@@ -515,9 +467,6 @@ export default function CourseDetailPage() {
               progress={progress}
               courseId={id}
               onMarkSlideDone={markSlideDone}
-              onStartAssessment={startAssessment}
-              onOpenGoogleForm={openGoogleForm}
-              onMarkFormDone={markFormDone}
               onMarkTakeAwayDone={markTakeAwayDone}
               onLessonComplete={markLessonComplete}
               onNext={() => {
@@ -536,26 +485,21 @@ export default function CourseDetailPage() {
 }
 
 // ── Build steps array from course config ──────────────────────────────────────
+// Course-level pre/post-assessment steps no longer exist — a course now has
+// only a 'slide' step (always present) and an optional 'takeaway' step.
 function buildSteps(course: ReturnType<typeof useCourse>['data'] & object): StepDef[] {
-  const steps: StepDef[] = []
-  if (course.hasPreAssessment) steps.push({ id: 'pre', label: 'Pre-Assessment', sublabel: 'ทำแบบทดสอบก่อนเรียน' })
-  if (course.slideUrl) steps.push({ id: 'slide', label: 'สื่อการสอน', sublabel: 'เรียนจากสไลด์' })
-  if (course.hasPostAssessment) steps.push({ id: 'post', label: 'Post-Assessment', sublabel: 'ทำแบบทดสอบหลังเรียน' })
+  const steps: StepDef[] = [{ id: 'slide', label: 'สื่อการสอน', sublabel: 'เรียนจากสไลด์' }]
   if (course.hasKeyTakeAway) steps.push({ id: 'takeaway', label: 'Key Take Away', sublabel: 'สรุปสิ่งที่ได้เรียนรู้' })
-  if (steps.length === 0) steps.push({ id: 'slide', label: 'สื่อการสอน', sublabel: 'เรียนจากสไลด์' })
   return steps
 }
 
 // ── Certificate status ───────────────────────────────────────────────────────
-function CertificateStatusBadge({ status, passThresholdPercent }: {
-  status: CertificateStatus; passThresholdPercent?: number
-}) {
+// 'below_threshold' can no longer be produced (see getCertificateStatus) —
+// the branch is kept out of the rendered copy rather than the type so a
+// future re-introduction of a score gate doesn't require touching this badge.
+function CertificateStatusBadge({ status }: { status: CertificateStatus }) {
   if (status === 'none') return null
-  const style = status === 'earned'
-    ? 'bg-freshket-50 text-freshket-700'
-    : status === 'below_threshold'
-    ? 'bg-rose-50 text-rose-600'
-    : 'bg-gray-50 text-gray-400'
+  const style = status === 'earned' ? 'bg-freshket-50 text-freshket-700' : 'bg-gray-50 text-gray-400'
   return (
     <div className={`px-2.5 py-2 rounded-xl text-xs font-bold flex items-start gap-2 ${style}`}>
       <svg className="size-4 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
@@ -563,7 +507,6 @@ function CertificateStatusBadge({ status, passThresholdPercent }: {
       </svg>
       <span>
         {status === 'earned' && 'ได้รับใบประกาศนียบัตร'}
-        {status === 'below_threshold' && `คะแนนไม่ถึงเกณฑ์ (${passThresholdPercent}%) — ยังไม่ได้รับใบประกาศ`}
         {status === 'locked' && 'เรียนให้ครบเพื่อรับใบประกาศนียบัตร'}
       </span>
     </div>
@@ -608,9 +551,6 @@ function StepContent({
   progress,
   courseId,
   onMarkSlideDone,
-  onStartAssessment,
-  onOpenGoogleForm,
-  onMarkFormDone,
   onMarkTakeAwayDone,
   onLessonComplete,
   onNext,
@@ -622,54 +562,11 @@ function StepContent({
   progress: Progress
   courseId: string
   onMarkSlideDone: () => void
-  onStartAssessment: (id: string, step: 'pre' | 'post') => void
-  onOpenGoogleForm: (url: string, step: 'pre' | 'post') => void
-  onMarkFormDone: (step: 'pre' | 'post') => void
   onMarkTakeAwayDone: (text: string) => void
   onLessonComplete: (lessonId: string) => void
   onNext: () => void
   hasNext: boolean
 }) {
-  if (step.id === 'pre') return (
-    <AssessmentStep
-      label="ก่อนเรียน"
-      description="ทำแบบทดสอบก่อนเรียนเพื่อวัดความรู้พื้นฐาน"
-      courseTitle={course.title}
-      assessmentType={course.assessmentType}
-      assessmentId={course.preAssessmentId}
-      formUrl={course.preFormUrl}
-      done={done}
-      onStart={() => {
-        if (course.assessmentType === 'self' && course.preAssessmentId)
-          onStartAssessment(course.preAssessmentId, 'pre')
-      }}
-      onOpenForm={() => { if (course.preFormUrl) onOpenGoogleForm(course.preFormUrl, 'pre') }}
-      onMarkDone={() => onMarkFormDone('pre')}
-      onNext={onNext}
-      hasNext={hasNext}
-    />
-  )
-
-  if (step.id === 'post') return (
-    <AssessmentStep
-      label="หลังเรียน"
-      description="ทำแบบทดสอบหลังเรียนเพื่อวัดความเข้าใจ"
-      courseTitle={course.title}
-      assessmentType={course.assessmentType}
-      assessmentId={course.postAssessmentId}
-      formUrl={course.postFormUrl}
-      done={done}
-      onStart={() => {
-        if (course.assessmentType === 'self' && course.postAssessmentId)
-          onStartAssessment(course.postAssessmentId, 'post')
-      }}
-      onOpenForm={() => { if (course.postFormUrl) onOpenGoogleForm(course.postFormUrl, 'post') }}
-      onMarkDone={() => onMarkFormDone('post')}
-      onNext={onNext}
-      hasNext={hasNext}
-    />
-  )
-
   if (step.id === 'takeaway') return (
     <TakeAwayStep
       course={course}
@@ -919,9 +816,16 @@ function LessonBrowserStep({
   const allVideosWatched = requiredVideoKeys.every((k) => watchedVideos.has(k))
   const selectedVideoId = selectedLesson?.type === 'video' ? youtubeVideoId(selectedLesson.videoUrl) : null
 
-  function startQuiz(assessmentId: string) {
-    sessionStorage.setItem('assessment_return', JSON.stringify({ courseId: course.id, step: 'pre' }))
-    router.push(`/assessment/${assessmentId}`)
+  // `step` comes from the admin's pre/post tag on the lesson (CourseLesson.quizRole).
+  // An untagged quiz sends no step at all: it is an ordinary lesson quiz, graded
+  // into `score` only, and it must still notify the manager on completion — which
+  // a hardcoded 'pre' silently suppressed.
+  function startQuiz(lesson: CourseLesson) {
+    const step = lesson.quizRole === 'pre_test' ? 'pre'
+      : lesson.quizRole === 'post_test' ? 'post'
+      : undefined
+    sessionStorage.setItem('assessment_return', JSON.stringify({ courseId: course.id, ...(step ? { step } : {}) }))
+    router.push(`/assessment/${lesson.assessmentId}`)
   }
 
   const media = selectedLesson?.type === 'video' && selectedLesson.videoUrl ? toEmbedUrl(selectedLesson.videoUrl) : null
@@ -1035,7 +939,7 @@ function LessonBrowserStep({
               )}
 
               {selectedLesson.type === 'quiz' && selectedLesson.assessmentId && (
-                <button onClick={() => startQuiz(selectedLesson!.assessmentId!)}
+                <button onClick={() => startQuiz(selectedLesson!)}
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
                   เริ่มทำแบบฝึกหัด
                 </button>
@@ -1175,167 +1079,6 @@ function TakeAwayStep({
           </svg>
         </button>
       )}
-    </div>
-  )
-}
-
-// ── Assessment Step (pre / post) ──────────────────────────────────────────────
-function AssessmentStep({
-  label,
-  description,
-  courseTitle,
-  assessmentType,
-  assessmentId,
-  formUrl,
-  done,
-  onStart,
-  onOpenForm,
-  onMarkDone,
-  onNext,
-  hasNext,
-}: {
-  label: string
-  description: string
-  courseTitle?: string
-  assessmentType?: 'self' | 'google_form'
-  assessmentId?: string
-  formUrl?: string
-  done: boolean
-  onStart: () => void
-  onOpenForm: () => void
-  onMarkDone: () => void
-  onNext: () => void
-  hasNext: boolean
-}) {
-  const [formOpened, setFormOpened] = useState(false)
-  const isSelf = assessmentType === 'self' || (!assessmentType && !!assessmentId)
-  const isForm = assessmentType === 'google_form' || (!assessmentId && !!formUrl)
-  const embedUrl = formUrl ? toFormEmbedUrl(formUrl) : null
-
-  return (
-    <div className="max-w-lg mx-auto space-y-5">
-      <div className="flex items-center gap-3">
-        <div className={`size-10 rounded-xl flex items-center justify-center ${done ? 'bg-freshket-100 text-freshket-600' : 'bg-blue-50 text-blue-500'}`}>
-          <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-          </svg>
-        </div>
-        <div>
-          <h2 className="text-base font-bold text-gray-900">แบบทดสอบ{label}</h2>
-          <p className="text-xs text-gray-500">{description}</p>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-4">
-        {done ? (
-          /* Done state */
-          <div className="flex flex-col items-center gap-3 py-6">
-            <div className="size-16 rounded-full bg-freshket-100 flex items-center justify-center">
-              <svg className="size-8 text-freshket-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <p className="text-sm font-bold text-freshket-600">ทำแบบทดสอบเสร็จแล้ว</p>
-            {hasNext && (
-              <button onClick={onNext}
-                className="mt-2 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all">
-                ไปขั้นตอนถัดไป
-                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                </svg>
-              </button>
-            )}
-          </div>
-        ) : isSelf && assessmentId ? (
-          /* Self-created assessment */
-          <div className="space-y-4">
-            <div className="p-4 rounded-xl bg-blue-50 border border-blue-100 text-sm text-blue-700">
-              <p className="font-bold mb-1">แบบทดสอบสร้างในระบบ</p>
-              <p className="text-xs text-blue-600">ตอบทีละข้อ กดส่งคำตอบเมื่อเสร็จ ผลจะถูกบันทึกอัตโนมัติ</p>
-            </div>
-            <button onClick={onStart}
-              className="w-full py-3 rounded-xl text-sm font-bold bg-freshket-500 text-white hover:bg-freshket-600 transition-all flex items-center justify-center gap-2">
-              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-              </svg>
-              เริ่มทำแบบทดสอบ
-            </button>
-          </div>
-        ) : isForm && formUrl ? (
-          /* Google Form — embedded or new-tab fallback */
-          <div className="space-y-4">
-            {embedUrl ? (
-              /* Embeddable URL → show iframe inline */
-              !formOpened ? (
-                <>
-                  <div className="p-4 rounded-xl bg-blue-50 border border-blue-100 text-sm">
-                    {courseTitle && <p className="font-bold text-blue-900 mb-0.5 truncate">{courseTitle}</p>}
-                    <p className="font-bold text-blue-800 mb-1">แบบทดสอบ{label} — Google Form</p>
-                    <p className="text-xs text-blue-600">แบบฟอร์มจะแสดงในหน้านี้เลย ไม่ต้องเปิด tab ใหม่</p>
-                  </div>
-                  <button onClick={() => setFormOpened(true)}
-                    className="w-full py-2.5 rounded-xl text-sm font-bold bg-blue-500 text-white hover:bg-blue-600 transition-all flex items-center justify-center gap-2">
-                    <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-                    </svg>
-                    เริ่มทำแบบทดสอบ
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="rounded-xl overflow-hidden border border-gray-200 shadow-sm">
-                    <iframe
-                      src={embedUrl}
-                      width="100%"
-                      height="640"
-                      frameBorder={0}
-                      marginHeight={0}
-                      marginWidth={0}
-                      title={`แบบทดสอบ${label}`}
-                    >
-                      กำลังโหลด...
-                    </iframe>
-                  </div>
-                  <button onClick={onMarkDone}
-                    className="w-full py-2.5 rounded-xl text-sm font-bold bg-freshket-500 text-white hover:bg-freshket-600 transition-all flex items-center justify-center gap-2">
-                    <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
-                    ฉันทำเสร็จแล้ว
-                  </button>
-                </>
-              )
-            ) : (
-              /* Non-embeddable URL (forms.gle short link, etc.) → open new tab */
-              <>
-                <div className="p-4 rounded-xl bg-amber-50 border border-amber-100 text-sm text-amber-700">
-                  {courseTitle && <p className="font-bold text-amber-800 mb-0.5 truncate">{courseTitle}</p>}
-                  <p className="font-bold mb-1">แบบทดสอบ{label} — Google Form</p>
-                  <p className="text-xs text-amber-600">จะเปิดในหน้าต่างใหม่ เมื่อทำเสร็จให้กด &quot;ฉันทำเสร็จแล้ว&quot;</p>
-                </div>
-                <button onClick={() => { setFormOpened(true); onOpenForm() }}
-                  className="w-full py-2.5 rounded-xl text-sm font-bold bg-blue-500 text-white hover:bg-blue-600 transition-all flex items-center justify-center gap-2">
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                  </svg>
-                  เปิด Google Form
-                </button>
-                {formOpened && (
-                  <button onClick={onMarkDone}
-                    className="w-full py-2.5 rounded-xl text-sm font-bold bg-freshket-500 text-white hover:bg-freshket-600 transition-all flex items-center justify-center gap-2">
-                    <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
-                    ฉันทำเสร็จแล้ว
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-gray-400 text-center py-4">ไม่มีแบบทดสอบสำหรับขั้นตอนนี้</p>
-        )}
-      </div>
     </div>
   )
 }

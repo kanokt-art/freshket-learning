@@ -270,13 +270,20 @@ export async function POST(req: NextRequest) {
         courseId,
         courseTitle: course?.title ?? '',
         score: graded.score,
+        // Same threshold the pass/fail verdict above was computed against
+        // (Assessment.passingScore) — this used to read a separate
+        // Course.quizSettings.passThresholdPercent, which could silently
+        // diverge from the value that actually decided `passed`.
+        passScore: passingScore,
         attemptCount: attemptNumber,
         source: 'manual',
         updatedAt: FieldValue.serverTimestamp(),
       }
-      if (course?.quizSettings?.passThresholdPercent != null) {
-        payload.passScore = course.quizSettings.passThresholdPercent
-      }
+      // A quiz the admin tagged as the course's pre-test or post-test
+      // (CourseLesson.quizRole) also lands in its own column, so the learner
+      // roster can show the before/after pair. Untagged quizzes set neither.
+      if (step === 'pre') payload.preTestScore = graded.score
+      if (step === 'post') payload.postTestScore = graded.score
       // First touch stamps only — never move an existing startedAt.
       if (!recSnap.exists || !recSnap.data()?.startedAt) {
         payload.startedAt = FieldValue.serverTimestamp()

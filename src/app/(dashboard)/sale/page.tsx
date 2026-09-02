@@ -491,7 +491,7 @@ export default function SaleDashboardPage() {
                         <p className={`text-xs font-bold mb-0.5 ${CAT_TEXT[course.category]}`}>{CATEGORY_LABELS[course.category]}</p>
                         <p className="text-sm font-bold text-gray-900 truncate">{course.title}</p>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          Next Module: <span className="text-gray-600 font-normal">{course.hasPreAssessment ? 'Pre-Assessment' : course.title}</span>
+                          Next Module: <span className="text-gray-600 font-normal">{course.title}</span>
                         </p>
                         <div className="mt-2 h-1.5 bg-gray-100 rounded-full w-full max-w-xs">
                           <div className="h-full rounded-full bg-indigo-500" style={{ width: '40%' }} />
@@ -767,6 +767,21 @@ function calcTenure(startDate: Date | undefined | null): string {
   return `${years}.${String(months).padStart(2, '0')}.${String(days).padStart(2, '0')}`
 }
 
+function SortHeaderCell({ label, active, dir, onClick, className }: {
+  label: string; active: boolean; dir: 'asc' | 'desc'; onClick: () => void; className?: string
+}) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`flex items-center gap-1 text-left transition-colors ${active ? 'text-gray-900' : 'text-gray-500 hover:text-gray-700'} ${className ?? ''}`}>
+      {label}
+      <svg className={`size-3 shrink-0 transition-transform ${active && dir === 'desc' ? 'rotate-180' : ''} ${active ? 'text-indigo-500' : 'text-gray-300'}`}
+        viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l4-4 4 4M8 15l4 4 4-4" />
+      </svg>
+    </button>
+  )
+}
+
 // ── User Table ────────────────────────────────────────────────────────────────
 function UserTable({
   users,
@@ -778,23 +793,67 @@ function UserTable({
   selectedUid?: string
 }) {
   const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState<'empId' | 'name' | 'department' | 'position' | 'startDate' | 'tenure' | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+
+  function toggleSort(col: typeof sortBy) {
+    if (sortBy === col) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortBy(col)
+      setSortDir('asc')
+    }
+  }
 
   const filtered = useMemo(() => {
-    const q = search.toLowerCase().trim()
-    if (!q) return users
-    return users.filter((u) =>
-      u.displayName?.toLowerCase().includes(q) ||
-      u.email?.toLowerCase().includes(q) ||
-      (u.employeeId ?? '').toLowerCase().includes(q),
+    // Same "only the literal 'Active' counts as inactive" rule used across the
+    // app (Employees list, course individual-assignment picker) — a resigned
+    // employee shouldn't show up in a roster meant for current staff.
+    // Also drop non-numeric employee IDs (e.g. "FTE" placeholder codes) — this
+    // roster is meant to list real, numbered employees only.
+    let list = users.filter((u) =>
+      (!u.employmentStatus || u.employmentStatus === 'Active') &&
+      !!u.employeeId && /^\d+$/.test(u.employeeId),
     )
-  }, [users, search])
+
+    const q = search.toLowerCase().trim()
+    if (q) {
+      list = list.filter((u) =>
+        u.displayName?.toLowerCase().includes(q) ||
+        (u.displayNameEN ?? '').toLowerCase().includes(q) ||
+        u.email?.toLowerCase().includes(q) ||
+        (u.employeeId ?? '').toLowerCase().includes(q),
+      )
+    }
+
+    if (sortBy) {
+      const dir = sortDir === 'asc' ? 1 : -1
+      list = [...list].sort((a, b) => {
+        if (sortBy === 'startDate' || sortBy === 'tenure') {
+          const at = a.startDate ? new Date(a.startDate as unknown as string).getTime() : 0
+          const bt = b.startDate ? new Date(b.startDate as unknown as string).getTime() : 0
+          // Tenure is the inverse of start date (earlier start = longer tenure),
+          // so "sort by tenure ascending" means most-recent-hire first.
+          return sortBy === 'tenure' ? (bt - at) * dir : (at - bt) * dir
+        }
+        if (sortBy === 'empId') {
+          return (a.employeeId ?? '').localeCompare(b.employeeId ?? '', undefined, { numeric: true }) * dir
+        }
+        const av = (sortBy === 'name' ? (a.displayNameEN || a.displayName) : a[sortBy]) ?? ''
+        const bv = (sortBy === 'name' ? (b.displayNameEN || b.displayName) : b[sortBy]) ?? ''
+        return av.localeCompare(bv) * dir
+      })
+    }
+
+    return list
+  }, [users, search, sortBy, sortDir])
 
   return (
     <section>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-bold text-gray-900">
           รายชื่อพนักงาน
-          <span className="ml-2 text-xs font-normal text-gray-400">{users.length} คน</span>
+          <span className="ml-2 text-xs font-normal text-gray-400">{filtered.length} คน</span>
         </h2>
         {/* Search */}
         <div className="relative w-56">
@@ -818,12 +877,12 @@ function UserTable({
           {/* Table header */}
           <div className="grid grid-cols-12 gap-2 px-4 py-2.5 bg-white border-b border-gray-100 text-xs font-bold text-gray-500">
             <div className="col-span-1">#</div>
-            <div className="col-span-1">รหัส</div>
-            <div className="col-span-2">ชื่อ</div>
-            <div className="col-span-2">แผนก</div>
-            <div className="col-span-1">ตำแหน่ง</div>
-            <div className="col-span-2">วันที่เริ่มทำงาน</div>
-            <div className="col-span-1">อายุงาน</div>
+            <SortHeaderCell className="col-span-1" label="รหัส" active={sortBy === 'empId'} dir={sortDir} onClick={() => toggleSort('empId')} />
+            <SortHeaderCell className="col-span-2" label="ชื่อ" active={sortBy === 'name'} dir={sortDir} onClick={() => toggleSort('name')} />
+            <SortHeaderCell className="col-span-2" label="แผนก" active={sortBy === 'department'} dir={sortDir} onClick={() => toggleSort('department')} />
+            <SortHeaderCell className="col-span-1" label="ตำแหน่ง" active={sortBy === 'position'} dir={sortDir} onClick={() => toggleSort('position')} />
+            <SortHeaderCell className="col-span-2" label="วันที่เริ่มทำงาน" active={sortBy === 'startDate'} dir={sortDir} onClick={() => toggleSort('startDate')} />
+            <SortHeaderCell className="col-span-1" label="อายุงาน" active={sortBy === 'tenure'} dir={sortDir} onClick={() => toggleSort('tenure')} />
             <div className="col-span-2">Email</div>
           </div>
 
@@ -851,10 +910,10 @@ function UserTable({
                     </div>
                     {/* Name */}
                     <div className="col-span-2 flex items-center min-w-0">
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-gray-900 truncate">{u.displayName ?? u.email}</p>
-                        {u.nickname && <p className="text-xs text-gray-400 truncate leading-tight">{u.nickname}</p>}
-                      </div>
+                      <p className="text-xs font-bold text-gray-900 truncate">
+                        {u.displayNameEN || u.displayName || u.email}
+                        {u.nickname && <span className="text-gray-400 font-normal"> ({u.nickname})</span>}
+                      </p>
                     </div>
                     {/* Department */}
                     <div className="col-span-2 flex items-center">
@@ -962,13 +1021,15 @@ function UserSidePanel({
           <img src={user.photoURL} alt="" className="size-11 rounded-full object-cover border-2 border-freshket-200 shadow-sm shrink-0" />
         ) : (
           <div className="size-11 rounded-full bg-freshket-100 border border-freshket-200 flex items-center justify-center text-base font-black text-freshket-700 shrink-0">
-            {user.displayName?.charAt(0).toUpperCase() ?? '?'}
+            {(user.displayNameEN || user.displayName)?.charAt(0).toUpperCase() ?? '?'}
           </div>
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-bold text-gray-900 truncate">{user.displayName ?? user.email}</p>
-            {user.nickname && <span className="text-xs text-gray-400">{user.nickname}</span>}
+            <p className="font-bold text-gray-900 truncate">
+              {user.displayNameEN || user.displayName || user.email}
+              {user.nickname && <span className="text-gray-400 font-normal text-xs"> ({user.nickname})</span>}
+            </p>
           </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             {user.employeeId && (

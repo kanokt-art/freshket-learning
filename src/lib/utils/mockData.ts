@@ -1,5 +1,5 @@
 import type { UserProfile, Team, Department } from '@/types/user'
-import type { Course, Resource } from '@/types/course'
+import type { Course, CourseTopic, Resource } from '@/types/course'
 import type { TrainingRecord } from '@/types/tracking'
 import type { Assessment } from '@/types/assessment'
 
@@ -258,6 +258,63 @@ export const MOCK_USERS: MockUser[] = [
 ]
 
 // ─── Courses ──────────────────────────────────────────────────────────────────
+
+// The eight sale learners, assigned to every demo course. The course builder
+// writes targeting into `assignedUserIds` (it always saves `targetRoles: []`),
+// so seed courses need this to exercise the real assignment path.
+const DEMO_SALE_UIDS = [
+  'mock-sale-01', 'mock-sale-02', 'mock-sale-03', 'mock-sale-04',
+  'mock-sale-05', 'mock-sale-06', 'mock-sale-07', 'mock-sale-08',
+]
+
+// Builds a topics/lessons tree for a course: a pre-test quiz, the content
+// lessons, then a post-test quiz. The two quiz lessons carry `quizRole`, which
+// is what makes the Pre-Test / Post-Test columns appear on the learner roster
+// and what tells assessment/submit which score column to fill.
+function courseTopics(key: string, subject: string, videoUrl: string): CourseTopic[] {
+  return [
+    {
+      id: `t-${key}-1`,
+      title: 'ประเมินก่อนเรียน',
+      order: 1,
+      lessons: [
+        {
+          id: `l-${key}-pre`, title: `แบบทดสอบก่อนเรียน: ${subject}`, type: 'quiz', order: 1,
+          description: 'วัดพื้นฐานความรู้ก่อนเริ่มเรียน',
+          assessmentId: `assess-${key}-pre`, quizRole: 'pre_test',
+        },
+      ],
+    },
+    {
+      id: `t-${key}-2`,
+      title: 'เนื้อหาหลัก',
+      order: 2,
+      lessons: [
+        {
+          id: `l-${key}-v`, title: `วิดีโอ: ${subject}`, type: 'video', order: 1,
+          videoProvider: 'youtube', videoUrl,
+        },
+        {
+          id: `l-${key}-a`, title: `สรุปสาระสำคัญ: ${subject}`, type: 'article', order: 2,
+          articleBody: `สรุปประเด็นสำคัญของหลักสูตร ${subject} สำหรับทบทวนก่อนทำแบบทดสอบหลังเรียน`,
+        },
+      ],
+    },
+    {
+      id: `t-${key}-3`,
+      title: 'ประเมินหลังเรียน',
+      order: 3,
+      lessons: [
+        {
+          id: `l-${key}-post`, title: `แบบทดสอบหลังเรียน: ${subject}`, type: 'quiz', order: 1,
+          description: 'วัดความรู้หลังเรียนจบ เพื่อเทียบกับคะแนนก่อนเรียน',
+          assessmentId: `assess-${key}-post`, quizRole: 'post_test',
+        },
+      ],
+    },
+  ]
+}
+
 export const MOCK_COURSES: Omit<Course, 'createdAt' | 'updatedAt'>[] = [
   {
     id: 'course-01',
@@ -271,12 +328,12 @@ export const MOCK_COURSES: Omit<Course, 'createdAt' | 'updatedAt'>[] = [
     slideUrl: 'https://docs.google.com/presentation/d/example-01',
     formUrl: 'https://forms.gle/example-01',
     isPublished: true,
-    hasPreAssessment: true,
-    preAssessmentId: 'assess-01',
-    hasPostAssessment: true,
-    postAssessmentId: 'assess-02',
-    assessmentType: 'self' as const,
     createdBy: 'mock-admin-01',
+    level: 'beginner',
+    hasKeyTakeAway: true,
+    keyTakeAwayPrompt: 'สรุปสิ่งที่ได้เรียนรู้เกี่ยวกับสินค้าและบริการของ Freshket และจะนำไปใช้กับลูกค้าอย่างไร',
+    assignedUserIds: DEMO_SALE_UIDS,
+    topics: courseTopics('pk', 'Product Knowledge', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
   },
   {
     id: 'course-02',
@@ -290,11 +347,12 @@ export const MOCK_COURSES: Omit<Course, 'createdAt' | 'updatedAt'>[] = [
     slideUrl: 'https://docs.google.com/presentation/d/example-02',
     formUrl: 'https://forms.gle/example-02',
     isPublished: true,
-    hasPreAssessment: false,
-    hasPostAssessment: true,
-    postAssessmentId: 'assess-02',
-    assessmentType: 'self' as const,
     createdBy: 'mock-admin-01',
+    level: 'intermediate',
+    hasKeyTakeAway: true,
+    keyTakeAwayPrompt: 'เทคนิคการปิดการขายใดที่คุณจะนำไปใช้กับลูกค้ารายถัดไป และเพราะอะไร',
+    assignedUserIds: DEMO_SALE_UIDS,
+    topics: courseTopics('st', 'Sales Technique', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
   },
   {
     id: 'course-03',
@@ -309,6 +367,11 @@ export const MOCK_COURSES: Omit<Course, 'createdAt' | 'updatedAt'>[] = [
     formUrl: '',
     isPublished: true,
     createdBy: 'mock-admin-01',
+    level: 'beginner',
+    hasKeyTakeAway: true,
+    keyTakeAwayPrompt: 'คุณจะใช้ CRM ติดตามลูกค้าของคุณอย่างไรให้เป็นระบบมากขึ้น',
+    assignedUserIds: DEMO_SALE_UIDS,
+    topics: courseTopics('crm', 'CRM System', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
   },
   {
     id: 'course-04',
@@ -321,8 +384,13 @@ export const MOCK_COURSES: Omit<Course, 'createdAt' | 'updatedAt'>[] = [
     targetRoles: ['sale'],
     slideUrl: '',
     formUrl: '',
-    isPublished: false,
+    isPublished: true,
     createdBy: 'mock-admin-01',
+    level: 'intermediate',
+    hasKeyTakeAway: true,
+    keyTakeAwayPrompt: 'ยกตัวอย่างสถานการณ์ที่คุณรับมือข้อร้องเรียนของลูกค้า และสิ่งที่จะปรับปรุงครั้งต่อไป',
+    assignedUserIds: DEMO_SALE_UIDS,
+    topics: courseTopics('cs', 'Customer Service', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
   },
   {
     id: 'course-05',
@@ -355,6 +423,34 @@ export const MOCK_COURSES: Omit<Course, 'createdAt' | 'updatedAt'>[] = [
 ]
 
 // ─── Assessments ─────────────────────────────────────────────────────────────
+
+// Builds the matching pre-test / post-test pair for a course from one shared
+// question set. Both sides ask the same things on purpose — that is what makes
+// the before/after delta on the learner roster meaningful.
+function prePostPair(
+  key: string,
+  subject: string,
+  qs: { text: string; choices: string[]; correct: number }[],
+): Omit<Assessment, 'createdAt' | 'updatedAt'>[] {
+  const build = (kind: 'pre' | 'post') => ({
+    id: `assess-${key}-${kind}`,
+    title: `${kind === 'pre' ? 'ทดสอบก่อนเรียน' : 'ทดสอบหลังเรียน'}: ${subject}`,
+    description: `วัดความรู้${kind === 'pre' ? 'ก่อน' : 'หลัง'}เรียนหลักสูตร ${subject}`,
+    isPublished: true,
+    passingScore: 70,
+    createdBy: 'mock-admin-01',
+    questions: qs.map((q, i) => ({
+      id: `q-${key}-${kind}-${i + 1}`,
+      order: i + 1,
+      type: 'multiple_choice' as const,
+      points: 1,
+      text: q.text,
+      choices: q.choices.map((c, ci) => ({ id: `c${ci + 1}`, text: c, isCorrect: ci === q.correct })),
+    })),
+  })
+  return [build('pre'), build('post')]
+}
+
 export const MOCK_ASSESSMENTS: Omit<Assessment, 'createdAt' | 'updatedAt'>[] = [
   {
     id: 'assess-01',
@@ -425,6 +521,47 @@ export const MOCK_ASSESSMENTS: Omit<Assessment, 'createdAt' | 'updatedAt'>[] = [
       },
     ],
   },
+  // Pre/Post pairs for the four courses that carry a tagged pre-test and
+  // post-test lesson (see MOCK_COURSES topics) — these are what fill the
+  // Pre-Test / Post-Test columns on the learner roster.
+  ...prePostPair('pk', 'Product Knowledge', [
+    {
+      text: 'Freshket ให้บริการลูกค้ากลุ่มใดเป็นหลัก?',
+      choices: ['ผู้บริโภคทั่วไป', 'ร้านอาหาร โรงแรม และ catering', 'โรงงานผลิตอาหาร', 'ร้านค้าปลีก'],
+      correct: 1,
+    },
+    {
+      text: 'ระบบ Cold Chain มีความสำคัญต่อสินค้าประเภทใดมากที่สุด?',
+      choices: ['สินค้าแห้ง', 'ผักและผลไม้สด', 'เครื่องปรุงรส', 'บรรจุภัณฑ์'],
+      correct: 1,
+    },
+  ]),
+  ...prePostPair('st', 'Sales Technique', [
+    {
+      text: 'ขั้นตอนแรกของกระบวนการขายคืออะไร?',
+      choices: ['Closing', 'Prospecting', 'Presentation', 'Follow-up'],
+      correct: 1,
+    },
+    {
+      text: 'เมื่อลูกค้าปฏิเสธ ควรทำสิ่งใดก่อน?',
+      choices: ['ลดราคาทันที', 'เข้าใจเหตุผลเบื้องหลัง', 'เปลี่ยนไปหาลูกค้ารายอื่น', 'ยืนยันข้อเสนอเดิม'],
+      correct: 1,
+    },
+  ]),
+  ...prePostPair('crm', 'CRM System', [
+    {
+      text: 'ข้อมูลใดควรบันทึกใน CRM ทุกครั้งหลังเข้าพบลูกค้า?',
+      choices: ['เฉพาะยอดขาย', 'สรุปการสนทนาและขั้นตอนถัดไป', 'เฉพาะชื่อผู้ติดต่อ', 'ไม่ต้องบันทึก'],
+      correct: 1,
+    },
+  ]),
+  ...prePostPair('cs', 'Customer Service', [
+    {
+      text: 'เมื่อลูกค้าร้องเรียนเรื่องสินค้าไม่สด ควรทำอย่างไรเป็นอันดับแรก?',
+      choices: ['ปฏิเสธความรับผิดชอบ', 'รับฟังและขอรายละเอียด', 'โอนสายให้ฝ่ายอื่น', 'เสนอส่วนลดทันที'],
+      correct: 1,
+    },
+  ]),
   {
     id: 'assess-03',
     title: 'ทดสอบ Onboarding',
@@ -601,6 +738,7 @@ function record(
   status: TrainingRecord['status'],
   score?: number,
   daysAgo?: number,
+  prePost?: { pre?: number; post?: number },
 ): MockRecord {
   const completedAt = status === 'completed' && daysAgo !== undefined
     ? new Date(Date.now() - daysAgo * 86_400_000)
@@ -611,6 +749,8 @@ function record(
     courseTitle,
     status,
     score,
+    ...(prePost?.pre !== undefined ? { preTestScore: prePost.pre } : {}),
+    ...(prePost?.post !== undefined ? { postTestScore: prePost.post } : {}),
     completedAt,
     dueDate: new Date(Date.now() + 14 * 86_400_000),
     attemptCount: status === 'failed' ? 2 : 1,
@@ -623,42 +763,45 @@ const C = MOCK_COURSES
 
 export const MOCK_TRAINING_RECORDS: MockRecord[] = [
   // สมชาย — star performer
-  record('mock-sale-01', C[0].id, C[0].title, 'completed', 95, 30),
-  record('mock-sale-01', C[1].id, C[1].title, 'completed', 88, 20),
-  record('mock-sale-01', C[2].id, C[2].title, 'completed', 92, 15),
-  record('mock-sale-01', C[3].id, C[3].title, 'completed', 85, 10),
+  record('mock-sale-01', C[0].id, C[0].title, 'completed', 95, 30, { pre: 55, post: 95 }),
+  record('mock-sale-01', C[1].id, C[1].title, 'completed', 88, 20, { pre: 48, post: 88 }),
+  record('mock-sale-01', C[2].id, C[2].title, 'completed', 92, 15, { pre: 60, post: 92 }),
+  record('mock-sale-01', C[3].id, C[3].title, 'completed', 85, 10, { pre: 52, post: 85 }),
   record('mock-sale-01', C[4].id, C[4].title, 'completed', 100, 5),
 
   // ปริยา — good progress
-  record('mock-sale-02', C[0].id, C[0].title, 'completed', 78, 25),
-  record('mock-sale-02', C[1].id, C[1].title, 'completed', 82, 18),
-  record('mock-sale-02', C[2].id, C[2].title, 'in_progress'),
+  record('mock-sale-02', C[0].id, C[0].title, 'completed', 78, 25, { pre: 45, post: 78 }),
+  record('mock-sale-02', C[1].id, C[1].title, 'completed', 82, 18, { pre: 50, post: 82 }),
+  record('mock-sale-02', C[2].id, C[2].title, 'in_progress', undefined, undefined, { pre: 42 }),
   record('mock-sale-02', C[4].id, C[4].title, 'not_started'),
 
-  // ธนกร — struggling
-  record('mock-sale-03', C[0].id, C[0].title, 'completed', 65, 40),
-  record('mock-sale-03', C[1].id, C[1].title, 'failed', 45),
+  // ธนกร — struggling: post-test barely moved, the signal a manager should act on
+  record('mock-sale-03', C[0].id, C[0].title, 'completed', 65, 40, { pre: 58, post: 65 }),
+  record('mock-sale-03', C[1].id, C[1].title, 'failed', 45, undefined, { pre: 40, post: 45 }),
   record('mock-sale-03', C[2].id, C[2].title, 'not_started'),
+  record('mock-sale-03', C[3].id, C[3].title, 'completed', 62, 12, { pre: 55, post: 62 }),
   record('mock-sale-03', C[4].id, C[4].title, 'completed', 70, 35),
 
-  // อรัญญา — new joiner
-  record('mock-sale-04', C[0].id, C[0].title, 'in_progress'),
+  // อรัญญา — new joiner: pre-test taken, course not finished yet
+  record('mock-sale-04', C[0].id, C[0].title, 'in_progress', undefined, undefined, { pre: 38 }),
   record('mock-sale-04', C[1].id, C[1].title, 'not_started'),
   record('mock-sale-04', C[4].id, C[4].title, 'not_started'),
 
   // นพดล — strong
-  record('mock-sale-05', C[0].id, C[0].title, 'completed', 90, 20),
-  record('mock-sale-05', C[1].id, C[1].title, 'completed', 87, 15),
-  record('mock-sale-05', C[2].id, C[2].title, 'completed', 93, 10),
+  record('mock-sale-05', C[0].id, C[0].title, 'completed', 90, 20, { pre: 62, post: 90 }),
+  record('mock-sale-05', C[1].id, C[1].title, 'completed', 87, 15, { pre: 58, post: 87 }),
+  record('mock-sale-05', C[2].id, C[2].title, 'completed', 93, 10, { pre: 65, post: 93 }),
+  record('mock-sale-05', C[3].id, C[3].title, 'completed', 89, 6, { pre: 60, post: 89 }),
   record('mock-sale-05', C[4].id, C[4].title, 'completed', 100, 8),
 
   // กัญญา — on track
-  record('mock-sale-06', C[0].id, C[0].title, 'completed', 75, 22),
-  record('mock-sale-06', C[1].id, C[1].title, 'in_progress'),
+  record('mock-sale-06', C[0].id, C[0].title, 'completed', 75, 22, { pre: 44, post: 75 }),
+  record('mock-sale-06', C[1].id, C[1].title, 'in_progress', undefined, undefined, { pre: 51 }),
+  record('mock-sale-06', C[3].id, C[3].title, 'completed', 80, 14, { pre: 47, post: 80 }),
   record('mock-sale-06', C[4].id, C[4].title, 'completed', 80, 30),
 
-  // ภาคภูมิ — at risk
-  record('mock-sale-07', C[0].id, C[0].title, 'failed', 52),
+  // ภาคภูมิ — at risk: post below pre, the clearest "needs coaching" case
+  record('mock-sale-07', C[0].id, C[0].title, 'failed', 52, undefined, { pre: 56, post: 52 }),
   record('mock-sale-07', C[1].id, C[1].title, 'not_started'),
   record('mock-sale-07', C[4].id, C[4].title, 'in_progress'),
 

@@ -65,6 +65,16 @@
     @apply outline-none ring-2 ring-freshket-300 ring-offset-2;
   }
 
+  /* Form fields opt out of the ring-based focus indicator above — a focused
+     input/textarea/select shows its own colored border only (set per-field
+     with focus:border-*), so the ring didn't add a second visible outline on
+     top of it and read as a double border. */
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    @apply ring-0 ring-offset-0;
+  }
+
   /* Custom scrollbar — thin green thumb (used in QR sidebar) */
   .scrollbar-green::-webkit-scrollbar {
     width: 3px;

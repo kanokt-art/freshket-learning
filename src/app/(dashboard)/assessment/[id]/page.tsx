@@ -2,10 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useCourse } from '@/hooks/useFirestore'
 import { useAuth } from '@/hooks/useAuth'
 import { authedFetch } from '@/lib/api/authedFetch'
-import { progKey, readScoped } from '@/lib/courseProgressKeys'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { MOCK_ASSESSMENTS } from '@/lib/utils/mockData'
 import { gradeSubmission, sanitizeQuestion } from '@/lib/assessment/grade'
@@ -20,12 +18,30 @@ function formatCountdown(ms: number): string {
 }
 
 // What GET /api/assessment/[id]/take returns — the assessment minus its key.
+// googleFormUrl is present only for a Google Form assessment, which carries no
+// questions[] (Google owns the response collection, not this app).
 interface TakeAssessment {
   id: string
   title: string
   description: string
   passingScore: number
   questions: Question[]
+  googleFormUrl?: string
+  antiCheatEnabled?: boolean
+}
+
+// Mirrors courses/[id]/page.tsx's toFormEmbedUrl — converts an ALREADY-RESOLVED
+// docs.google.com URL into its embeddable form. forms.gle resolving happens
+// separately via /api/resolve-form-url (a browser can't follow that redirect
+// itself; the target host sends no CORS headers for a cross-origin fetch).
+function toFormEmbedUrl(url: string): string | null {
+  if (!url || url.includes('example-')) return null
+  if (url.includes('docs.google.com/forms')) {
+    const base = url.split('?')[0].replace(/\/(edit|pub|closedform)$/, '/viewform')
+    const viewBase = base.endsWith('/viewform') ? base : `${base}/viewform`
+    return `${viewBase}?embedded=true`
+  }
+  return null
 }
 
 // What POST /api/assessment/submit returns. `results` is the per-question
@@ -47,7 +63,9 @@ export interface SubmitResult {
   }[]
 }
 
-type ReturnCtx = { courseId: string; step: 'pre' | 'post' }
+// `step` is present only when the course lesson carried a pre/post tag
+// (CourseLesson.quizRole); a plain lesson quiz returns a courseId alone.
+type ReturnCtx = { courseId: string; step?: 'pre' | 'post' }
 
 const MAX_VIOLATIONS = 3
 
@@ -73,6 +91,45 @@ export default function TakeAssessmentPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [returnCtx, setReturnCtx] = useState<ReturnCtx | null>(null)
 
+  // ── Google Form assessment: resolve forms.gle, then embed ──────────────────
+  // A short forms.gle link can't be embedded directly — resolve it to its
+  // docs.google.com/forms/... target once (server round trip, see
+  // /api/resolve-form-url) and cache the result. A full docs.google.com URL
+  // needs no resolving at all.
+  const [resolvedFormUrl, setResolvedFormUrl] = useState<string | null>(null)
+  const [resolvingForm, setResolvingForm] = useState(false)
+  const [formOpened, setFormOpened] = useState(false)
+  const [formMarkedDone, setFormMarkedDone] = useState(false)
+  useEffect(() => {
+    const formUrl = assessment?.googleFormUrl
+    if (!formUrl || !formUrl.includes('forms.gle')) return
+    let cancelled = false
+    setResolvingForm(true)
+    authedFetch('/api/resolve-form-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: formUrl }),
+    })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return
+        const json = await res.json()
+        if (!cancelled) setResolvedFormUrl(json.resolvedUrl)
+      })
+      .catch(() => { /* falls back to the "open new tab" branch below */ })
+      .finally(() => { if (!cancelled) setResolvingForm(false) })
+    return () => { cancelled = true }
+  }, [assessment?.googleFormUrl])
+
+  // No server-side grading exists for a Google Form (Google owns the response
+  // collection). Course-level pre/post-test progress fields (preDone/postDone)
+  // were removed along with the course-level pre/post-test concept, so there is
+  // no course Progress field left to mark here — this now just clears the
+  // return flag and lets the learner navigate back via handleBack().
+  function handleGoogleFormDone() {
+    if (returnCtx) sessionStorage.removeItem('assessment_return')
+    setFormMarkedDone(true)
+  }
+
   // Timed attempt. The deadline is the SERVER's (from POST /api/assessment/start);
   // this countdown only displays it and triggers the auto-submit. Reloading the
   // page does not reset it, because the server keeps the start time.
@@ -97,6 +154,7 @@ export default function TakeAssessmentPage() {
             description: found.description,
             passingScore: found.passingScore,
             questions: found.questions.map(sanitizeQuestion),
+            antiCheatEnabled: found.antiCheatEnabled,
           }
         : null)
       setLoadError(found ? null : 'ไม่พบแบบทดสอบนี้')
@@ -130,8 +188,10 @@ export default function TakeAssessmentPage() {
   }, [])
 
   // ── Anti-cheat (fullscreen enforcement + tab/window-switch detection) ──────
-  const { data: course } = useCourse(returnCtx?.courseId ?? '')
-  const antiCheatEnabled = !!returnCtx && !!course?.quizSettings?.antiCheatEnabled
+  // Lives on the Assessment itself (not the course that happens to link to it)
+  // — the same quiz keeps the same anti-cheat behavior whether it's a course's
+  // pre-test, post-test, or a standalone lesson quiz.
+  const antiCheatEnabled = !!assessment?.antiCheatEnabled
   const [started, setStarted] = useState(false)
   const [violations, setViolations] = useState(0)
   const [showViolationWarning, setShowViolationWarning] = useState(false)
@@ -277,7 +337,8 @@ export default function TakeAssessmentPage() {
         body: JSON.stringify({
           assessmentId: id,
           answers,
-          ...(returnCtx ? { courseId: returnCtx.courseId, step: returnCtx.step } : {}),
+          ...(returnCtx ? { courseId: returnCtx.courseId } : {}),
+          ...(returnCtx?.step ? { step: returnCtx.step } : {}),
           ...(sessionId ? { sessionId } : {}),
           autoSubmitted: violations >= MAX_VIOLATIONS || (deadlineAt != null && Date.now() >= deadlineAt),
         }),
@@ -293,19 +354,15 @@ export default function TakeAssessmentPage() {
 
       const result: SubmitResult = await res.json()
 
-      // Mark the course step done locally so the course page's step machine
-      // advances. The SCORE is intentionally not written here any more — the
-      // server owns it. It is kept in local state only for the result screen.
-      if (returnCtx && user?.uid) {
-        try {
-          const key = progKey(user.uid, returnCtx.courseId)
-          const existing: Record<string, boolean | number> =
-            JSON.parse(readScoped(user.uid, key, `course_prog_${returnCtx.courseId}`) ?? '{}')
-          const doneField = returnCtx.step === 'pre' ? 'preDone' : 'postDone'
-          localStorage.setItem(key, JSON.stringify({ ...existing, [doneField]: true }))
-        } catch {}
-        sessionStorage.removeItem('assessment_return')
-      }
+      // Course-level pre/post-test Progress fields (preDone/postDone) were
+      // removed along with the course-level pre/post-test concept, so there is
+      // no course step left to mark done here. The SCORE is intentionally not
+      // written to localStorage either — the server owns it (see
+      // /api/assessment/submit) and is kept in local state only for the result
+      // screen below. Lesson-level quiz completion is unaffected: it's driven
+      // by completedLessonIds, ticked when the lesson is opened, not by this
+      // return-context mechanism.
+      if (returnCtx) sessionStorage.removeItem('assessment_return')
 
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
       setScore(result.score)

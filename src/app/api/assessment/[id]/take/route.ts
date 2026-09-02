@@ -36,6 +36,21 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ error: 'แบบทดสอบนี้ยังไม่เผยแพร่' }, { status: 403 })
     }
 
+    // A Google Form assessment has no questions[] to grade or strip a key
+    // from — Google owns the response collection. Hand back just enough for
+    // the take-page to render the embed and skip the self-graded flow (session,
+    // timer, anti-cheat, submit) entirely.
+    if (data.googleFormUrl) {
+      return NextResponse.json({
+        id: snap.id,
+        title: data.title ?? '',
+        description: data.description ?? '',
+        passingScore: typeof data.passingScore === 'number' ? data.passingScore : 70,
+        questions: [],
+        googleFormUrl: data.googleFormUrl,
+      })
+    }
+
     const questions = (data.questions ?? []) as Question[]
 
     return NextResponse.json({
@@ -43,6 +58,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       title: data.title ?? '',
       description: data.description ?? '',
       passingScore: typeof data.passingScore === 'number' ? data.passingScore : 70,
+      antiCheatEnabled: data.antiCheatEnabled === true,
       questions: questions
         .slice()
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))

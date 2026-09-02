@@ -154,7 +154,12 @@ export default function UsersPage() {
     // Resigned / No-show employees are hidden from this list only — their
     // training history, team membership, and org-board presence are untouched;
     // this is purely a roster-view filter, not a data deletion.
-    const active = users.filter(u => !u.employmentStatus || u.employmentStatus === 'Active')
+    // Also drop non-numeric employee IDs (e.g. "FTE" placeholder codes) — same
+    // rule as the /sale roster: this list is meant for real, numbered employees.
+    const active = users.filter(u =>
+      (!u.employmentStatus || u.employmentStatus === 'Active') &&
+      !!u.employeeId && /^\d+$/.test(u.employeeId),
+    )
     let list = q
       ? active.filter((u) =>
           u.displayName.toLowerCase().includes(q) ||

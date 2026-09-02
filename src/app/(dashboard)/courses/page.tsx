@@ -24,23 +24,19 @@ import {
   CATEGORY_LABELS,
   LEVEL_LABELS,
   LESSON_TYPE_LABELS,
-  QUIZ_ANSWER_VIEW_LABELS,
   type Course,
   type CourseCategory,
   type CourseLevel,
   type CourseTopic,
   type CourseLesson,
   type LessonType,
-  type QuizAnswerViewMode,
-  type GradeBand,
 } from '@/types/course'
 import { STATUS_LABELS, STATUS_COLORS, recordProgressPercent, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
-import type { Assessment } from '@/types/assessment'
+import { QUESTION_TYPE_LABELS, QUESTION_TYPE_COLORS, type Assessment } from '@/types/assessment'
 import type { UserProfile, UserRole, Department, Team } from '@/types/user'
 import { getClientFirestore } from '@/lib/firebase/client'
 import { formatDateEN } from '@/lib/utils/dateFormatter'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
-import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
 import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
 import { LearnerCourseDashboard } from '@/components/features/LearnerCourseDashboard'
@@ -50,7 +46,9 @@ import { getDemoMode, FRESHKET_LOGO_URL } from '@/lib/demo/demoMode'
 import { demoStore } from '@/lib/demo/demoStore'
 import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
-import { alertError } from '@/lib/ui/alert'
+import { InfoTooltip } from '@/components/common/InfoTooltip'
+import { alertError, confirmAction } from '@/lib/ui/alert'
+import { authedFetch } from '@/lib/api/authedFetch'
 const DEMO_MODE = getDemoMode()
 const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS) as CourseCategory[]
 
@@ -569,6 +567,7 @@ export default function CoursesPage() {
           }}
           userId={user?.uid ?? ''}
           editCourse={editingCourse ?? undefined}
+          isSuperAdmin={isSuperAdmin}
         />
       )}
     </div>
@@ -617,11 +616,16 @@ function CourseCard({ course, status, isSuperAdmin, allAssessments, allUsers, on
 }) {
   const gradient = CAT_GRADIENT[course.category]
   const resolvedStatus = status ?? 'not_started'
-  const moduleCount = [course.hasPreAssessment, !!(course as Course & { slideUrl?: string }).slideUrl, course.hasPostAssessment].filter(Boolean).length || 1
+  // Module count = number of topics if the course uses the topics/lessons
+  // curriculum, else 1 for the legacy single slideUrl course.
+  const moduleCount = course.topics?.length || (course.slideUrl ? 1 : 0) || 1
 
-  const linkedAssessments = allAssessments.filter(
-    (a) => a.id === course.preAssessmentId || a.id === course.postAssessmentId,
+  // Question/score summary now comes from every lesson-level quiz in the
+  // course (course-level pre/post-test no longer exists).
+  const lessonQuizAssessmentIds = new Set(
+    (course.topics ?? []).flatMap((t) => t.lessons.filter((l) => l.type === 'quiz' && l.assessmentId).map((l) => l.assessmentId as string)),
   )
+  const linkedAssessments = allAssessments.filter((a) => lessonQuizAssessmentIds.has(a.id))
   const questionCount = linkedAssessments.reduce((sum, a) => sum + a.questions.length, 0)
   const maxScore = linkedAssessments.reduce((sum, a) => sum + a.questions.reduce((s, q) => s + (q.points ?? 0), 0), 0)
   const creatorName = allUsers.find((u) => u.uid === course.createdBy)?.displayName ?? '—'
@@ -796,7 +800,10 @@ function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMa
         </thead>
         <tbody>
           {courses.map((course) => {
-            const linkedAssessments = allAssessments.filter((a) => a.id === course.preAssessmentId || a.id === course.postAssessmentId)
+            const lessonQuizAssessmentIds = new Set(
+              (course.topics ?? []).flatMap((t) => t.lessons.filter((l) => l.type === 'quiz' && l.assessmentId).map((l) => l.assessmentId as string)),
+            )
+            const linkedAssessments = allAssessments.filter((a) => lessonQuizAssessmentIds.has(a.id))
             const maxScore = linkedAssessments.reduce((sum, a) => sum + a.questions.reduce((s, q) => s + (q.points ?? 0), 0), 0)
             const creatorName = allUsers.find((u) => u.uid === course.createdBy)?.displayName ?? '—'
             const rec = enrollmentByCourseid[course.id] ?? { enrolled: 0, completed: 0, in_progress: 0 }
@@ -1122,6 +1129,121 @@ interface AssignedLearnerRow {
   lastActivity?: Date
 }
 
+// Super_admin manual correction of one learner's status/score(s) — the only
+// path to it, since firestore.rules lets a learner write only their OWN
+// record and never `score` at all (see /trainingRecords in firestore.rules).
+// Goes through POST /api/training-records/override (Admin SDK); the realtime
+// onSnapshot behind useAllTrainingRecords picks up the write on its own, so
+// there's no local state to reconcile here after a successful save.
+function OverrideRecordModal({ row, courseId, courseTitle, hasPreTest, hasPostTest, onClose }: {
+  row: AssignedLearnerRow; courseId: string; courseTitle: string
+  hasPreTest: boolean; hasPostTest: boolean; onClose: () => void
+}) {
+  const [status, setStatus] = useState<TrainingStatus>(row.status)
+  const [score, setScore] = useState(row.record?.score != null ? String(row.record.score) : '')
+  const [preTestScore, setPreTestScore] = useState(row.record?.preTestScore != null ? String(row.record.preTestScore) : '')
+  const [postTestScore, setPostTestScore] = useState(row.record?.postTestScore != null ? String(row.record.postTestScore) : '')
+  const [saving, setSaving] = useState(false)
+
+  function toNum(s: string): number | null | undefined {
+    if (s.trim() === '') return null // explicit clear
+    const n = Number(s)
+    return Number.isFinite(n) ? n : undefined
+  }
+
+  async function handleSave() {
+    // Demo mode has no writable training-records backend — ALL_RECORDS is a
+    // static mock array, not React state, so there's nothing to persist to
+    // and nothing that would re-render from it either way. Matches every
+    // other DEMO_MODE branch in this file: skip the network call entirely.
+    if (DEMO_MODE) { onClose(); return }
+    setSaving(true)
+    try {
+      const res = await authedFetch('/api/training-records/override', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: row.user.uid,
+          courseId,
+          courseTitle,
+          status,
+          score: toNum(score),
+          ...(hasPreTest ? { preTestScore: toNum(preTestScore) } : {}),
+          ...(hasPostTest ? { postTestScore: toNum(postTestScore) } : {}),
+        }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        void alertError('บันทึกไม่สำเร็จ', json.error ?? `HTTP ${res.status}`)
+        return
+      }
+      onClose()
+    } catch (e) {
+      void alertError('บันทึกไม่สำเร็จ', e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="animate-pop-in bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <p className="text-sm font-bold text-gray-900">แก้ไขสถานะ/คะแนน</p>
+          <p className="text-xs text-gray-400 truncate">{row.user.displayName}</p>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="text-xs font-bold text-gray-600 block mb-1.5">สถานะ</label>
+            <select value={status} onChange={(e) => setStatus(e.target.value as TrainingStatus)}
+              className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:border-freshket-500">
+              {(Object.keys(STATUS_LABELS) as TrainingStatus[]).map((s) => (
+                <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-gray-600 block mb-1.5">คะแนน</label>
+            <input type="number" min={0} max={100} value={score} onChange={(e) => setScore(e.target.value)}
+              placeholder="เว้นว่าง = ไม่มีคะแนน"
+              className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300"
+            />
+          </div>
+          {hasPreTest && (
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1.5">คะแนน Pre-Test</label>
+              <input type="number" min={0} max={100} value={preTestScore} onChange={(e) => setPreTestScore(e.target.value)}
+                placeholder="เว้นว่าง = ไม่มีคะแนน"
+                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300"
+              />
+            </div>
+          )}
+          {hasPostTest && (
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1.5">คะแนน Post-Test</label>
+              <input type="number" min={0} max={100} value={postTestScore} onChange={(e) => setPostTestScore(e.target.value)}
+                placeholder="เว้นว่าง = ไม่มีคะแนน"
+                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300"
+              />
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving}
+            className="px-4 py-2 rounded-xl text-sm font-bold text-gray-500 hover:bg-gray-100 transition-all disabled:opacity-60">
+            ยกเลิก
+          </button>
+          <button type="button" onClick={handleSave} disabled={saving}
+            className="px-4 py-2 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all disabled:opacity-60 flex items-center gap-1.5">
+            {saving && <span className="size-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+            บันทึก
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function computeAssignedRows(assignedUserIds: string[], allUsers: UserProfile[], allTrainingRecords: TrainingRecord[], courseId?: string): AssignedLearnerRow[] {
   return assignedUserIds
     .map((uid) => allUsers.find((u) => u.uid === uid))
@@ -1168,11 +1290,13 @@ function SortableTh({ label, sortKey, activeSortKey, sortDir, onSort }: {
   )
 }
 
-function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, emptyText }: {
+function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, emptyText, courseId, courseTitle, hasPreTest, hasPostTest, isSuperAdmin }: {
   rows: AssignedLearnerRow[]; enrolledUserIds: Set<string>; onRemove: (uid: string) => void; emptyText?: string
+  courseId?: string; courseTitle?: string; hasPreTest?: boolean; hasPostTest?: boolean; isSuperAdmin?: boolean
 }) {
   const [sortKey, setSortKey] = useState<AssignedSortKey | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [editingRow, setEditingRow] = useState<AssignedLearnerRow | null>(null)
 
   function handleSort(key: AssignedSortKey) {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -1180,8 +1304,13 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, emptyText }: {
   }
 
   const sorted = useMemo(() => sortAssignedRows(rows, sortKey, sortDir), [rows, sortKey, sortDir])
+  // Editing needs a real courseId to write trainingRecords/{uid}_{courseId} —
+  // a brand-new, unsaved course has none yet, so the edit affordance is
+  // simply unavailable until the course exists.
+  const canEdit = isSuperAdmin && !!courseId
 
   return (
+    <>
     <table className="w-full text-sm">
       <thead>
         <tr className="border-b border-gray-100 sticky top-0 bg-white">
@@ -1191,14 +1320,17 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, emptyText }: {
           <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">เรียนล่าสุด</th>
           <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ความคืบหน้า</th>
           <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ผลการทดสอบ</th>
+          {hasPreTest && <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Pre-Test</th>}
+          {hasPostTest && <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Post-Test</th>}
           <SortableTh label="สถานะ" sortKey="status" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <th className="px-4 py-3" />
         </tr>
       </thead>
       <tbody>
         {sorted.length === 0 ? (
-          <tr><td colSpan={8} className="text-center text-gray-400 text-sm py-10">{emptyText ?? 'ยังไม่มีผู้เรียนที่กำหนด'}</td></tr>
-        ) : sorted.map(({ user: u, record, status, lastActivity }) => {
+          <tr><td colSpan={7 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">{emptyText ?? 'ยังไม่มีผู้เรียนที่กำหนด'}</td></tr>
+        ) : sorted.map((row) => {
+          const { user: u, record, status, lastActivity } = row
           const pct = approxProgressPct(status, record)
           const isEnrolled = enrolledUserIds.has(u.uid)
           return (
@@ -1230,32 +1362,60 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, emptyText }: {
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
                 {record?.score != null ? `${record.score}${record.passScore != null ? `/${record.passScore}` : ''}` : '—'}
               </td>
+              {hasPreTest && (
+                <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{record?.preTestScore ?? '—'}</td>
+              )}
+              {hasPostTest && (
+                <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{record?.postTestScore ?? '—'}</td>
+              )}
               <td className="px-4 py-3 whitespace-nowrap">
                 <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${STATUS_COLORS[status]}`}>{STATUS_LABELS[status]}</span>
               </td>
               <td className="px-4 py-3 whitespace-nowrap">
-                <button type="button"
-                  title={isEnrolled ? 'ผู้เรียนที่เริ่มเรียนแล้วไม่สามารถลบออกได้' : 'ลบออกจากรายชื่อผู้เรียน'}
-                  onClick={() => !isEnrolled && onRemove(u.uid)} disabled={isEnrolled}
-                  className={`size-7 flex items-center justify-center rounded-lg border opacity-0 group-hover:opacity-100 transition-all ${
-                    isEnrolled ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-gray-200 text-gray-400 hover:bg-rose-500 hover:text-white hover:border-rose-500'
-                  }`}>
-                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                  </svg>
-                </button>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                  {canEdit && (
+                    <button type="button" title="แก้ไขสถานะ/คะแนน" onClick={() => setEditingRow(row)}
+                      className="size-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-freshket-500 hover:text-white hover:border-freshket-500 transition-all">
+                      <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                      </svg>
+                    </button>
+                  )}
+                  <button type="button"
+                    title={isEnrolled ? 'ผู้เรียนที่เริ่มเรียนแล้วไม่สามารถลบออกได้' : 'ลบออกจากรายชื่อผู้เรียน'}
+                    onClick={() => !isEnrolled && onRemove(u.uid)} disabled={isEnrolled}
+                    className={`size-7 flex items-center justify-center rounded-lg border transition-all ${
+                      isEnrolled ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-gray-200 text-gray-400 hover:bg-rose-500 hover:text-white hover:border-rose-500'
+                    }`}>
+                    <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                    </svg>
+                  </button>
+                </div>
               </td>
             </tr>
           )
         })}
       </tbody>
     </table>
+    {editingRow && courseId && (
+      <OverrideRecordModal
+        row={editingRow}
+        courseId={courseId}
+        courseTitle={courseTitle ?? ''}
+        hasPreTest={!!hasPreTest}
+        hasPostTest={!!hasPostTest}
+        onClose={() => setEditingRow(null)}
+      />
+    )}
+    </>
   )
 }
 
-function AssignedLearnersTableModal({ assignedUserIds, allUsers, allTrainingRecords, enrolledUserIds, courseId, onRemove, onClose }: {
+function AssignedLearnersTableModal({ assignedUserIds, allUsers, allTrainingRecords, enrolledUserIds, courseId, courseTitle, hasPreTest, hasPostTest, isSuperAdmin, onRemove, onClose }: {
   assignedUserIds: string[]; allUsers: UserProfile[]; allTrainingRecords: TrainingRecord[]; enrolledUserIds: Set<string>
-  courseId?: string; onRemove: (uid: string) => void; onClose: () => void
+  courseId?: string; courseTitle?: string; hasPreTest?: boolean; hasPostTest?: boolean; isSuperAdmin?: boolean
+  onRemove: (uid: string) => void; onClose: () => void
 }) {
   const rows = useMemo(() => computeAssignedRows(assignedUserIds, allUsers, allTrainingRecords, courseId), [assignedUserIds, allUsers, allTrainingRecords, courseId])
 
@@ -1275,277 +1435,59 @@ function AssignedLearnersTableModal({ assignedUserIds, allUsers, allTrainingReco
           </button>
         </div>
         <div className="flex-1 min-h-0 overflow-auto">
-          <AssignedLearnersTable rows={rows} enrolledUserIds={enrolledUserIds} onRemove={onRemove} />
+          <AssignedLearnersTable rows={rows} enrolledUserIds={enrolledUserIds} onRemove={onRemove}
+            courseId={courseId} courseTitle={courseTitle} hasPreTest={hasPreTest} hasPostTest={hasPostTest} isSuperAdmin={isSuperAdmin} />
         </div>
       </div>
     </div>
   )
 }
 
-
-// ── Setting Toggle Row (label + hint + switch, used across the Quiz tab) ───────
-function SettingToggleRow({ label, hint, checked, onChange, noBorder }: {
-  label: string; hint?: string; checked: boolean; onChange: () => void; noBorder?: boolean
-}) {
-  return (
-    <div className={`flex items-center justify-between gap-4 ${noBorder ? '' : 'rounded-2xl border border-gray-100 bg-white px-4 py-3.5'}`}>
-      <div className="min-w-0 flex items-center gap-1.5">
-        <p className="text-sm text-gray-700 font-normal">{label}</p>
-        {hint && <InfoTooltip text={hint} />}
-      </div>
-      <button type="button" onClick={onChange}
-        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${checked ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-        <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-      </button>
-    </div>
-  )
-}
-
-// ── Grade Bands (เกณฑ์คะแนน) ───────────────────────────────────────────────────
-const GRADE_COLORS: { key: string; name: string; pill: string; dot: string }[] = [
-  { key: 'red',      name: 'แดง',     pill: 'bg-red-100 text-red-700 border-red-200',                 dot: 'bg-red-500' },
-  { key: 'orange',   name: 'ส้ม',     pill: 'bg-orange-100 text-orange-700 border-orange-200',        dot: 'bg-orange-500' },
-  { key: 'amber',    name: 'เหลือง',  pill: 'bg-amber-100 text-amber-700 border-amber-200',           dot: 'bg-amber-500' },
-  { key: 'blue',     name: 'น้ำเงิน', pill: 'bg-blue-100 text-blue-700 border-blue-200',             dot: 'bg-blue-500' },
-  { key: 'freshket', name: 'เขียว',   pill: 'bg-freshket-100 text-freshket-700 border-freshket-200', dot: 'bg-freshket-500' },
-  { key: 'purple',   name: 'ม่วง',    pill: 'bg-purple-100 text-purple-700 border-purple-200',        dot: 'bg-purple-500' },
-  { key: 'gray',     name: 'เทา',     pill: 'bg-gray-100 text-gray-700 border-gray-200',              dot: 'bg-gray-400' },
-]
-
-const DEFAULT_GRADE_BANDS: GradeBand[] = [
-  { id: 'grade-f',  minPercent: 0,  maxPercent: 50,  label: 'F',  color: 'red' },
-  { id: 'grade-d',  minPercent: 51, maxPercent: 60,  label: 'D',  color: 'orange' },
-  { id: 'grade-c',  minPercent: 61, maxPercent: 70,  label: 'C',  color: 'amber' },
-  { id: 'grade-b',  minPercent: 71, maxPercent: 80,  label: 'B',  color: 'blue' },
-  { id: 'grade-a',  minPercent: 81, maxPercent: 90,  label: 'A',  color: 'freshket' },
-  { id: 'grade-a+', minPercent: 91, maxPercent: 100, label: 'A*', color: 'purple' },
-]
-
-function gradeColorPill(key: string): string {
-  return GRADE_COLORS.find((c) => c.key === key)?.pill ?? GRADE_COLORS[GRADE_COLORS.length - 1].pill
-}
-
-function GradeBandsModal({ bands, onSave, onClose }: {
-  bands: GradeBand[]; onSave: (bands: GradeBand[]) => void; onClose: () => void
-}) {
-  const [rows, setRows] = useState<GradeBand[]>(bands)
-
-  function updateRow(id: string, patch: Partial<GradeBand>) {
-    setRows((p) => p.map((r) => (r.id === id ? { ...r, ...patch } : r)))
-  }
-  function addRow() {
-    setRows((p) => [...p, { id: makeId(), minPercent: 0, maxPercent: 100, label: '', color: GRADE_COLORS[p.length % GRADE_COLORS.length].key }])
-  }
-  function removeRow(id: string) {
-    setRows((p) => p.filter((r) => r.id !== id))
-  }
-  function moveRow(id: string, dir: -1 | 1) {
-    setRows((p) => {
-      const idx = p.findIndex((r) => r.id === id)
-      const next = idx + dir
-      if (idx < 0 || next < 0 || next >= p.length) return p
-      const copy = [...p]
-      ;[copy[idx], copy[next]] = [copy[next], copy[idx]]
-      return copy
-    })
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="animate-pop-in bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
-          <h3 className="text-lg font-bold text-gray-900">เกณฑ์คะแนน</h3>
-          <button type="button" onClick={onClose}
-            className="size-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-all">
-            <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="px-6 py-4 overflow-auto flex-1 space-y-3">
-          <p className="text-sm text-gray-500">กำหนดช่วงคะแนนและความหมาย เพื่อแสดงผลลัพธ์การทดสอบของผู้เรียนแบบมีสี</p>
-
-          {rows.length === 0 && (
-            <div className="text-center py-8 text-sm text-gray-400">ยังไม่มีเกณฑ์คะแนน กด &quot;เพิ่มเกณฑ์&quot; ด้านล่าง</div>
-          )}
-
-          {rows.map((row, i) => (
-            <div key={row.id} className="rounded-2xl border border-gray-100 p-3 flex items-start gap-2">
-              <div className="flex flex-col gap-1 pt-1 shrink-0">
-                <button type="button" disabled={i === 0} onClick={() => moveRow(row.id, -1)}
-                  className="size-5 flex items-center justify-center text-gray-300 hover:text-gray-600 disabled:opacity-30 transition-all">
-                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
-                  </svg>
-                </button>
-                <button type="button" disabled={i === rows.length - 1} onClick={() => moveRow(row.id, 1)}
-                  className="size-5 flex items-center justify-center text-gray-300 hover:text-gray-600 disabled:opacity-30 transition-all">
-                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                  </svg>
-                </button>
-              </div>
-
-              <div className="flex-1 min-w-0 space-y-2.5">
-                <div className="grid grid-cols-[1fr_auto_1fr_1.4fr] gap-2 items-end">
-                  <div>
-                    <label className="text-xs font-bold text-gray-600 block mb-1">คะแนนเริ่มต้น</label>
-                    <div className="relative">
-                      <input type="number" min={0} max={100} value={row.minPercent}
-                        onChange={(e) => updateRow(row.id, { minPercent: Number(e.target.value) })}
-                        className="w-full px-2.5 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 text-right pr-6" />
-                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">%</span>
-                    </div>
-                  </div>
-                  <span className="text-gray-300 pb-2.5">–</span>
-                  <div>
-                    <label className="text-xs font-bold text-gray-600 block mb-1">คะแนนสิ้นสุด</label>
-                    <div className="relative">
-                      <input type="number" min={0} max={100} value={row.maxPercent}
-                        onChange={(e) => updateRow(row.id, { maxPercent: Number(e.target.value) })}
-                        className="w-full px-2.5 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 text-right pr-6" />
-                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">%</span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-gray-600 block mb-1">ความหมาย</label>
-                    <input type="text" value={row.label} onChange={(e) => updateRow(row.id, { label: e.target.value })}
-                      placeholder="เช่น ดีเยี่ยม"
-                      className="w-full px-2.5 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300" />
-                  </div>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-1.5">
-                    {GRADE_COLORS.map((c) => (
-                      <button key={c.key} type="button" onClick={() => updateRow(row.id, { color: c.key })} title={c.name}
-                        className={`size-5 rounded-full ${c.dot} transition-all ${row.color === c.key ? 'ring-2 ring-offset-2 ring-gray-400' : 'opacity-50 hover:opacity-80'}`} />
-                    ))}
-                  </div>
-                  <span className={`inline-flex items-center text-xs font-bold px-3 py-1 rounded-full border ${gradeColorPill(row.color)}`}>
-                    {row.label.trim() || 'ตัวอย่าง'}
-                  </span>
-                </div>
-              </div>
-
-              <button type="button" onClick={() => removeRow(row.id)}
-                className="size-8 shrink-0 rounded-lg flex items-center justify-center text-gray-300 hover:bg-rose-50 hover:text-rose-500 transition-all">
-                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                </svg>
-              </button>
-            </div>
-          ))}
-
-          <button type="button" onClick={addRow}
-            className="w-full py-2.5 rounded-xl border-2 border-dashed border-gray-200 text-sm font-bold text-gray-500 hover:border-freshket-300 hover:text-freshket-600 transition-all flex items-center justify-center gap-1.5">
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            เพิ่มเกณฑ์
-          </button>
-        </div>
-
-        <div className="flex gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
-          <button type="button" onClick={onClose}
-            className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50 transition-all">
-            ยกเลิก
-          </button>
-          <button type="button" onClick={() => onSave(rows)}
-            className="flex-1 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all">
-            บันทึก
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Assessment Picker ─────────────────────────────────────────────────────────
-type AssessmentSection = { enabled: boolean; mode: 'self' | 'google_form'; assessmentId: string; formUrl: string; search: string }
-
-function AssessmentPicker({ section, onChange, assessments, label, hideToggle }: {
-  section: AssessmentSection; onChange: (s: Partial<AssessmentSection>) => void; assessments: Assessment[]; label: string
-  hideToggle?: boolean
-}) {
-  const published = assessments.filter((a) => a.isPublished)
-  const filteredList = section.search.trim() ? published.filter((a) => a.title.toLowerCase().includes(section.search.toLowerCase())) : published
-  const showContent = hideToggle || section.enabled
-
-  // Staged pick: checking a box only updates this draft. The committed
-  // assessmentId (and course form) only changes once ยืนยัน is pressed, so
-  // browsing/checking candidates can't accidentally swap the linked quiz set.
-  const [draftId, setDraftId] = useState(section.assessmentId)
-  useEffect(() => { setDraftId(section.assessmentId) }, [section.assessmentId])
-  const dirty = draftId !== section.assessmentId
-
-  function confirm() {
-    onChange({ assessmentId: draftId, search: '' })
-  }
-
-  return (
-    <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50/50">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-bold text-gray-700">{label}</p>
-        {!hideToggle && (
-          <button type="button" onClick={() => onChange({ enabled: !section.enabled })}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${section.enabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-            <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${section.enabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-          </button>
-        )}
-      </div>
-      {showContent && (
-        <div className="space-y-2">
-          <input type="text" placeholder="ค้นหา Assessment..." value={section.search}
-            onChange={(e) => onChange({ search: e.target.value })}
-            className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
-          />
-          <div className="max-h-36 overflow-y-auto space-y-1">
-            {filteredList.length === 0
-              ? <p className="text-xs text-gray-400 text-center py-3">ไม่พบ assessment</p>
-              : filteredList.map((a) => (
-                <label key={a.id}
-                  className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-xs cursor-pointer transition-all ${draftId === a.id ? 'bg-freshket-100 text-freshket-700 font-bold' : 'bg-white hover:bg-gray-100 text-gray-700'}`}>
-                  <input type="checkbox" checked={draftId === a.id}
-                    onChange={() => setDraftId(draftId === a.id ? '' : a.id)}
-                    className="rounded border-gray-300 text-freshket-500 focus:ring-freshket-300 size-4 shrink-0"
-                  />
-                  <span className="flex-1 truncate">{a.title}</span>
-                  <span className="text-gray-400 shrink-0">({a.questions.length} ข้อ)</span>
-                </label>
-              ))}
-          </div>
-          <div className="flex items-center justify-between gap-3 pt-1">
-            <p className="text-xs text-gray-400 min-w-0 truncate">
-              {section.assessmentId
-                ? <>เลือกอยู่: <span className="font-bold text-freshket-600">{assessments.find((a) => a.id === section.assessmentId)?.title}</span></>
-                : 'ยังไม่ได้เลือกชุดคำถาม'}
-            </p>
-            <button type="button" onClick={confirm} disabled={!dirty}
-              className="shrink-0 px-4 py-1.5 rounded-lg bg-freshket-500 text-white text-xs font-bold hover:bg-freshket-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
-              ยืนยัน
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ── Quiz Preview Modal — mocks the learner-facing take-assessment flow ────────
-// Read-only: no answers are graded or saved. It exists so an admin editing quiz
-// settings can see how the intro screen and question paging (per_question /
-// per_topic / all_in_one) will look before publishing.
-function QuizPreviewModal({ quiz, assessment, onClose }: {
-  quiz: QuizFormState; assessment?: Assessment; onClose: () => void
-}) {
+// Read-only: no answers are graded or saved. It exists so an admin editing a
+// lesson's linked assessment can see how the intro screen and question paging
+// (per_question / per_topic / all_in_one) will look before publishing.
+// Renders the take-assessment preview (intro → form/quiz → done) with no modal
+// chrome of its own, so it can sit directly in LessonPreviewModal's right-hand
+// pane next to the video/file/link previews. A quiz lesson then behaves like
+// every other lesson type there — content appears in place rather than in a
+// second modal stacked on top of the first.
+function QuizPreviewInline({ assessment }: { assessment?: Assessment }) {
+  const isGoogleForm = !!assessment?.googleFormUrl
   const questions = (assessment?.questions ?? []).slice().sort((a, b) => a.order - b.order)
-  const [screen, setScreen] = useState<'intro' | 'quiz' | 'done'>('intro')
+  // Google Form has no intro/paging screens of its own — it goes straight
+  // from "intro" to the embedded form, skipping "quiz" entirely (there are no
+  // questions[] to page through; Google owns the response collection).
+  const [screen, setScreen] = useState<'intro' | 'quiz' | 'form' | 'done'>('intro')
   const [page, setPage] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>({})
 
-  const perPage = quiz.answerViewMode === 'all_in_one' ? Math.max(questions.length, 1)
-    : quiz.answerViewMode === 'per_topic' ? 5
+  const [resolvedFormUrl, setResolvedFormUrl] = useState<string | null>(null)
+  const [resolvingForm, setResolvingForm] = useState(false)
+  useEffect(() => {
+    if (!isGoogleForm || !assessment?.googleFormUrl?.includes('forms.gle')) return
+    let cancelled = false
+    setResolvingForm(true)
+    authedFetch('/api/resolve-form-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: assessment.googleFormUrl }),
+    })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return
+        const json = await res.json()
+        if (!cancelled) setResolvedFormUrl(json.resolvedUrl)
+      })
+      .catch(() => { /* falls back to the "open new tab" branch below */ })
+      .finally(() => { if (!cancelled) setResolvingForm(false) })
+    return () => { cancelled = true }
+  }, [isGoogleForm, assessment?.googleFormUrl])
+  const formEmbedUrl = isGoogleForm ? toFormEmbedUrl(resolvedFormUrl ?? assessment?.googleFormUrl ?? '') : null
+
+  const answerViewMode = assessment?.answerViewMode ?? 'per_topic'
+  const perPage = answerViewMode === 'all_in_one' ? Math.max(questions.length, 1)
+    : answerViewMode === 'per_topic' ? 5
     : 1
   const pages = Math.max(Math.ceil(questions.length / perPage), 1)
   const pageQuestions = questions.slice(page * perPage, page * perPage + perPage)
@@ -1559,25 +1501,8 @@ function QuizPreviewModal({ quiz, assessment, onClose }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="animate-pop-in bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
-        <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500">
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            พรีวิวมุมมองผู้เรียน
-          </span>
-          <button type="button" onClick={onClose}
-            className="size-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition-all">
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5">
+    <>
+      <div>
           {!assessment ? (
             <div className="py-10 text-center text-sm text-gray-400">
               ยังไม่ได้เลือกชุดคำถาม — เลือกชุดคำถามในหัวข้อ &ldquo;ชุดคำถาม&rdquo; ก่อนเพื่อดูตัวอย่าง
@@ -1590,22 +1515,33 @@ function QuizPreviewModal({ quiz, assessment, onClose }: {
                 </svg>
               </div>
               <div>
-                <h3 className="text-base font-bold text-gray-900">{quiz.title || 'แบบทดสอบ'}</h3>
-                {quiz.description && <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">{quiz.description}</p>}
+                <h3 className="text-base font-bold text-gray-900">{assessment.title || 'แบบทดสอบ'}</h3>
+                {assessment.description && <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">{assessment.description}</p>}
               </div>
               <div className="flex flex-wrap items-center justify-center gap-1.5">
-                <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">{questions.length} ข้อ</span>
-                {Number(quiz.timeLimitMinutes) > 0 && (
-                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">{quiz.timeLimitMinutes} นาที</span>
+                {isGoogleForm ? (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">Google Form</span>
+                ) : (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">{questions.length} ข้อ</span>
                 )}
-                <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700">ผ่านที่ {quiz.passThresholdPercent}%</span>
-                {quiz.antiCheatEnabled && (
+                {Number(assessment.timeLimitMinutes) > 0 && (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">{assessment.timeLimitMinutes} นาที</span>
+                )}
+                {!isGoogleForm && (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700">ผ่านที่ {assessment.passingScore}%</span>
+                )}
+                {assessment.antiCheatEnabled && (
                   <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-600">Anti-Cheat</span>
                 )}
                 {/* No "ต้องเปิดกล้อง" badge: camera proctoring is not implemented,
                     and showing it implied an enforcement that never ran. */}
               </div>
-              {questions.length === 0 ? (
+              {isGoogleForm ? (
+                <button type="button" onClick={() => setScreen('form')}
+                  className="px-6 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all">
+                  เริ่มทำแบบทดสอบ
+                </button>
+              ) : questions.length === 0 ? (
                 <p className="text-xs text-gray-400">ชุดคำถามนี้ยังไม่มีคำถาม</p>
               ) : (
                 <button type="button" onClick={() => setScreen('quiz')}
@@ -1614,11 +1550,38 @@ function QuizPreviewModal({ quiz, assessment, onClose }: {
                 </button>
               )}
             </div>
+          ) : screen === 'form' ? (
+            <div className="space-y-4 h-full flex flex-col">
+              {resolvingForm ? (
+                <div className="flex-1 flex items-center justify-center gap-2 text-sm text-gray-400">
+                  <span className="size-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+                  กำลังตรวจสอบลิงก์แบบฟอร์ม...
+                </div>
+              ) : formEmbedUrl ? (
+                <>
+                  <div className="rounded-xl overflow-hidden border border-gray-200 flex-1" style={{ minHeight: '50vh' }}>
+                    <iframe src={formEmbedUrl} className="w-full h-full" title={assessment.title} style={{ border: 'none' }} />
+                  </div>
+                  <button type="button" onClick={() => setScreen('done')}
+                    className="w-full py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all">
+                    เสร็จสิ้น (ตัวอย่างเท่านั้น)
+                  </button>
+                </>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center gap-3 text-sm text-gray-400">
+                  <p>ไม่สามารถแสดงตัวอย่างในหน้านี้ได้</p>
+                  {assessment.googleFormUrl && (
+                    <a href={assessment.googleFormUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-freshket-600 font-bold hover:underline">เปิดลิงก์ Google Form</a>
+                  )}
+                </div>
+              )}
+            </div>
           ) : screen === 'quiz' ? (
             <div className="space-y-4">
               <div>
                 <div className="flex items-center justify-between text-xs text-gray-400 mb-1.5">
-                  <span>{quiz.answerViewMode === 'per_topic' ? `หัวข้อ ${page + 1}/${pages}` : `หน้า ${page + 1}/${pages}`}</span>
+                  <span>{answerViewMode === 'per_topic' ? `หัวข้อ ${page + 1}/${pages}` : `หน้า ${page + 1}/${pages}`}</span>
                   <span>{Object.keys(answers).length}/{questions.length} ตอบแล้ว</span>
                 </div>
                 <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -1692,9 +1655,8 @@ function QuizPreviewModal({ quiz, assessment, onClose }: {
               </button>
             </div>
           )}
-        </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -2142,7 +2104,7 @@ function SaveConfirmationModal({ recipientCount, skippedCount, saving, onBack, o
 }
 
 // ── Course Builder (full-page, sidebar tabs) ──────────────────────────────────
-type BuilderTab = 'details' | 'lessons' | 'learners' | 'summary' | 'quiz'
+type BuilderTab = 'details' | 'lessons' | 'learners' | 'summary'
 
 // Order = setup first, then the read-only report. "สรุปผลการเรียน" sits last
 // because it reports on the course rather than configuring it.
@@ -2150,46 +2112,11 @@ const BUILDER_TABS: { id: BuilderTab; label: string }[] = [
   { id: 'details',  label: 'รายละเอียดคอร์ส' },
   { id: 'lessons',  label: 'บทเรียน' },
   { id: 'learners', label: 'กำหนดผู้เรียน' },
-  { id: 'quiz',     label: 'แบบทดสอบ' },
   { id: 'summary',  label: 'สรุปผลการเรียน' },
 ]
 
 function makeId(): string {
   return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
-type QuizFormState = {
-  enabled: boolean
-  isPreAssessment: boolean
-  title: string
-  timeLimitMinutes: string
-  antiCheatEnabled: boolean
-  cameraRequired: boolean
-  description: string
-  answerViewMode: QuizAnswerViewMode
-  passThresholdPercent: string
-  retryEnabled: boolean
-  retryAfterDays: string
-  maxRetries: string
-  rewardEnabled: boolean
-  rewardWithinAttempts: string
-  rewardThresholdPercent: string
-  mode: 'self' | 'google_form'
-  assessmentId: string
-  formUrl: string
-  search: string
-  gradeBands: GradeBand[]
-}
-
-function defaultQuizForm(): QuizFormState {
-  return {
-    enabled: false, isPreAssessment: true, title: '', timeLimitMinutes: '0',
-    antiCheatEnabled: false, cameraRequired: false, description: '',
-    answerViewMode: 'per_topic', passThresholdPercent: '70',
-    retryEnabled: true, retryAfterDays: '0', maxRetries: '999',
-    rewardEnabled: false, rewardWithinAttempts: '1', rewardThresholdPercent: '70',
-    mode: 'self', assessmentId: '', formUrl: '', search: '', gradeBands: DEFAULT_GRADE_BANDS,
-  }
 }
 
 type FormState = {
@@ -2201,7 +2128,6 @@ type FormState = {
   hasCertificate: boolean; allowRetake: boolean
   topics: CourseTopic[]
   assignedUserIds: string[]
-  quiz: QuizFormState
   hasKeyTakeAway: boolean; keyTakeAwayPrompt: string
   isPublished: boolean
   // Challenge
@@ -2218,8 +2144,6 @@ function formFromCourse(c: Course): FormState {
     if (isNaN(date.getTime())) return ''
     return date.toISOString().split('T')[0]
   }
-  const isPre = !!c.hasPreAssessment
-  const qs = c.quizSettings
   return {
     title: c.title, description: c.description, category: c.category,
     level: c.level ?? 'beginner',
@@ -2233,28 +2157,6 @@ function formFromCourse(c: Course): FormState {
     hasCertificate: !!c.hasCertificate, allowRetake: !!c.allowRetake,
     topics: c.topics ?? [],
     assignedUserIds: c.assignedUserIds ?? [],
-    quiz: {
-      enabled: !!c.hasPreAssessment || !!c.hasPostAssessment,
-      isPreAssessment: isPre,
-      title: qs?.title ?? '',
-      timeLimitMinutes: String(qs?.timeLimitMinutes ?? 0),
-      antiCheatEnabled: !!qs?.antiCheatEnabled,
-      cameraRequired: !!qs?.cameraRequired,
-      description: qs?.description ?? '',
-      answerViewMode: qs?.answerViewMode ?? 'per_topic',
-      passThresholdPercent: String(qs?.passThresholdPercent ?? 70),
-      retryEnabled: qs?.retryEnabled ?? true,
-      retryAfterDays: String(qs?.retryAfterDays ?? 0),
-      maxRetries: String(qs?.maxRetries ?? 999),
-      rewardEnabled: !!qs?.rewardEnabled,
-      rewardWithinAttempts: String(qs?.rewardWithinAttempts ?? 1),
-      rewardThresholdPercent: String(qs?.rewardThresholdPercent ?? 70),
-      mode: c.assessmentType === 'google_form' ? 'google_form' : 'self',
-      assessmentId: (isPre ? c.preAssessmentId : c.postAssessmentId) ?? '',
-      formUrl: (isPre ? c.preFormUrl : c.postFormUrl) ?? '',
-      search: '',
-      gradeBands: qs?.gradeBands ?? DEFAULT_GRADE_BANDS,
-    },
     hasKeyTakeAway: !!c.hasKeyTakeAway,
     keyTakeAwayPrompt: c.keyTakeAwayPrompt ?? '',
     isPublished: c.isPublished,
@@ -2294,7 +2196,10 @@ function BuilderTabIcon({ id, className }: { id: BuilderTab; className?: string 
   )
 }
 
-const LESSON_TYPES: LessonType[] = ['video', 'article', 'file', 'link', 'quiz', 'assignment']
+// article/link/assignment removed from the picker — unused lesson formats.
+// Existing lessons of those types (if any) are left as-is in Firestore; this
+// only stops new ones from being created.
+const LESSON_TYPES: LessonType[] = ['video', 'file', 'quiz']
 
 function LessonTypeIcon({ type, className }: { type: LessonType; className?: string }) {
   const cls = className ?? 'size-4'
@@ -2328,6 +2233,201 @@ function LessonTypeIcon({ type, className }: { type: LessonType; className?: str
     <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
     </svg>
+  )
+}
+
+// ── Lesson/course preview (learner view) ──────────────────────────────────────
+// Media URL detection mirrors courses/[id]/page.tsx's learner-facing embed
+// logic — kept as a local copy (not shared) since this is a read-only preview
+// that never needs progress-gating, unlike the real YouTubeGatedPlayer.
+type PreviewMediaType = 'google_slides' | 'youtube' | 'google_drive' | 'unknown'
+
+function detectPreviewMediaType(url: string): PreviewMediaType {
+  if (!url) return 'unknown'
+  if (url.includes('docs.google.com/presentation')) return 'google_slides'
+  if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube'
+  if (url.includes('drive.google.com')) return 'google_drive'
+  return 'unknown'
+}
+
+function toPreviewEmbedUrl(url: string): string | null {
+  if (!url || url.includes('example-')) return null
+  const type = detectPreviewMediaType(url)
+
+  if (type === 'google_slides') {
+    const base = url
+      .replace(/\/edit(\?.*)?$/, '/embed')
+      .replace(/\/pub(\?.*)?$/, '/embed')
+      .replace(/\/present(\?.*)?$/, '/embed')
+    return base.includes('/embed') ? (base.includes('?') ? base : `${base}?start=false&loop=false&delayms=3000`) : null
+  }
+  if (type === 'youtube') {
+    const m1 = url.match(/youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/)
+    const m2 = url.match(/youtu\.be\/([a-zA-Z0-9_-]+)/)
+    const vid = (m1 ?? m2)?.[1]
+    return vid ? `https://www.youtube.com/embed/${vid}?rel=0` : null
+  }
+  if (type === 'google_drive') {
+    const m1 = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/)
+    const m2 = url.match(/[?&]id=([a-zA-Z0-9_-]+)/)
+    const fileId = (m1 ?? m2)?.[1]
+    return fileId ? `https://drive.google.com/file/d/${fileId}/preview` : null
+  }
+  return null
+}
+
+// Mirrors courses/[id]/page.tsx's toFormEmbedUrl — converts an ALREADY-RESOLVED
+// docs.google.com URL into its embeddable form. forms.gle resolving happens
+// separately via /api/resolve-form-url (a browser can't follow that redirect
+// itself; the target host sends no CORS headers for a cross-origin fetch).
+function toFormEmbedUrl(url: string): string | null {
+  if (!url || url.includes('example-')) return null
+  if (url.includes('docs.google.com/forms')) {
+    const base = url.split('?')[0].replace(/\/(edit|pub|closedform)$/, '/viewform')
+    const viewBase = base.endsWith('/viewform') ? base : `${base}/viewform`
+    return `${viewBase}?embedded=true`
+  }
+  return null
+}
+
+// Full course preview: browse every topic/lesson exactly as a learner's lesson
+// list is laid out. Takes the full assessments list (not one resolved
+// assessment) because "เริ่มทำแบบฝึกหัด" on a quiz-type lesson needs THAT
+// lesson's own assessmentId — each quiz-type lesson can link a different
+// question set.
+function LessonPreviewModal({ topics, assessments, onClose }: {
+  topics: CourseTopic[]; assessments: Assessment[]; onClose: () => void
+}) {
+  const sortedTopics = topics.slice().sort((a, b) => a.order - b.order)
+  const firstLesson = sortedTopics.find((t) => t.lessons.length > 0)?.lessons[0]
+  const [selectedId, setSelectedId] = useState<string | undefined>(firstLesson?.id)
+
+  const selectedLesson = sortedTopics
+    .flatMap((t) => t.lessons)
+    .find((l) => l.id === selectedId)
+
+  const activeQuizAssessment = assessments.find((a) => a.id === selectedLesson?.assessmentId)
+
+  const embedUrl = selectedLesson?.type === 'video' ? toPreviewEmbedUrl(selectedLesson.videoUrl ?? '')
+    : selectedLesson?.type === 'file' ? toPreviewEmbedUrl(selectedLesson.fileUrl ?? '')
+    : null
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="animate-pop-in bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden">
+        <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500">
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            พรีวิวมุมมองผู้เรียน
+          </span>
+          <button type="button" onClick={onClose}
+            className="size-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition-all">
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {sortedTopics.every((t) => t.lessons.length === 0) ? (
+          <div className="flex-1 flex items-center justify-center text-sm text-gray-400">ยังไม่มีบทเรียน — เพิ่มหัวข้อและบทเรียนก่อนเพื่อดูตัวอย่าง</div>
+        ) : (
+          <div className="flex-1 flex overflow-hidden">
+            {/* Left: topics/lessons list */}
+            <div className="w-64 shrink-0 border-r border-gray-100 overflow-y-auto p-3 space-y-3">
+              {sortedTopics.map((t) => (
+                <div key={t.id}>
+                  <p className="text-xs font-bold text-gray-400 px-1.5 mb-1 truncate">{t.title}</p>
+                  <div className="space-y-0.5">
+                    {t.lessons.slice().sort((a, b) => a.order - b.order).map((l) => (
+                      <button key={l.id} type="button" onClick={() => setSelectedId(l.id)}
+                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-xs transition-all ${selectedId === l.id ? 'bg-freshket-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
+                        <LessonTypeIcon type={l.type} className="size-3.5 shrink-0" />
+                        <span className="flex-1 truncate">{l.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Right: content viewer */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {!selectedLesson ? (
+                <div className="h-full flex items-center justify-center text-gray-400 text-sm">เลือกบทเรียนทางซ้าย</div>
+              ) : (
+                <div className="space-y-4 max-w-2xl">
+                  <h3 className="text-base font-bold text-gray-900">{selectedLesson.title}</h3>
+                  {selectedLesson.description && <p className="text-xs text-gray-400">{selectedLesson.description}</p>}
+
+                  {selectedLesson.type === 'video' && (
+                    embedUrl ? (
+                      <div className="rounded-xl overflow-hidden border border-gray-100" style={{ aspectRatio: '16/9' }}>
+                        <iframe src={embedUrl} className="w-full h-full" allowFullScreen title={selectedLesson.title} style={{ border: 'none' }} />
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-400">ยังไม่ได้ใส่ลิงก์วิดีโอ หรือลิงก์ไม่สามารถแสดงตัวอย่างได้</p>
+                    )
+                  )}
+
+                  {selectedLesson.type === 'article' && (
+                    selectedLesson.articleBody
+                      ? <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{selectedLesson.articleBody}</p>
+                      : <p className="text-xs text-gray-400">ยังไม่ได้กรอกเนื้อหาบทความ</p>
+                  )}
+
+                  {selectedLesson.type === 'file' && (
+                    embedUrl ? (
+                      <div className="rounded-xl overflow-hidden border border-gray-100" style={{ aspectRatio: '16/9' }}>
+                        <iframe src={embedUrl} className="w-full h-full" allowFullScreen title={selectedLesson.title} style={{ border: 'none' }} />
+                      </div>
+                    ) : selectedLesson.fileUrl ? (
+                      <a href={selectedLesson.fileUrl} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
+                        เปิดเอกสาร
+                      </a>
+                    ) : (
+                      <p className="text-xs text-gray-400">ยังไม่ได้ใส่ลิงก์เอกสาร</p>
+                    )
+                  )}
+
+                  {selectedLesson.type === 'link' && (
+                    selectedLesson.linkUrl ? (
+                      <a href={selectedLesson.linkUrl} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
+                        เปิดลิงก์ภายนอก
+                      </a>
+                    ) : (
+                      <p className="text-xs text-gray-400">ยังไม่ได้ใส่ลิงก์ภายนอก</p>
+                    )
+                  )}
+
+                  {selectedLesson.type === 'quiz' && (
+                    selectedLesson.assessmentId ? (
+                      <QuizPreviewInline key={selectedLesson.id} assessment={activeQuizAssessment} />
+                    ) : (
+                      <p className="text-xs text-gray-400">ยังไม่ได้เลือกชุดคำถามสำหรับบทเรียนนี้ — ไปที่การ์ด &quot;เลือกแบบฝึกหัด&quot; ด้านซ้ายเพื่อเลือก</p>
+                    )
+                  )}
+
+                  {selectedLesson.type === 'assignment' && (
+                    <div className="space-y-2">
+                      {selectedLesson.assignmentPrompt
+                        ? <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedLesson.assignmentPrompt}</p>
+                        : <p className="text-xs text-gray-400">ยังไม่ได้กรอกคำสั่งการบ้าน</p>}
+                      <textarea rows={4} disabled placeholder="พิมพ์คำตอบของคุณที่นี่..."
+                        className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 placeholder:text-gray-300 resize-none bg-gray-50" />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -2551,16 +2651,241 @@ function InstructorPicker({ users, value, onChange }: {
   )
 }
 
-// ── Lesson Editor (right pane of the Lessons tab) ─────────────────────────────
-function LessonEditor({ lesson, assessments, onChange, onDelete }: {
-  lesson: CourseLesson; assessments: Assessment[]
-  onChange: (patch: Partial<CourseLesson>) => void; onDelete: () => void
-}) {
-  const [quizSearch, setQuizSearch] = useState('')
-  const published = assessments.filter((a) => a.isPublished)
-  const filteredAssessments = quizSearch.trim() ? published.filter((a) => a.title.toLowerCase().includes(quizSearch.toLowerCase())) : published
+// ── Assessment content preview ("ดูโจทย์") ────────────────────────────────────
+// Admin-facing preview of what's actually inside the linked assessment, opened
+// from the lesson quiz picker. A Google Form assessment has no questions[] to
+// list (Google owns the response collection) so it embeds the form itself
+// instead; a self-authored one lists every question — WITH the correct answer
+// shown, unlike the learner-facing take page, because this is a pre-publish
+// content check for whoever is wiring up the lesson, not an attempt.
+function AssessmentPreviewContent({ assessment }: { assessment: Assessment }) {
+  const isGoogleForm = !!assessment.googleFormUrl
+  const [resolvedFormUrl, setResolvedFormUrl] = useState<string | null>(null)
+  const [resolving, setResolving] = useState(false)
+
+  useEffect(() => {
+    if (!isGoogleForm || !assessment.googleFormUrl?.includes('forms.gle')) return
+    let cancelled = false
+    setResolving(true)
+    authedFetch('/api/resolve-form-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: assessment.googleFormUrl }),
+    })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return
+        const json = await res.json()
+        if (!cancelled) setResolvedFormUrl(json.resolvedUrl)
+      })
+      .catch(() => { /* falls back to showing the raw link below */ })
+      .finally(() => { if (!cancelled) setResolving(false) })
+    return () => { cancelled = true }
+  }, [isGoogleForm, assessment.googleFormUrl])
+
+  const embedUrl = isGoogleForm ? toFormEmbedUrl(resolvedFormUrl ?? assessment.googleFormUrl ?? '') : null
+  const sortedQuestions = assessment.questions.slice().sort((a, b) => a.order - b.order)
 
   return (
+    <div className="max-w-4xl space-y-4">
+      <div>
+        <p className="text-sm font-bold text-gray-800">{assessment.title}</p>
+        <p className="text-xs text-gray-400">{isGoogleForm ? 'Google Form' : `${sortedQuestions.length} ข้อ`}</p>
+      </div>
+
+      {isGoogleForm ? (
+        resolving ? (
+          <div className="flex items-center justify-center gap-2 text-sm text-gray-400 py-16">
+            <span className="size-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+            กำลังตรวจสอบลิงก์แบบฟอร์ม...
+          </div>
+        ) : embedUrl ? (
+          <div className="rounded-xl overflow-hidden border border-gray-200" style={{ height: '70vh' }}>
+            <iframe src={embedUrl} className="w-full h-full" title={assessment.title} style={{ border: 'none' }} />
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center gap-3 text-sm text-gray-400 py-16">
+            <p>ไม่สามารถแสดงตัวอย่างในหน้านี้ได้</p>
+            {assessment.googleFormUrl && (
+              <a href={assessment.googleFormUrl} target="_blank" rel="noopener noreferrer"
+                className="text-freshket-600 font-bold hover:underline">เปิดลิงก์ Google Form</a>
+            )}
+          </div>
+        )
+      ) : sortedQuestions.length === 0 ? (
+        <div className="flex items-center justify-center text-sm text-gray-400 py-16">ชุดคำถามนี้ยังไม่มีคำถาม</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {sortedQuestions.map((q, i) => (
+            <div key={q.id} className="rounded-xl border border-gray-200 p-4 space-y-2.5 bg-white">
+              <div className="flex items-center gap-2">
+                <span className="size-6 rounded-full bg-gray-100 text-gray-600 text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${QUESTION_TYPE_COLORS[q.type]}`}>{QUESTION_TYPE_LABELS[q.type]}</span>
+                <span className="text-xs text-gray-400 ml-auto shrink-0">{q.points} pt</span>
+              </div>
+              <p className="text-sm font-bold text-gray-800">{q.text || <span className="text-gray-300 font-normal">(ยังไม่ได้กรอกคำถาม)</span>}</p>
+              {q.description && <p className="text-xs text-gray-400">{q.description}</p>}
+
+              {q.type === 'multiple_choice' && (
+                <div className="space-y-1.5">
+                  {q.choices?.map((c) => (
+                    <div key={c.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs ${c.isCorrect ? 'bg-freshket-50 text-freshket-700 font-bold' : 'text-gray-600'}`}>
+                      {c.isCorrect ? (
+                        <svg className="size-3.5 shrink-0 text-freshket-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      ) : (
+                        <span className="size-3.5 shrink-0 rounded-full border-2 border-gray-300" />
+                      )}
+                      <span className="truncate">{c.text || '(ยังไม่ได้กรอกตัวเลือก)'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {q.type === 'open_ended' && q.sampleAnswer && (
+                <p className="text-xs text-gray-500 italic">เฉลย (อ้างอิง): {q.sampleAnswer}</p>
+              )}
+
+              {q.type === 'drag_drop' && (
+                <div className="space-y-1">
+                  {q.dragPairs?.map((p) => (
+                    <div key={p.id} className="flex items-center gap-2 text-xs text-gray-600">
+                      <span className="px-2 py-1 rounded-lg bg-gray-100 font-bold shrink-0 truncate max-w-[45%]">{p.left || '—'}</span>
+                      <svg className="size-3.5 text-gray-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 8.25L21 12m0 0l-3.75 3.75M21 12H3" />
+                      </svg>
+                      <span className="px-2 py-1 rounded-lg bg-freshket-50 text-freshket-700 font-bold flex-1 truncate">{p.right || '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Lesson Editor (right pane of the Lessons tab) ─────────────────────────────
+function LessonEditor({ lesson, assessments, topics, onChange, onSetQuizRole, onDelete }: {
+  lesson: CourseLesson; assessments: Assessment[]; topics: CourseTopic[]
+  onChange: (patch: Partial<CourseLesson>) => void
+  onSetQuizRole: (role: 'pre_test' | 'post_test' | undefined) => void
+  onDelete: () => void
+}) {
+  const router = useRouter()
+  const [quizSearch, setQuizSearch] = useState('')
+  // At most one lesson per course should carry each pre/post role — find
+  // whichever OTHER lesson already claims a role so the picker can warn
+  // before silently double-assigning it.
+  const otherPreTestLesson = topics.flatMap((t) => t.lessons).find((l) => l.id !== lesson.id && l.quizRole === 'pre_test')
+  const otherPostTestLesson = topics.flatMap((t) => t.lessons).find((l) => l.id !== lesson.id && l.quizRole === 'post_test')
+  // "แก้ไข" configures the lesson/quiz link; "ตัวอย่างแบบทดสอบ" (only shown
+  // once an assessment is linked) previews its actual content — embedded form
+  // or full question list — without leaving this pane. Resets to "แก้ไข" on
+  // lesson switch so opening a different lesson never lands mid-preview.
+  const [editorTab, setEditorTab] = useState<'edit' | 'preview'>('edit')
+  useEffect(() => { setEditorTab('edit') }, [lesson.id])
+  const currentAssessment = assessments.find((a) => a.id === lesson.assessmentId)
+
+  // Timer/anti-cheat settings for the Google Form assessment currently linked
+  // to this lesson. These live on the Assessment document itself (shared by
+  // every lesson/course that reuses it), so this writes straight to Firestore
+  // instead of going through the course draft's save button.
+  const [showFormSettings, setShowFormSettings] = useState(false)
+  const [savingFormSettings, setSavingFormSettings] = useState(false)
+  const [formTimeLimitMinutes, setFormTimeLimitMinutes] = useState('0')
+  const [formAntiCheatEnabled, setFormAntiCheatEnabled] = useState(false)
+  useEffect(() => {
+    setFormTimeLimitMinutes(String(currentAssessment?.timeLimitMinutes ?? 0))
+    setFormAntiCheatEnabled(currentAssessment?.antiCheatEnabled ?? false)
+  }, [currentAssessment?.id, currentAssessment?.timeLimitMinutes, currentAssessment?.antiCheatEnabled])
+
+  async function handleSaveFormSettings() {
+    if (!currentAssessment) return
+    setSavingFormSettings(true)
+    try {
+      const patch = {
+        timeLimitMinutes: Number(formTimeLimitMinutes) || 0,
+        antiCheatEnabled: formAntiCheatEnabled,
+      }
+      if (!DEMO_MODE) {
+        await updateDoc(doc(getClientFirestore(), 'assessments', currentAssessment.id), patch)
+      }
+      setShowFormSettings(false)
+    } catch (e) {
+      void alertError('บันทึกการตั้งค่าไม่สำเร็จ', e instanceof Error ? e.message : String(e))
+    } finally {
+      setSavingFormSettings(false)
+    }
+  }
+  // Each Assessment already carries its own self/Google Form mode (set on the
+  // /assessment authoring page) — this only filters which kind the picker
+  // shows, it doesn't create or change an assessment's mode. Starts on
+  // whichever mode the lesson's OWN assessment already uses (not a hardcoded
+  // 'self') so opening an already-configured Google Form lesson doesn't land
+  // on a filter that hides its current pick.
+  const [quizModeFilter, setQuizModeFilter] = useState<'self' | 'google_form'>(
+    currentAssessment?.googleFormUrl ? 'google_form' : 'self',
+  )
+  const published = assessments.filter((a) => a.isPublished && (quizModeFilter === 'google_form' ? !!a.googleFormUrl : !a.googleFormUrl))
+  const filteredAssessments = quizSearch.trim() ? published.filter((a) => a.title.toLowerCase().includes(quizSearch.toLowerCase())) : published
+
+  // Swapping the linked assessment changes what learners already in progress
+  // see next time they open this lesson — confirm before committing, same
+  // reasoning as handleCreateNewAssessment leaving the page.
+  async function handleSelectAssessment(a: Assessment) {
+    if (a.id === lesson.assessmentId) return
+    if (lesson.assessmentId) {
+      const ok = await confirmAction({
+        title: 'เปลี่ยนแบบทดสอบของบทเรียนนี้?',
+        text: `จาก "${currentAssessment?.title ?? '(ไม่พบแบบฝึกหัดนี้แล้ว)'}" เป็น "${a.title}"`,
+        confirmText: 'ยืนยันเปลี่ยน',
+        cancelText: 'ยกเลิก',
+      })
+      if (!ok) return
+    }
+    onChange({ assessmentId: a.id })
+  }
+
+  // /assessment is a full page, not a modal — navigating there leaves this
+  // course draft behind unsaved (CourseFormModal's form state isn't
+  // persisted). Confirm first so a stray click doesn't silently lose an
+  // in-progress edit; a learner who actually wants to create a quiz will
+  // come straight back once it's published.
+  async function handleCreateNewAssessment() {
+    const ok = await confirmAction({
+      title: 'ออกจากหน้าแก้ไขหลักสูตร?',
+      text: 'การเปลี่ยนแปลงที่ยังไม่ได้บันทึกในหลักสูตรนี้จะหายไป — สร้างแบบทดสอบเสร็จแล้วค่อยกลับมาเลือกได้',
+      confirmText: 'ไปสร้างแบบทดสอบ',
+      cancelText: 'อยู่หน้านี้ต่อ',
+      danger: true,
+    })
+    if (ok) router.push('/assessment')
+  }
+
+  return (
+    <>
+    {/* Sub-tabs: "แก้ไข" configures the lesson; "ตัวอย่างแบบทดสอบ" (quiz
+        lessons with an assessment linked only) previews it in place — no
+        modal, so switching back and forth keeps the same scroll position. */}
+    {lesson.type === 'quiz' && currentAssessment && (
+      <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit mb-5">
+        <button type="button" onClick={() => setEditorTab('edit')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${editorTab === 'edit' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+          แก้ไข
+        </button>
+        <button type="button" onClick={() => setEditorTab('preview')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${editorTab === 'preview' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+          ตัวอย่างแบบทดสอบ
+        </button>
+      </div>
+    )}
+
+    {lesson.type === 'quiz' && currentAssessment && editorTab === 'preview' ? (
+      <AssessmentPreviewContent assessment={currentAssessment} />
+    ) : (
     <div className="max-w-2xl space-y-5">
       {/* Format cards — large tile selector */}
       <div>
@@ -2572,11 +2897,11 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
               <button key={t} type="button" onClick={() => onChange({ type: t })}
                 className={`flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-2xl border-2 transition-all ${
                   active
-                    ? 'border-freshket-400 bg-freshket-50 shadow-sm'
+                    ? 'border-freshket-200 bg-freshket-100 shadow-sm'
                     : 'border-gray-200 bg-white hover:border-freshket-300 hover:bg-gray-50'
                 }`}>
                 <span className={`size-11 rounded-xl flex items-center justify-center transition-colors ${
-                  active ? 'bg-freshket-100 text-freshket-600' : 'bg-gray-100 text-gray-400'
+                  active ? 'bg-white text-freshket-700' : 'bg-gray-100 text-gray-400'
                 }`}>
                   <LessonTypeIcon type={t} className="size-6" />
                 </span>
@@ -2650,7 +2975,141 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
 
       {lesson.type === 'quiz' && (
         <div className="space-y-2">
+          {/* Tags this lesson as the course's pre-test/post-test for reporting
+              (AssignedLearnersTable) — purely a label, doesn't change how the
+              quiz itself is taken. Picking a role another lesson already
+              holds re-tags it here and clears it there (confirmed first),
+              since exactly one lesson per course may hold each role. */}
+          <div>
+            <label className="text-xs font-bold text-gray-600 block mb-1.5">บทบาทของแบบฝึกหัดนี้ (ถ้ามี)</label>
+            <div className="grid grid-cols-3 gap-2">
+              <button type="button" onClick={() => onSetQuizRole(undefined)}
+                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${!lesson.quizRole ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
+                ไม่ระบุ
+              </button>
+              <button type="button"
+                onClick={async () => {
+                  if (otherPreTestLesson) {
+                    const ok = await confirmAction({
+                      title: 'ย้ายป้าย Pre-Test มาที่บทเรียนนี้?',
+                      text: `บทเรียน "${otherPreTestLesson.title}" กำลังถือป้ายนี้อยู่ — จะถูกยกเลิกป้ายนั้นให้อัตโนมัติ`,
+                      confirmText: 'ยืนยัน',
+                      cancelText: 'ยกเลิก',
+                    })
+                    if (!ok) return
+                  }
+                  onSetQuizRole('pre_test')
+                }}
+                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${lesson.quizRole === 'pre_test' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
+                Pre-Test
+              </button>
+              <button type="button"
+                onClick={async () => {
+                  if (otherPostTestLesson) {
+                    const ok = await confirmAction({
+                      title: 'ย้ายป้าย Post-Test มาที่บทเรียนนี้?',
+                      text: `บทเรียน "${otherPostTestLesson.title}" กำลังถือป้ายนี้อยู่ — จะถูกยกเลิกป้ายนั้นให้อัตโนมัติ`,
+                      confirmText: 'ยืนยัน',
+                      cancelText: 'ยกเลิก',
+                    })
+                    if (!ok) return
+                  }
+                  onSetQuizRole('post_test')
+                }}
+                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${lesson.quizRole === 'post_test' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
+                Post-Test
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">ใช้เพื่อแสดงคอลัมน์คะแนน Pre/Post-Test แยกในตารางผู้เรียน — ไม่กระทบวิธีทำแบบทดสอบ</p>
+          </div>
+
           <label className="text-xs font-bold text-gray-600 block">เลือกแบบฝึกหัด</label>
+
+          {/* Current pick — shown regardless of which mode filter is active
+              below, so switching the filter to browse the other kind never
+              looks like the lesson lost its assessment. */}
+          <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-xs ${
+            currentAssessment ? 'bg-freshket-50 border-freshket-200' : 'bg-gray-50 border-gray-200'
+          }`}>
+            <svg className={`size-4 shrink-0 ${currentAssessment ? 'text-freshket-500' : 'text-gray-300'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+            </svg>
+            <span className="flex-1 min-w-0">
+              <span className="text-gray-500">กำลังใช้งาน: </span>
+              {lesson.assessmentId ? (
+                <span className="font-bold text-freshket-700">{currentAssessment?.title ?? '(ไม่พบแบบฝึกหัดนี้แล้ว)'}</span>
+              ) : (
+                <span className="text-gray-400">ยังไม่ได้เลือกแบบฝึกหัด</span>
+              )}
+            </span>
+            {currentAssessment && (
+              <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${currentAssessment.googleFormUrl ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'}`}>
+                {currentAssessment.googleFormUrl ? 'Google Form' : 'สร้างเอง'}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="flex-1 grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setQuizModeFilter('self')}
+                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${quizModeFilter === 'self' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
+                สร้างเอง
+              </button>
+              <button type="button" onClick={() => setQuizModeFilter('google_form')}
+                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${quizModeFilter === 'google_form' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
+                Google Form
+              </button>
+            </div>
+            {/* Time limit / anti-cheat for the Google Form assessment currently
+                linked to this lesson — hidden until there IS one, since these
+                settings belong to that specific assessment, not to "Google Form
+                mode" in the abstract. */}
+            {currentAssessment?.googleFormUrl && (
+              <button type="button" onClick={() => setShowFormSettings((v) => !v)}
+                title="ตั้งค่าเวลา / anti-cheat ของแบบทดสอบนี้"
+                className={`shrink-0 size-9 rounded-lg flex items-center justify-center border transition-all ${
+                  showFormSettings ? 'bg-freshket-500 border-freshket-500 text-white' : 'bg-white border-gray-200 text-gray-500 hover:border-freshket-300 hover:text-freshket-600'
+                }`}>
+                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {showFormSettings && currentAssessment?.googleFormUrl && (
+            <div className="bg-gray-50 rounded-lg border border-gray-200 p-3.5 space-y-3.5">
+              <p className="text-xs font-bold text-gray-500">ตั้งค่าสำหรับ &quot;{currentAssessment.title}&quot;</p>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1.5">เวลาในการทำแบบทดสอบ</label>
+                <div className="relative">
+                  <input type="number" min={0} value={formTimeLimitMinutes} onChange={(e) => setFormTimeLimitMinutes(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 pr-12" />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">นาที</span>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">ใส่ 0 = ไม่จำกัดเวลา</p>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5">
+                  <label className="text-xs font-bold text-gray-600">ระบบป้องกันการทุจริต (Anti-Cheat)</label>
+                  <InfoTooltip text="บังคับเข้าโหมดเต็มจอ ห้ามสลับแท็บ/หน้าต่างระหว่างทำแบบทดสอบ ระบบแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และส่งคำตอบอัตโนมัติเมื่อแจ้งเตือนครบ 3 ครั้ง" />
+                </div>
+                <button type="button" onClick={() => setFormAntiCheatEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${formAntiCheatEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                  <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${formAntiCheatEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              <button type="button" onClick={handleSaveFormSettings} disabled={savingFormSettings}
+                className="w-full py-2 rounded-lg bg-freshket-500 text-white text-xs font-bold hover:bg-freshket-600 transition-all disabled:opacity-60 flex items-center justify-center gap-1.5">
+                {savingFormSettings
+                  ? <span className="size-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  : <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                {savingFormSettings ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
+              </button>
+            </div>
+          )}
+
           <input type="text" value={quizSearch} onChange={(e) => setQuizSearch(e.target.value)} placeholder="ค้นหาแบบฝึกหัด..."
             className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
           />
@@ -2660,7 +3119,7 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
               : filteredAssessments.map((a) => {
                 const active = lesson.assessmentId === a.id
                 return (
-                  <button key={a.id} type="button" onClick={() => onChange({ assessmentId: a.id })}
+                  <button key={a.id} type="button" onClick={() => handleSelectAssessment(a)}
                     className={`w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg text-xs transition-all border ${
                       active ? 'bg-freshket-100 text-freshket-700 font-bold border-freshket-300' : 'bg-white hover:bg-gray-100 text-gray-700 border-transparent'
                     }`}>
@@ -2673,11 +3132,13 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
                 )
               })}
           </div>
-          <p className="text-xs text-gray-400">
-            {lesson.assessmentId
-              ? <>เลือกอยู่: <span className="font-bold text-freshket-600">{assessments.find((a) => a.id === lesson.assessmentId)?.title ?? '(ไม่พบแบบฝึกหัดนี้แล้ว)'}</span></>
-              : 'ยังไม่ได้เลือกแบบฝึกหัด'}
-          </p>
+          <button type="button" onClick={handleCreateNewAssessment}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-gray-300 text-xs font-bold text-gray-500 hover:border-freshket-400 hover:text-freshket-600 transition-all">
+            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            สร้างแบบทดสอบใหม่
+          </button>
         </div>
       )}
 
@@ -2709,6 +3170,8 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
         </button>
       </div>
     </div>
+    )}
+    </>
   )
 }
 
@@ -2752,6 +3215,19 @@ function LessonsBuilder({ topics, onChange, assessments }: {
     const topic = topics.find((t) => t.id === topicId)
     if (!topic) return
     updateTopic(topicId, { lessons: topic.lessons.map((l) => (l.id === lessonId ? { ...l, ...patch } : l)) })
+  }
+  // Exactly one lesson per course may hold each pre/post role — assigning it
+  // here strips it from whichever OTHER lesson held it, across every topic,
+  // in the same update so the two writes can't land as separate saves.
+  function setQuizRole(lessonId: string, role: 'pre_test' | 'post_test' | undefined) {
+    onChange(topics.map((t) => ({
+      ...t,
+      lessons: t.lessons.map((l) => {
+        if (l.id === lessonId) return { ...l, quizRole: role }
+        if (role && l.quizRole === role) return { ...l, quizRole: undefined }
+        return l
+      }),
+    })))
   }
   function removeLesson(topicId: string, lessonId: string) {
     const topic = topics.find((t) => t.id === topicId)
@@ -2872,7 +3348,9 @@ function LessonsBuilder({ topics, onChange, assessments }: {
           <LessonEditor
             lesson={selectedLesson}
             assessments={assessments}
+            topics={topics}
             onChange={(patch) => updateLesson(selectedTopic!.id, selectedLesson!.id, patch)}
+            onSetQuizRole={(role) => setQuizRole(selectedLesson!.id, role)}
             onDelete={() => removeLesson(selectedTopic!.id, selectedLesson!.id)}
           />
         ) : (
@@ -2917,11 +3395,11 @@ function fmtTenure(startDate?: Date | string): string {
   return months > 0 ? `${wholeYears} ปี ${months} เดือน` : `${wholeYears} ปี`
 }
 
-function CourseFormModal({ assessments, allUsers, allTrainingRecords, departments, teams, onDone, userId, editCourse }: {
+function CourseFormModal({ assessments, allUsers, allTrainingRecords, departments, teams, onDone, userId, editCourse, isSuperAdmin }: {
   assessments: Assessment[]; allUsers: UserProfile[]
   allTrainingRecords: import('@/types/tracking').TrainingRecord[]
   departments: Department[]; teams: Team[]
-  onDone: (c?: Course) => void; userId: string; editCourse?: Course
+  onDone: (c?: Course) => void; userId: string; editCourse?: Course; isSuperAdmin: boolean
 }) {
   const isEdit = !!editCourse
 
@@ -2964,7 +3442,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     thumbnailUrl: '', slideUrl: '', formUrl: '', startDate: '', endDate: '',
     instructorId: '', courseAdminIds: [], introVideoUrl: '',
     hasCertificate: false, allowRetake: false, topics: [],
-    assignedUserIds: [], quiz: defaultQuizForm(),
+    assignedUserIds: [],
     hasKeyTakeAway: false, keyTakeAwayPrompt: '',
     isPublished: true,
     isChallenge: false, challengeWindowStart: '', challengeWindowEnd: '', challengeMultiplier: '2',
@@ -2981,14 +3459,19 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     [form.assignedUserIds, allUsers, allTrainingRecords, editCourse?.id],
   )
 
+  // Whether the roster should show a Pre-Test/Post-Test column at all — only
+  // once the admin has tagged a lesson with that role (see LessonEditor's
+  // "บทบาทของแบบฝึกหัดนี้" picker).
+  const hasPreTest = useMemo(() => form.topics.some((t) => t.lessons.some((l) => l.quizRole === 'pre_test')), [form.topics])
+  const hasPostTest = useMemo(() => form.topics.some((t) => t.lessons.some((l) => l.quizRole === 'post_test')), [form.topics])
+
   // ── Learner assignment UI state ──
   const [openPanel, setOpenPanel] = useState<'individual' | 'department' | 'rank' | 'position' | 'tenure' | null>(null)
   const [condMasterOn, setCondMasterOn] = useState(false)
   const [condToggles, setCondToggles] = useState({ department: false, rank: false, position: false, tenure: false })
   const [showConfirm, setShowConfirm] = useState(false)
   const [showAssignedTable, setShowAssignedTable] = useState(false)
-  const [showGradeBands, setShowGradeBands] = useState(false)
-  const [showQuizPreview, setShowQuizPreview] = useState(false)
+  const [showLessonPreview, setShowLessonPreview] = useState(false)
 
   function set<K extends keyof FormState>(key: K, val: FormState[K]) {
     setForm((p) => ({ ...p, [key]: val }))
@@ -3048,30 +3531,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
         allowRetake: form.allowRetake,
         topics: form.topics,
         isPublished: publishOverride ?? form.isPublished,
-        hasPreAssessment: form.quiz.enabled && form.quiz.isPreAssessment,
-        hasPostAssessment: form.quiz.enabled && !form.quiz.isPreAssessment,
-        assessmentType: form.quiz.mode,
-        preAssessmentId: form.quiz.enabled && form.quiz.isPreAssessment && form.quiz.mode === 'self' ? form.quiz.assessmentId : undefined,
-        postAssessmentId: form.quiz.enabled && !form.quiz.isPreAssessment && form.quiz.mode === 'self' ? form.quiz.assessmentId : undefined,
-        preFormUrl: form.quiz.enabled && form.quiz.isPreAssessment && form.quiz.mode === 'google_form' ? form.quiz.formUrl : undefined,
-        postFormUrl: form.quiz.enabled && !form.quiz.isPreAssessment && form.quiz.mode === 'google_form' ? form.quiz.formUrl : undefined,
-        quizSettings: form.quiz.enabled ? {
-          // No nested undefined — Firestore rejects it at any depth, not just top-level
-          title: form.quiz.title.trim(),
-          timeLimitMinutes: Number(form.quiz.timeLimitMinutes) || 0,
-          antiCheatEnabled: form.quiz.antiCheatEnabled,
-          cameraRequired: form.quiz.cameraRequired,
-          description: form.quiz.description.trim(),
-          answerViewMode: form.quiz.answerViewMode,
-          passThresholdPercent: Number(form.quiz.passThresholdPercent) || 70,
-          retryEnabled: form.quiz.retryEnabled,
-          retryAfterDays: Number(form.quiz.retryAfterDays) || 0,
-          maxRetries: Number(form.quiz.maxRetries) || 999,
-          rewardEnabled: form.quiz.rewardEnabled,
-          rewardWithinAttempts: Number(form.quiz.rewardWithinAttempts) || 1,
-          rewardThresholdPercent: Number(form.quiz.rewardThresholdPercent) || 70,
-          gradeBands: form.quiz.gradeBands,
-        } : undefined,
         hasKeyTakeAway: form.hasKeyTakeAway,
         keyTakeAwayPrompt: form.hasKeyTakeAway && form.keyTakeAwayPrompt.trim() ? form.keyTakeAwayPrompt.trim() : undefined,
         isChallenge: form.isChallenge || undefined,
@@ -3102,7 +3561,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   }
 
   const lessonCount = form.topics.reduce((s, t) => s + t.lessons.length, 0)
-  const quizEnabled = form.quiz.enabled
   // "สรุปผลการเรียน" only makes sense once the course exists and can have real
   // training records — hide it while creating a brand-new course.
   const visibleTabs = isEdit ? BUILDER_TABS : BUILDER_TABS.filter((t) => t.id !== 'summary')
@@ -3134,14 +3592,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     const avgScore = scored.length > 0 ? Math.round(scored.reduce((s, r) => s + (r.record!.score ?? 0), 0) / scored.length) : null
     return { total, completed, inProgress, notStarted, avgScore }
   }, [summaryRows])
-
-  function toggleQuizEnabled() {
-    setForm((p) => ({ ...p, quiz: { ...p.quiz, enabled: !p.quiz.enabled } }))
-  }
-
-  function setQuiz<K extends keyof QuizFormState>(key: K, val: QuizFormState[K]) {
-    setForm((p) => ({ ...p, quiz: { ...p.quiz, [key]: val } }))
-  }
 
   return (
     <div className="absolute inset-0 z-20 bg-white flex flex-col">
@@ -3182,19 +3632,21 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                       <span className={`shrink-0 text-xs font-bold px-1.5 rounded-full ${isActive ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>{summaryStats.total}</span>
                     )}
                   </button>
-                  {t.id === 'quiz' && (
-                    <button type="button" onClick={toggleQuizEnabled} title="เปิด/ปิดแบบทดสอบ"
-                      className={`shrink-0 mr-2.5 relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                        quizEnabled ? (isActive ? 'bg-white' : 'bg-freshket-500') : (isActive ? 'bg-white/25' : 'bg-gray-200')
-                      }`}>
-                      <span className={`inline-block size-3.5 transform rounded-full shadow transition-transform ${
-                        isActive && quizEnabled ? 'bg-freshket-600' : 'bg-white'
-                      } ${quizEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-                    </button>
-                  )}
                 </div>
               )
             })}
+            <div className="pt-2 mt-1 border-t border-gray-100">
+              <button type="button" onClick={() => setShowLessonPreview(true)}
+                disabled={lessonCount === 0}
+                title={lessonCount === 0 ? 'เพิ่มบทเรียนก่อนเพื่อดูตัวอย่าง' : undefined}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-bold text-freshket-600 hover:bg-freshket-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent">
+                <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span className="flex-1 truncate text-left">พรีวิวมุมมองผู้เรียน</span>
+              </button>
+            </div>
           </aside>
 
           <div className="flex-1 flex flex-col overflow-hidden">
@@ -3376,6 +3828,36 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                     </div>
                   </div>
                 )}
+
+                {/* Key Take Away */}
+                <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3.5">
+                    <div className="flex items-center gap-3">
+                      <div className={`size-8 rounded-lg flex items-center justify-center ${form.hasKeyTakeAway ? 'bg-freshket-100 text-freshket-600' : 'bg-gray-100 text-gray-400'}`}>
+                        <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-gray-800">Key Take Away</p>
+                        <p className="text-sm text-gray-400">ให้ผู้เรียนสรุปสิ่งที่ได้เรียนรู้หลังจบหลักสูตร</p>
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setForm((p) => ({ ...p, hasKeyTakeAway: !p.hasKeyTakeAway }))}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${form.hasKeyTakeAway ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                      <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform ${form.hasKeyTakeAway ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  {form.hasKeyTakeAway && (
+                    <div className="px-4 pb-4">
+                      <label className="text-xs font-bold text-gray-600 block mb-1.5">คำถามสรุปบทเรียน</label>
+                      <textarea rows={2} value={form.keyTakeAwayPrompt} onChange={(e) => set('keyTakeAwayPrompt', e.target.value)}
+                        placeholder="เช่น สิ่งที่คุณได้เรียนรู้จากคอร์สนี้คืออะไร?"
+                        className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
               )}
 
@@ -3482,6 +3964,11 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                         rows={assignedRows}
                         enrolledUserIds={enrolledUserIds}
                         onRemove={removeAssignedUser}
+                        courseId={editCourse?.id}
+                        courseTitle={form.title}
+                        hasPreTest={hasPreTest}
+                        hasPostTest={hasPostTest}
+                        isSuperAdmin={isSuperAdmin}
                       />
                     </div>
                   </div>
@@ -3570,202 +4057,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
               </div>
               )}
 
-              {/* ── Quiz tab ── */}
-              {tab === 'quiz' && (
-              <div className="w-full px-6 py-8 space-y-4">
-                {!form.quiz.enabled ? (
-                  <div className="rounded-2xl border border-gray-100 bg-white p-10 text-center">
-                    <div className="size-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
-                      <svg className="size-6 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
-                      </svg>
-                    </div>
-                    <p className="text-sm font-bold text-gray-700 mb-1">ยังไม่เปิดใช้งานแบบทดสอบ</p>
-                    <p className="text-sm text-gray-400 mb-5">เปิดใช้งานเพื่อกำหนดค่าแบบทดสอบสำหรับหลักสูตรนี้</p>
-                    <button type="button" onClick={toggleQuizEnabled}
-                      className="px-5 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all">
-                      เปิดใช้งานแบบทดสอบ
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-end">
-                      <button type="button" onClick={() => setShowQuizPreview(true)}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:border-freshket-400 hover:text-freshket-600 transition-all">
-                        <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                        พรีวิวมุมมองผู้เรียน
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-bold text-gray-600 block mb-1.5">ชื่อแบบทดสอบ <span className="text-rose-500">*</span></label>
-                        <input type="text" value={form.quiz.title} onChange={(e) => setQuiz('title', e.target.value)}
-                          placeholder="เช่น แบบทดสอบเริ่มต้นใช้งานสำหรับพนักงาน"
-                          className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-gray-600 block mb-1.5">เวลาในการทำแบบทดสอบ</label>
-                        <div className="relative">
-                          <input type="number" min={0} value={form.quiz.timeLimitMinutes} onChange={(e) => setQuiz('timeLimitMinutes', e.target.value)}
-                            className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300"
-                          />
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">นาที</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <SettingToggleRow label="ใช้เป็นแบบทดสอบก่อนเรียน" hint="เมื่อปิด จะเป็นแบบทดสอบหลังเรียนแทน"
-                      checked={form.quiz.isPreAssessment} onChange={() => setQuiz('isPreAssessment', !form.quiz.isPreAssessment)} />
-                    <SettingToggleRow label="ระบบป้องกันการทุจริต (Anti-Cheat)"
-                      hint="เมื่อเปิด: บังคับเข้าโหมดเต็มจอ ห้ามสลับแท็บ/หน้าต่างระหว่างทำแบบทดสอบ ระบบแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และส่งคำตอบอัตโนมัติเมื่อแจ้งเตือนครบ 3 ครั้ง"
-                      checked={form.quiz.antiCheatEnabled} onChange={() => setQuiz('antiCheatEnabled', !form.quiz.antiCheatEnabled)} />
-                    {/* The camera toggle was removed, not implemented: it wrote
-                        `cameraRequired` to Firestore but nothing ever read it, so an
-                        admin who switched it on believed the exam was proctored when
-                        no camera check, recording or review existed anywhere. A
-                        setting that silently does nothing is worse than an absent
-                        one. The field is kept in the type for stored documents;
-                        bring the toggle back together with real proctoring. */}
-
-                    <div>
-                      <label className="text-xs font-bold text-gray-600 block mb-1.5">คำอธิบายแบบทดสอบ</label>
-                      <textarea rows={3} value={form.quiz.description} onChange={(e) => setQuiz('description', e.target.value)}
-                        placeholder="กรอกคำอธิบายแบบทดสอบ"
-                        className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-bold text-gray-600 block mb-2">มุมมองการตอบ <span className="text-rose-500">*</span></label>
-                      <div className="grid grid-cols-3 gap-3">
-                        {(Object.keys(QUIZ_ANSWER_VIEW_LABELS) as QuizAnswerViewMode[]).map((mode) => (
-                          <button key={mode} type="button" onClick={() => setQuiz('answerViewMode', mode)}
-                            className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 text-xs font-bold transition-all text-left ${
-                              form.quiz.answerViewMode === mode ? 'border-freshket-500 bg-freshket-50 text-freshket-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                            }`}>
-                            <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
-                            </svg>
-                            {QUIZ_ANSWER_VIEW_LABELS[mode]}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-gray-100 bg-white p-4 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-bold text-gray-800">ตั้งค่าเกณฑ์การประเมิน</p>
-                        <button type="button" onClick={() => setShowGradeBands(true)} title="ตั้งค่าเกณฑ์คะแนน (ช่วงคะแนน / ความหมาย / สี)"
-                          className="size-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-all">
-                          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.559.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.02-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.107-1.204l-.527-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          </svg>
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between gap-4">
-                        <label className="text-xs font-bold text-gray-600">ผ่านเมื่อทำแบบทดสอบได้คะแนนมากกว่าหรือเท่ากับ</label>
-                        <div className="relative shrink-0 w-24">
-                          <input type="number" min={0} max={100} value={form.quiz.passThresholdPercent} onChange={(e) => setQuiz('passThresholdPercent', e.target.value)}
-                            className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 text-right pr-7"
-                          />
-                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">%</span>
-                        </div>
-                      </div>
-
-                      <SettingToggleRow label="เปิดให้ทำแบบทดสอบอีกครั้งเมื่อสอบไม่ผ่าน" noBorder
-                        checked={form.quiz.retryEnabled} onChange={() => setQuiz('retryEnabled', !form.quiz.retryEnabled)} />
-                      {form.quiz.retryEnabled && (
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="text-xs font-bold text-gray-600 block mb-1.5">หลังจากสอบไม่ผ่าน</label>
-                            <div className="relative">
-                              <input type="number" min={0} value={form.quiz.retryAfterDays} onChange={(e) => setQuiz('retryAfterDays', e.target.value)}
-                                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 pr-10" />
-                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">วัน</span>
-                            </div>
-                          </div>
-                          <div>
-                            <label className="text-xs font-bold text-gray-600 block mb-1.5">สอบใหม่ได้ไม่เกิน</label>
-                            <div className="relative">
-                              <input type="number" min={0} value={form.quiz.maxRetries} onChange={(e) => setQuiz('maxRetries', e.target.value)}
-                                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 pr-12" />
-                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">ครั้ง</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="rounded-2xl border border-gray-100 bg-white p-4 space-y-3">
-                      <SettingToggleRow label="กำหนดของรางวัล" hint="เป็นข้อมูลอ้างอิงเท่านั้น ยังไม่เชื่อมกับระบบคะแนนอัตโนมัติ" noBorder
-                        checked={form.quiz.rewardEnabled} onChange={() => setQuiz('rewardEnabled', !form.quiz.rewardEnabled)} />
-                      {form.quiz.rewardEnabled && (
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="text-xs font-bold text-gray-600 block mb-1.5">เมื่อสอบผ่านภายใน</label>
-                            <div className="relative">
-                              <input type="number" min={1} value={form.quiz.rewardWithinAttempts} onChange={(e) => setQuiz('rewardWithinAttempts', e.target.value)}
-                                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 pr-12" />
-                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">ครั้ง</span>
-                            </div>
-                          </div>
-                          <div>
-                            <label className="text-xs font-bold text-gray-600 block mb-1.5">ตั้งแต่</label>
-                            <div className="relative">
-                              <input type="number" min={0} max={100} value={form.quiz.rewardThresholdPercent} onChange={(e) => setQuiz('rewardThresholdPercent', e.target.value)}
-                                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 pr-7" />
-                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">%</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <AssessmentPicker
-                      section={{ enabled: true, mode: form.quiz.mode, assessmentId: form.quiz.assessmentId, formUrl: form.quiz.formUrl, search: form.quiz.search }}
-                      onChange={(s) => setForm((p) => ({ ...p, quiz: { ...p.quiz, ...s } }))}
-                      assessments={assessments} label="ชุดคำถาม" hideToggle
-                    />
-                  </>
-                )}
-
-                {/* Key Take Away */}
-                <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3.5">
-                    <div className="flex items-center gap-3">
-                      <div className={`size-8 rounded-lg flex items-center justify-center ${form.hasKeyTakeAway ? 'bg-freshket-100 text-freshket-600' : 'bg-gray-100 text-gray-400'}`}>
-                        <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                        </svg>
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-gray-800">Key Take Away</p>
-                        <p className="text-sm text-gray-400">ให้ผู้เรียนสรุปสิ่งที่ได้เรียนรู้หลังจบหลักสูตร</p>
-                      </div>
-                    </div>
-                    <button type="button" onClick={() => setForm((p) => ({ ...p, hasKeyTakeAway: !p.hasKeyTakeAway }))}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${form.hasKeyTakeAway ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                      <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform ${form.hasKeyTakeAway ? 'translate-x-6' : 'translate-x-1'}`} />
-                    </button>
-                  </div>
-                  {form.hasKeyTakeAway && (
-                    <div className="px-4 pb-4">
-                      <label className="text-xs font-bold text-gray-600 block mb-1.5">คำถามสรุปบทเรียน</label>
-                      <textarea rows={2} value={form.keyTakeAwayPrompt} onChange={(e) => set('keyTakeAwayPrompt', e.target.value)}
-                        placeholder="เช่น สิ่งที่คุณได้เรียนรู้จากคอร์สนี้คืออะไร?"
-                        className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-              )}
             </div>
           </div>
         </div>
@@ -3853,6 +4144,10 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
           allTrainingRecords={allTrainingRecords}
           enrolledUserIds={enrolledUserIds}
           courseId={editCourse?.id}
+          courseTitle={form.title}
+          hasPreTest={hasPreTest}
+          hasPostTest={hasPostTest}
+          isSuperAdmin={isSuperAdmin}
           onRemove={removeAssignedUser}
           onClose={() => setShowAssignedTable(false)}
         />
@@ -3868,19 +4163,11 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
         />
       )}
 
-      {showGradeBands && (
-        <GradeBandsModal
-          bands={form.quiz.gradeBands}
-          onClose={() => setShowGradeBands(false)}
-          onSave={(bands) => { setQuiz('gradeBands', bands); setShowGradeBands(false) }}
-        />
-      )}
-
-      {showQuizPreview && (
-        <QuizPreviewModal
-          quiz={form.quiz}
-          assessment={assessments.find((a) => a.id === form.quiz.assessmentId)}
-          onClose={() => setShowQuizPreview(false)}
+      {showLessonPreview && (
+        <LessonPreviewModal
+          topics={form.topics}
+          assessments={assessments}
+          onClose={() => setShowLessonPreview(false)}
         />
       )}
     </div>

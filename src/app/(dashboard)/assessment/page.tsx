@@ -17,7 +17,6 @@ import {
   type DragPair,
 } from '@/types/assessment'
 import { getClientFirestore } from '@/lib/firebase/client'
-import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { alertError } from '@/lib/ui/alert'
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
@@ -354,7 +353,7 @@ function genId() { return `q-${Date.now()}-${Math.random().toString(36).slice(2,
 function emptyQuestion(type: QuestionType, order: number): Question {
   if (type === 'multiple_choice') {
     return {
-      id: genId(), order, type, text: '', points: 10,
+      id: genId(), order, type, text: '', points: 1,
       choices: [
         { id: genId(), text: '', isCorrect: true },
         { id: genId(), text: '', isCorrect: false },
@@ -365,14 +364,14 @@ function emptyQuestion(type: QuestionType, order: number): Question {
   }
   if (type === 'drag_drop') {
     return {
-      id: genId(), order, type, text: '', points: 20,
+      id: genId(), order, type, text: '', points: 1,
       dragPairs: [
         { id: genId(), left: '', right: '' },
         { id: genId(), left: '', right: '' },
       ],
     }
   }
-  return { id: genId(), order, type: 'open_ended', text: '', points: 20, sampleAnswer: '' }
+  return { id: genId(), order, type: 'open_ended', text: '', points: 1, sampleAnswer: '' }
 }
 
 type AssessmentMode = 'builder' | 'google_form'
@@ -398,6 +397,10 @@ function AssessmentEditor({
   const [saving, setSaving] = useState(false)
   const [titleErr, setTitleErr] = useState('')
   const [formUrlErr, setFormUrlErr] = useState('')
+  // Per-question validation surfaced only after a failed save attempt — a
+  // question isn't wrong just because it's still being filled in, only if the
+  // admin tried to save it incomplete.
+  const [questionErrors, setQuestionErrors] = useState<Record<string, { noText?: boolean; noCorrect?: boolean }>>({})
 
   function addQuestion(type: QuestionType) {
     setQuestions((prev) => [...prev, emptyQuestion(type, prev.length + 1)])
@@ -422,11 +425,28 @@ function AssessmentEditor({
   }
   function updateQuestion(id: string, patch: Partial<Question>) {
     setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, ...patch } : q)))
+    setQuestionErrors((prev) => {
+      if (!prev[id]) return prev
+      const { [id]: _, ...rest } = prev
+      return rest
+    })
   }
 
   const handleSave = useCallback(async () => {
     if (!title.trim()) { setTitleErr('กรุณากรอกชื่อแบบทดสอบ'); return }
     if (mode === 'google_form' && !googleFormUrl.trim()) { setFormUrlErr('กรุณากรอก URL ของ Google Form'); return }
+
+    if (mode === 'builder') {
+      const errors: Record<string, { noText?: boolean; noCorrect?: boolean }> = {}
+      for (const q of questions) {
+        const noText = !q.text.trim()
+        const noCorrect = q.type === 'multiple_choice' && !q.choices?.some((c) => c.isCorrect)
+        if (noText || noCorrect) errors[q.id] = { noText, noCorrect }
+      }
+      setQuestionErrors(errors)
+      if (Object.keys(errors).length > 0) return
+    }
+
     setSaving(true)
     try {
       const now = new Date()
@@ -465,7 +485,7 @@ function AssessmentEditor({
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="animate-pop-in bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl max-h-[92vh] flex flex-col">
+      <div className="animate-pop-in bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl max-h-[92vh] flex flex-col">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
@@ -494,7 +514,7 @@ function AssessmentEditor({
               <label className="text-xs font-bold text-gray-600 block mb-1.5">ชื่อแบบทดสอบ <span className="text-rose-500">*</span></label>
               <input type="text" value={title} onChange={(e) => { setTitle(e.target.value); setTitleErr('') }}
                 placeholder="เช่น ทดสอบก่อนเรียน Product Knowledge"
-                className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
+                className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 hover:border-freshket-500 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300"
               />
               {titleErr && <p className="text-xs text-rose-500 mt-1">{titleErr}</p>}
             </div>
@@ -503,13 +523,13 @@ function AssessmentEditor({
                 <label className="text-xs font-bold text-gray-600 block mb-1.5">คำอธิบาย</label>
                 <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
                   placeholder="วัตถุประสงค์ของแบบทดสอบนี้..."
-                  className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
+                  className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 hover:border-freshket-500 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300"
                 />
               </div>
               <div>
                 <label className="text-xs font-bold text-gray-600 block mb-1.5">เกณฑ์ผ่าน (%)</label>
                 <input type="number" min={0} max={100} value={passingScore} onChange={(e) => setPassingScore(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300"
+                  className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 hover:border-freshket-500 focus:outline-none focus:border-freshket-500"
                 />
               </div>
             </div>
@@ -581,7 +601,8 @@ function AssessmentEditor({
               </div>
 
               {questions.map((q, idx) => (
-                <QuestionEditor key={q.id} question={q} index={idx} onChange={(patch) => updateQuestion(q.id, patch)}
+                <QuestionEditor key={q.id} question={q} index={idx} error={questionErrors[q.id]}
+                  onChange={(patch) => updateQuestion(q.id, patch)}
                   onRemove={() => removeQuestion(q.id)} onDuplicate={() => duplicateQuestion(q.id)} />
               ))}
 
@@ -624,18 +645,18 @@ function AssessmentEditor({
 function QuestionEditor({
   question,
   index,
+  error,
   onChange,
   onRemove,
   onDuplicate,
 }: {
   question: Question
   index: number
+  error?: { noText?: boolean; noCorrect?: boolean }
   onChange: (patch: Partial<Question>) => void
   onRemove: () => void
   onDuplicate: () => void
 }) {
-  const typeColor = QUESTION_TYPE_COLORS[question.type]
-
   function updateChoice(id: string, patch: Partial<Choice>) {
     onChange({ choices: question.choices?.map((c) => (c.id === id ? { ...c, ...patch } : c)) })
   }
@@ -660,17 +681,29 @@ function QuestionEditor({
     onChange({ dragPairs: question.dragPairs?.filter((p) => p.id !== id) })
   }
 
+  const hasError = !!error?.noText || !!error?.noCorrect
+
   return (
-    <div className="bg-gray-50 rounded-xl border border-gray-200 p-4 space-y-3">
+    <div className={`bg-white rounded-2xl border shadow-sm transition-all p-5 space-y-4 ${
+      hasError ? 'border-rose-300' : 'border-gray-200 hover:border-freshket-300'
+    }`}>
       {/* Header row */}
-      <div className="flex items-center gap-2">
-        <span className="size-6 rounded-full bg-gray-200 text-gray-600 text-xs font-bold flex items-center justify-center shrink-0">
-          {index + 1}
+      <div className="flex items-center gap-3">
+        <span className="text-sm font-bold text-gray-800">
+          ข้อที่ {index + 1}<span className="text-rose-500">*</span>
         </span>
-        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${typeColor}`}>
-          {QUESTION_TYPE_LABELS[question.type]}
-        </span>
-        <div className="flex items-center gap-1 ml-auto">
+        <select value={question.type} onChange={(e) => onChange({ type: e.target.value as QuestionType })}
+          className="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-200 bg-white hover:border-freshket-500 focus:outline-none focus:border-freshket-500">
+          {(['multiple_choice', 'open_ended', 'drag_drop'] as QuestionType[]).map((t) => (
+            <option key={t} value={t}>{QUESTION_TYPE_LABELS[t]}</option>
+          ))}
+        </select>
+        <div className="flex items-center gap-1.5 ml-auto shrink-0">
+          <label className="text-xs font-bold text-gray-500">Point</label>
+          <input type="number" min={0} value={question.points}
+            onChange={(e) => onChange({ points: Number(e.target.value) })}
+            className="w-14 text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white text-right focus:outline-none hover:border-freshket-500 focus:border-freshket-500"
+          />
           <button onClick={onDuplicate} className="p-1 rounded-lg hover:bg-gray-100 hover:text-gray-600 text-gray-400 transition-colors" title="ทำสำเนาคำถาม">
             <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" />
@@ -688,32 +721,44 @@ function QuestionEditor({
       <div>
         <label className="text-xs font-bold text-gray-600 block mb-1">คำถาม <span className="text-rose-500">*</span></label>
         <textarea value={question.text} onChange={(e) => onChange({ text: e.target.value })}
-          placeholder="พิมพ์คำถามที่นี่..."
+          placeholder="กรอกคำถาม"
           rows={2}
-          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
+          className={`w-full px-3 py-2 text-sm rounded-lg border bg-white focus:outline-none placeholder:text-gray-300 resize-none ${
+            error?.noText
+              ? 'border-rose-400 focus:border-rose-400'
+              : 'border-gray-200 hover:border-freshket-500 focus:border-freshket-500'
+          }`}
         />
+        {error?.noText && (
+          <p className="text-xs text-rose-500 mt-1 flex items-center gap-1">
+            <svg className="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+            กรุณากรอกคำถาม
+          </p>
+        )}
       </div>
 
-      {/* Weight */}
-      <div className="flex items-center gap-2">
-        <label className="text-xs font-bold text-gray-600 flex items-center gap-1">
-          น้ำหนัก
-          <InfoTooltip text="คะแนนของคำถามนี้ เทียบกับน้ำหนักรวมของคำถามทั้งหมดในชุดคำถาม ใช้คำนวณเปอร์เซ็นต์คะแนนสุดท้าย" />
-        </label>
-        <input type="number" min={0} value={question.points}
-          onChange={(e) => onChange({ points: Number(e.target.value) })}
-          className="w-16 text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white text-right focus:outline-none focus:ring-1 focus:ring-freshket-300"
+      {/* Description (optional context shown under the question) */}
+      <div>
+        <label className="text-xs font-bold text-gray-600 block mb-1">คำอธิบาย</label>
+        <textarea value={question.description ?? ''} onChange={(e) => onChange({ description: e.target.value })}
+          placeholder="คำอธิบาย (ถ้ามี)"
+          rows={2}
+          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white hover:border-freshket-500 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300 resize-none"
         />
       </div>
 
       {/* Type-specific inputs */}
       {question.type === 'multiple_choice' && (
         <div className="space-y-2">
-          {question.choices?.map((choice) => (
+          {question.choices?.map((choice, i) => (
             <div key={choice.id} className="flex items-center gap-2">
               <button type="button" onClick={() => setCorrect(choice.id)}
                 className={`size-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                  choice.isCorrect ? 'border-freshket-500 bg-freshket-500' : 'border-gray-300 bg-white hover:border-freshket-300'
+                  choice.isCorrect
+                    ? 'border-freshket-500 bg-freshket-500'
+                    : error?.noCorrect ? 'border-rose-300 bg-white hover:border-rose-400' : 'border-gray-300 bg-white hover:border-freshket-300'
                 }`}>
                 {choice.isCorrect && (
                   <svg className="size-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
@@ -722,8 +767,8 @@ function QuestionEditor({
                 )}
               </button>
               <input type="text" value={choice.text} onChange={(e) => updateChoice(choice.id, { text: e.target.value })}
-                placeholder={`ตัวเลือก ${choice.isCorrect ? '(ถูกต้อง)' : ''}`}
-                className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-freshket-300 placeholder:text-gray-300"
+                placeholder={`ตัวเลือกที่ ${i + 1}`}
+                className="flex-1 px-3.5 py-2.5 text-sm rounded-lg border border-gray-200 bg-white focus:outline-none hover:border-freshket-500 focus:border-freshket-500 placeholder:text-gray-300"
               />
               {(question.choices?.length ?? 0) > 2 && (
                 <button onClick={() => removeChoice(choice.id)} className="p-1 text-gray-400 hover:text-rose-500 transition-colors">
@@ -734,6 +779,14 @@ function QuestionEditor({
               )}
             </div>
           ))}
+          {error?.noCorrect && (
+            <p className="text-xs text-rose-500 flex items-center gap-1">
+              <svg className="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+              กรุณาเลือกคำตอบที่ถูกต้องอย่างน้อย 1 ข้อ
+            </p>
+          )}
           {(question.choices?.length ?? 0) < 5 && (
             <button onClick={addChoice} className="text-xs text-freshket-600 font-normal hover:underline">
               + เพิ่มตัวเลือก
@@ -747,7 +800,7 @@ function QuestionEditor({
           <label className="text-xs text-gray-500 mb-1 block">เฉลย (ใช้อ้างอิง)</label>
           <textarea value={question.sampleAnswer ?? ''} onChange={(e) => onChange({ sampleAnswer: e.target.value })}
             rows={2} placeholder="ตัวอย่างคำตอบที่ถูกต้อง..."
-            className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
+            className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none hover:border-freshket-500 focus:border-freshket-500 placeholder:text-gray-300 resize-none"
           />
         </div>
       )}
@@ -761,11 +814,11 @@ function QuestionEditor({
           {question.dragPairs?.map((pair) => (
             <div key={pair.id} className="grid grid-cols-2 gap-2 items-center">
               <input type="text" value={pair.left} onChange={(e) => updatePair(pair.id, { left: e.target.value })}
-                placeholder="รายการ..." className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-freshket-300 placeholder:text-gray-300"
+                placeholder="รายการ..." className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none hover:border-freshket-500 focus:border-freshket-500 placeholder:text-gray-300"
               />
               <div className="flex gap-1.5 items-center">
                 <input type="text" value={pair.right} onChange={(e) => updatePair(pair.id, { right: e.target.value })}
-                  placeholder="คู่ที่ถูก..." className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-freshket-300 placeholder:text-gray-300"
+                  placeholder="คู่ที่ถูก..." className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none hover:border-freshket-500 focus:border-freshket-500 placeholder:text-gray-300"
                 />
                 {(question.dragPairs?.length ?? 0) > 2 && (
                   <button onClick={() => removePair(pair.id)} className="p-1 text-gray-400 hover:text-rose-500 transition-colors shrink-0">

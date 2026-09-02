@@ -705,6 +705,10 @@ function EmployeeSidebar({
                   </div>
                 )}
 
+                {(rec.preTestScore != null || rec.postTestScore != null) && (
+                  <PrePostRow pre={rec.preTestScore} post={rec.postTestScore} />
+                )}
+
                 {/* Reflect knowledge (จากพนักงาน) + หัวหน้าคอมเมนต์ข้างล่าง */}
                 <div className="mt-1 rounded-xl border border-gray-100 overflow-hidden">
                   <div className="bg-freshket-50 border-b border-freshket-100 px-3 py-2.5">
@@ -844,6 +848,39 @@ function EmployeeSidebar({
 }
 
 // ── Info Row ───────────────────────────────────────────────────────────────────
+// Pre/post pair for one course, from the lesson quizzes the admin tagged with
+// CourseLesson.quizRole. The delta is the point of the row: a post-test that
+// barely moved (or went backwards) is the case a manager should coach on.
+function PrePostRow({ pre, post }: { pre?: number; post?: number }) {
+  const delta = pre != null && post != null ? post - pre : null
+  return (
+    <div className="mb-2.5 flex items-center gap-2">
+      <div className="flex-1 rounded-xl bg-slate-50 border border-gray-100 px-3 py-2 text-center">
+        <p className="text-xs text-gray-400 mb-0.5">Pre-Test</p>
+        {pre != null
+          ? <p className={`text-sm font-black ${scoreTextColor(pre)}`}>{pre}</p>
+          : <p className="text-sm text-gray-300">—</p>}
+      </div>
+      <div className="flex flex-col items-center shrink-0 w-12">
+        <svg className="size-4 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12h15m0 0l-6-6m6 6l-6 6" />
+        </svg>
+        {delta != null && (
+          <span className={`text-xs font-bold mt-0.5 ${delta > 0 ? 'text-freshket-600' : delta < 0 ? 'text-rose-600' : 'text-gray-400'}`}>
+            {delta > 0 ? `+${delta}` : delta}
+          </span>
+        )}
+      </div>
+      <div className="flex-1 rounded-xl bg-slate-50 border border-gray-100 px-3 py-2 text-center">
+        <p className="text-xs text-gray-400 mb-0.5">Post-Test</p>
+        {post != null
+          ? <p className={`text-sm font-black ${scoreTextColor(post)}`}>{post}</p>
+          : <p className="text-sm text-gray-300">—</p>}
+      </div>
+    </div>
+  )
+}
+
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-start gap-3 py-2.5 border-b border-gray-50 last:border-0">
