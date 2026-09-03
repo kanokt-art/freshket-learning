@@ -2768,6 +2768,90 @@ function AssessmentPreviewContent({ assessment }: { assessment: Assessment }) {
 }
 
 // ── Lesson Editor (right pane of the Lessons tab) ─────────────────────────────
+// Compact overlay for the settings behind the gear icon in the quiz picker:
+// the assessment's time limit and anti-cheat (stored on the Assessment doc,
+// shared by every lesson that links it) plus this lesson's pre/post role
+// (stored on the lesson, part of the course draft). The role toggle applies
+// immediately since it belongs to the unsaved course form; the two assessment
+// fields are committed by the save button.
+function QuizSettingsModal({
+  assessment, timeLimitMinutes, onTimeLimitChange, antiCheatEnabled, onAntiCheatChange,
+  isPreTest, onIsPreTestChange, saving, onSave, onClose,
+}: {
+  assessment: Assessment
+  timeLimitMinutes: string; onTimeLimitChange: (v: string) => void
+  antiCheatEnabled: boolean; onAntiCheatChange: (v: boolean) => void
+  isPreTest: boolean; onIsPreTestChange: (v: boolean) => void
+  saving: boolean; onSave: () => void; onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className="animate-pop-in bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-gray-900">ตั้งค่าแบบทดสอบ</h3>
+            <p className="text-xs text-gray-400 truncate mt-0.5">{assessment.title}</p>
+          </div>
+          <button type="button" onClick={onClose}
+            className="shrink-0 size-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-all">
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-5 pb-5 space-y-4">
+          <div>
+            <label className="text-xs font-bold text-gray-600 block mb-1.5">เวลาในการทำแบบทดสอบ</label>
+            <div className="relative">
+              <input type="number" min={0} value={timeLimitMinutes}
+                onChange={(e) => onTimeLimitChange(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:border-freshket-500 pr-12" />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">นาที</span>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">ใส่ 0 = ไม่จำกัดเวลา</p>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 pt-1">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <label className="text-xs font-bold text-gray-600">ใช้เป็นแบบทดสอบก่อนเรียน</label>
+              <InfoTooltip text="เปิด = บทเรียนนี้คือแบบทดสอบก่อนเรียนของหลักสูตร ปิด = เป็นแบบทดสอบหลังเรียน คะแนนจะถูกแยกเป็นคอลัมน์ Pre-Test / Post-Test ในตารางผู้เรียน" />
+            </div>
+            <button type="button" onClick={() => onIsPreTestChange(!isPreTest)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${isPreTest ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${isPreTest ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+          <p className="-mt-2.5 text-xs text-gray-400">
+            {isPreTest ? 'ตอนนี้เป็น: แบบทดสอบก่อนเรียน (Pre-Test)' : 'ตอนนี้เป็น: แบบทดสอบหลังเรียน (Post-Test)'}
+          </p>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <label className="text-xs font-bold text-gray-600">ระบบป้องกันการทุจริต (Anti-Cheat)</label>
+              <InfoTooltip text="บังคับเข้าโหมดเต็มจอ ห้ามสลับแท็บ/หน้าต่างระหว่างทำแบบทดสอบ ระบบแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และส่งคำตอบอัตโนมัติเมื่อแจ้งเตือนครบ 3 ครั้ง" />
+            </div>
+            <button type="button" onClick={() => onAntiCheatChange(!antiCheatEnabled)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${antiCheatEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${antiCheatEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+
+          <button type="button" onClick={onSave} disabled={saving}
+            className="w-full py-2.5 rounded-xl bg-freshket-500 text-white text-xs font-bold hover:bg-freshket-600 transition-all disabled:opacity-60 flex items-center justify-center gap-1.5">
+            {saving
+              ? <span className="size-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              : <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+            {saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function LessonEditor({ lesson, assessments, topics, onChange, onSetQuizRole, onDelete }: {
   lesson: CourseLesson; assessments: Assessment[]; topics: CourseTopic[]
   onChange: (patch: Partial<CourseLesson>) => void
@@ -2801,6 +2885,26 @@ function LessonEditor({ lesson, assessments, topics, onChange, onSetQuizRole, on
     setFormTimeLimitMinutes(String(currentAssessment?.timeLimitMinutes ?? 0))
     setFormAntiCheatEnabled(currentAssessment?.antiCheatEnabled ?? false)
   }, [currentAssessment?.id, currentAssessment?.timeLimitMinutes, currentAssessment?.antiCheatEnabled])
+
+  // The pre/post role is a single toggle: on = this is the course's pre-test,
+  // off = its post-test. There is no "untagged" state from here — a quiz
+  // reached through this panel is always one or the other. Only one lesson per
+  // course may hold each role, so claiming one that another lesson already has
+  // re-tags it here and clears it there (confirmed first).
+  async function handleTogglePreTest(next: boolean) {
+    const role = next ? 'pre_test' : 'post_test'
+    const holder = next ? otherPreTestLesson : otherPostTestLesson
+    if (holder) {
+      const ok = await confirmAction({
+        title: next ? 'ย้ายป้าย Pre-Test มาที่บทเรียนนี้?' : 'ย้ายป้าย Post-Test มาที่บทเรียนนี้?',
+        text: `บทเรียน "${holder.title}" กำลังถือป้ายนี้อยู่ — จะถูกยกเลิกป้ายนั้นให้อัตโนมัติ`,
+        confirmText: 'ยืนยัน',
+        cancelText: 'ยกเลิก',
+      })
+      if (!ok) return
+    }
+    onSetQuizRole(role)
+  }
 
   async function handleSaveFormSettings() {
     if (!currentAssessment) return
@@ -2975,53 +3079,6 @@ function LessonEditor({ lesson, assessments, topics, onChange, onSetQuizRole, on
 
       {lesson.type === 'quiz' && (
         <div className="space-y-2">
-          {/* Tags this lesson as the course's pre-test/post-test for reporting
-              (AssignedLearnersTable) — purely a label, doesn't change how the
-              quiz itself is taken. Picking a role another lesson already
-              holds re-tags it here and clears it there (confirmed first),
-              since exactly one lesson per course may hold each role. */}
-          <div>
-            <label className="text-xs font-bold text-gray-600 block mb-1.5">บทบาทของแบบฝึกหัดนี้ (ถ้ามี)</label>
-            <div className="grid grid-cols-3 gap-2">
-              <button type="button" onClick={() => onSetQuizRole(undefined)}
-                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${!lesson.quizRole ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
-                ไม่ระบุ
-              </button>
-              <button type="button"
-                onClick={async () => {
-                  if (otherPreTestLesson) {
-                    const ok = await confirmAction({
-                      title: 'ย้ายป้าย Pre-Test มาที่บทเรียนนี้?',
-                      text: `บทเรียน "${otherPreTestLesson.title}" กำลังถือป้ายนี้อยู่ — จะถูกยกเลิกป้ายนั้นให้อัตโนมัติ`,
-                      confirmText: 'ยืนยัน',
-                      cancelText: 'ยกเลิก',
-                    })
-                    if (!ok) return
-                  }
-                  onSetQuizRole('pre_test')
-                }}
-                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${lesson.quizRole === 'pre_test' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
-                Pre-Test
-              </button>
-              <button type="button"
-                onClick={async () => {
-                  if (otherPostTestLesson) {
-                    const ok = await confirmAction({
-                      title: 'ย้ายป้าย Post-Test มาที่บทเรียนนี้?',
-                      text: `บทเรียน "${otherPostTestLesson.title}" กำลังถือป้ายนี้อยู่ — จะถูกยกเลิกป้ายนั้นให้อัตโนมัติ`,
-                      confirmText: 'ยืนยัน',
-                      cancelText: 'ยกเลิก',
-                    })
-                    if (!ok) return
-                  }
-                  onSetQuizRole('post_test')
-                }}
-                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${lesson.quizRole === 'post_test' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
-                Post-Test
-              </button>
-            </div>
-            <p className="text-xs text-gray-400 mt-1">ใช้เพื่อแสดงคอลัมน์คะแนน Pre/Post-Test แยกในตารางผู้เรียน — ไม่กระทบวิธีทำแบบทดสอบ</p>
-          </div>
 
           <label className="text-xs font-bold text-gray-600 block">เลือกแบบฝึกหัด</label>
 
@@ -3060,13 +3117,14 @@ function LessonEditor({ lesson, assessments, topics, onChange, onSetQuizRole, on
                 Google Form
               </button>
             </div>
-            {/* Time limit / anti-cheat for the Google Form assessment currently
-                linked to this lesson — hidden until there IS one, since these
-                settings belong to that specific assessment, not to "Google Form
-                mode" in the abstract. */}
-            {currentAssessment?.googleFormUrl && (
-              <button type="button" onClick={() => setShowFormSettings((v) => !v)}
-                title="ตั้งค่าเวลา / anti-cheat ของแบบทดสอบนี้"
+            {/* Timer / pre-test role for the assessment currently linked to this
+                lesson — hidden until there IS one, since these settings belong
+                to that specific assessment, not to a picker mode in the
+                abstract. Opens a small overlay card rather than pushing the
+                picker below the fold. */}
+            {currentAssessment && (
+              <button type="button" onClick={() => setShowFormSettings(true)}
+                title="ตั้งค่าเวลา / แบบทดสอบก่อน-หลังเรียน"
                 className={`shrink-0 size-9 rounded-lg flex items-center justify-center border transition-all ${
                   showFormSettings ? 'bg-freshket-500 border-freshket-500 text-white' : 'bg-white border-gray-200 text-gray-500 hover:border-freshket-300 hover:text-freshket-600'
                 }`}>
@@ -3078,36 +3136,19 @@ function LessonEditor({ lesson, assessments, topics, onChange, onSetQuizRole, on
             )}
           </div>
 
-          {showFormSettings && currentAssessment?.googleFormUrl && (
-            <div className="bg-gray-50 rounded-lg border border-gray-200 p-3.5 space-y-3.5">
-              <p className="text-xs font-bold text-gray-500">ตั้งค่าสำหรับ &quot;{currentAssessment.title}&quot;</p>
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1.5">เวลาในการทำแบบทดสอบ</label>
-                <div className="relative">
-                  <input type="number" min={0} value={formTimeLimitMinutes} onChange={(e) => setFormTimeLimitMinutes(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 pr-12" />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">นาที</span>
-                </div>
-                <p className="text-xs text-gray-400 mt-1">ใส่ 0 = ไม่จำกัดเวลา</p>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-1.5">
-                  <label className="text-xs font-bold text-gray-600">ระบบป้องกันการทุจริต (Anti-Cheat)</label>
-                  <InfoTooltip text="บังคับเข้าโหมดเต็มจอ ห้ามสลับแท็บ/หน้าต่างระหว่างทำแบบทดสอบ ระบบแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และส่งคำตอบอัตโนมัติเมื่อแจ้งเตือนครบ 3 ครั้ง" />
-                </div>
-                <button type="button" onClick={() => setFormAntiCheatEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${formAntiCheatEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                  <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${formAntiCheatEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-                </button>
-              </div>
-              <button type="button" onClick={handleSaveFormSettings} disabled={savingFormSettings}
-                className="w-full py-2 rounded-lg bg-freshket-500 text-white text-xs font-bold hover:bg-freshket-600 transition-all disabled:opacity-60 flex items-center justify-center gap-1.5">
-                {savingFormSettings
-                  ? <span className="size-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  : <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
-                {savingFormSettings ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
-              </button>
-            </div>
+          {showFormSettings && currentAssessment && (
+            <QuizSettingsModal
+              assessment={currentAssessment}
+              timeLimitMinutes={formTimeLimitMinutes}
+              onTimeLimitChange={setFormTimeLimitMinutes}
+              antiCheatEnabled={formAntiCheatEnabled}
+              onAntiCheatChange={setFormAntiCheatEnabled}
+              isPreTest={lesson.quizRole === 'pre_test'}
+              onIsPreTestChange={handleTogglePreTest}
+              saving={savingFormSettings}
+              onSave={handleSaveFormSettings}
+              onClose={() => setShowFormSettings(false)}
+            />
           )}
 
           <input type="text" value={quizSearch} onChange={(e) => setQuizSearch(e.target.value)} placeholder="ค้นหาแบบฝึกหัด..."
