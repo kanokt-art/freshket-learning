@@ -816,14 +816,32 @@ function LessonBrowserStep({
   const allVideosWatched = requiredVideoKeys.every((k) => watchedVideos.has(k))
   const selectedVideoId = selectedLesson?.type === 'video' ? youtubeVideoId(selectedLesson.videoUrl) : null
 
-  // `step` comes from the admin's pre/post tag on the lesson (CourseLesson.quizRole).
-  // An untagged quiz sends no step at all: it is an ordinary lesson quiz, graded
-  // into `score` only, and it must still notify the manager on completion — which
-  // a hardcoded 'pre' silently suppressed.
+  // Every lesson except the pre-test quiz itself. A pre-test is sat BEFORE the
+  // material, so requiring it to be done before the course counts as finished
+  // would deadlock the second sitting below.
+  const nonPreTestLessonIds = topics
+    .flatMap((t) => t.lessons)
+    .filter((l) => l.quizRole !== 'pre_test')
+    .map((l) => l.id)
+  const courseworkDone = nonPreTestLessonIds.length > 0
+    && nonPreTestLessonIds.every((id) => completedLessonIds.includes(id))
+
+  // A lesson tagged 'pre_test' is sat TWICE — once before the material and
+  // again once the rest of the course is finished — so the pair yields a
+  // before/after score for the same questions. Which sitting this is decides
+  // the `step` sent to the grader, and so which column the score lands in.
+  // A 'post_test' lesson is sat once, after. An untagged quiz sends no step at
+  // all: it is an ordinary lesson quiz graded into `score` only, and it must
+  // still notify the manager on completion — which a hardcoded 'pre'
+  // silently suppressed.
+  function quizStepFor(lesson: CourseLesson): 'pre' | 'post' | undefined {
+    if (lesson.quizRole === 'post_test') return 'post'
+    if (lesson.quizRole !== 'pre_test') return undefined
+    return courseworkDone ? 'post' : 'pre'
+  }
+
   function startQuiz(lesson: CourseLesson) {
-    const step = lesson.quizRole === 'pre_test' ? 'pre'
-      : lesson.quizRole === 'post_test' ? 'post'
-      : undefined
+    const step = quizStepFor(lesson)
     sessionStorage.setItem('assessment_return', JSON.stringify({ courseId: course.id, ...(step ? { step } : {}) }))
     router.push(`/assessment/${lesson.assessmentId}`)
   }
@@ -939,10 +957,19 @@ function LessonBrowserStep({
               )}
 
               {selectedLesson.type === 'quiz' && selectedLesson.assessmentId && (
-                <button onClick={() => startQuiz(selectedLesson!)}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
-                  เริ่มทำแบบฝึกหัด
-                </button>
+                <div className="space-y-2">
+                  {selectedLesson.quizRole === 'pre_test' && (
+                    <p className="text-xs text-gray-400">
+                      {courseworkDone
+                        ? 'คุณเรียนจบทุกบทเรียนแล้ว — ทำแบบทดสอบนี้อีกครั้งเพื่อวัดผลหลังเรียน'
+                        : 'แบบทดสอบก่อนเรียน — เมื่อเรียนจบครบทุกบทเรียนแล้วจะได้ทำอีกครั้งเพื่อเทียบคะแนน'}
+                    </p>
+                  )}
+                  <button onClick={() => startQuiz(selectedLesson!)}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
+                    {selectedLesson.quizRole === 'pre_test' && courseworkDone ? 'ทำแบบทดสอบหลังเรียน' : 'เริ่มทำแบบฝึกหัด'}
+                  </button>
+                </div>
               )}
 
               {selectedLesson.type === 'assignment' && (

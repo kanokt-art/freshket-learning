@@ -1502,7 +1502,9 @@ function QuizPreviewInline({ assessment }: { assessment?: Assessment }) {
 
   return (
     <>
-      <div>
+      {/* Fills whatever height the host pane gives it, so the 'form' screen's
+          iframe can stretch; in a short host it simply sizes to its content. */}
+      <div className="flex-1 min-h-0 flex flex-col">
           {!assessment ? (
             <div className="py-10 text-center text-sm text-gray-400">
               ยังไม่ได้เลือกชุดคำถาม — เลือกชุดคำถามในหัวข้อ &ldquo;ชุดคำถาม&rdquo; ก่อนเพื่อดูตัวอย่าง
@@ -1559,8 +1561,12 @@ function QuizPreviewInline({ assessment }: { assessment?: Assessment }) {
                 </div>
               ) : formEmbedUrl ? (
                 <>
-                  <div className="rounded-xl overflow-hidden border border-gray-200 flex-1" style={{ minHeight: '50vh' }}>
-                    <iframe src={formEmbedUrl} className="w-full h-full" title={assessment.title} style={{ border: 'none' }} />
+                  {/* The form owns the full height of the pane. A short fixed
+                      height here just moved the scrolling inside Google's own
+                      frame, which reads as a cramped box rather than the
+                      learner's actual view. */}
+                  <div className="rounded-xl overflow-hidden border border-gray-200 flex-1 min-h-0">
+                    <iframe src={formEmbedUrl} className="w-full h-full block" title={assessment.title} style={{ border: 'none' }} />
                   </div>
                   <button type="button" onClick={() => setScreen('done')}
                     className="w-full py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all">
@@ -2360,12 +2366,15 @@ function LessonPreviewModal({ topics, assessments, onClose }: {
               ))}
             </div>
 
-            {/* Right: content viewer */}
-            <div className="flex-1 overflow-y-auto p-6">
+            {/* Right: content viewer. A quiz lesson gets the full height of the
+                pane (and no max-width) so an embedded Google Form renders at
+                the size a learner actually sees, instead of scrolling inside a
+                short box. Every other lesson type keeps the reading column. */}
+            <div className={`flex-1 p-6 ${selectedLesson?.type === 'quiz' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'}`}>
               {!selectedLesson ? (
                 <div className="h-full flex items-center justify-center text-gray-400 text-sm">เลือกบทเรียนทางซ้าย</div>
               ) : (
-                <div className="space-y-4 max-w-2xl">
+                <div className={`space-y-4 ${selectedLesson.type === 'quiz' ? 'flex-1 min-h-0 flex flex-col' : 'max-w-2xl'}`}>
                   <h3 className="text-base font-bold text-gray-900">{selectedLesson.title}</h3>
                   {selectedLesson.description && <p className="text-xs text-gray-400">{selectedLesson.description}</p>}
 
@@ -2413,7 +2422,9 @@ function LessonPreviewModal({ topics, assessments, onClose }: {
 
                   {selectedLesson.type === 'quiz' && (
                     selectedLesson.assessmentId ? (
-                      <QuizPreviewInline key={selectedLesson.id} assessment={activeQuizAssessment} />
+                      <div className="flex-1 min-h-0 flex flex-col">
+                        <QuizPreviewInline key={selectedLesson.id} assessment={activeQuizAssessment} />
+                      </div>
                     ) : (
                       <p className="text-xs text-gray-400">ยังไม่ได้เลือกชุดคำถามสำหรับบทเรียนนี้ — ไปที่การ์ด &quot;เลือกแบบฝึกหัด&quot; ด้านซ้ายเพื่อเลือก</p>
                     )
@@ -3108,6 +3119,10 @@ function QuizLessonSettingsCard({
     onSetQuizRole('post_test')
   }
 
+  // "ใช้เป็นแบบทดสอบก่อนเรียน": ON means the learner sits this quiz BEFORE the
+  // course as well as after, so the pair produces a before/after score; OFF
+  // means it is the post-test only. Claiming a role another lesson already
+  // holds re-tags it here and clears it there, confirmed first.
   async function handleSetRole(next: boolean) {
     const role = next ? 'pre_test' : 'post_test'
     const holder = next ? otherPreTestTitle : otherPostTestTitle
@@ -3175,7 +3190,7 @@ function QuizLessonSettingsCard({
         <div className="flex items-center gap-2.5 shrink-0">
           {enabled && (
             <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700">
-              {isPreTest ? 'Pre-Test' : 'Post-Test'}
+              {isPreTest ? 'ก่อน + หลังเรียน' : 'หลังเรียน'}
             </span>
           )}
           <button type="button" onClick={toggleEnabled}
@@ -3191,13 +3206,18 @@ function QuizLessonSettingsCard({
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-1.5 min-w-0">
               <label className="text-xs font-bold text-gray-600">ใช้เป็นแบบทดสอบก่อนเรียน</label>
-              <InfoTooltip text="เปิด = บทเรียนนี้คือแบบทดสอบก่อนเรียนของหลักสูตร ปิด = เป็นแบบทดสอบหลังเรียน คะแนนจะถูกแยกเป็นคอลัมน์ Pre-Test / Post-Test ในตารางผู้เรียน" />
+              <InfoTooltip text="ผู้เรียนจะต้องทำแบบทดสอบนี้ทั้งก่อนเริ่มเรียนและหลังเรียนจบครบทุกบทเรียนแล้ว หากไม่เปิดใช้งานส่วนนี้ แบบทดสอบนี้จะถูกใช้เพื่อทดสอบหลังเรียนเพียงอย่างเดียว" />
             </div>
             <button type="button" onClick={() => handleSetRole(!isPreTest)}
               className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 shrink-0 ${isPreTest ? 'bg-freshket-500' : 'bg-gray-200'}`}>
               <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${isPreTest ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
             </button>
           </div>
+          <p className="-mt-2.5 text-xs text-gray-400">
+            {isPreTest
+              ? 'ผู้เรียนจะทำแบบทดสอบนี้ทั้งก่อนเรียนและหลังเรียน (มีคะแนน Pre-Test และ Post-Test)'
+              : 'ผู้เรียนจะทำแบบทดสอบนี้หลังเรียนจบเท่านั้น (มีเฉพาะคะแนน Post-Test)'}
+          </p>
 
           <div>
             <label className="text-xs font-bold text-gray-600 block mb-1.5">ใช้แบบทดสอบจาก</label>
@@ -3570,10 +3590,11 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   )
 
   // Whether the roster should show a Pre-Test/Post-Test column at all — only
-  // once the admin has tagged a lesson with that role (see LessonEditor's
-  // "บทบาทของแบบฝึกหัดนี้" picker).
+  // once the admin has tagged a lesson with that role in the "แบบทดสอบ" tab.
+  // A 'pre_test' lesson is sat twice (before the material and again after), so
+  // it produces a post score too and lights up BOTH columns.
   const hasPreTest = useMemo(() => form.topics.some((t) => t.lessons.some((l) => l.quizRole === 'pre_test')), [form.topics])
-  const hasPostTest = useMemo(() => form.topics.some((t) => t.lessons.some((l) => l.quizRole === 'post_test')), [form.topics])
+  const hasPostTest = useMemo(() => form.topics.some((t) => t.lessons.some((l) => !!l.quizRole)), [form.topics])
 
   // ── Learner assignment UI state ──
   const [openPanel, setOpenPanel] = useState<'individual' | 'department' | 'rank' | 'position' | 'tenure' | null>(null)
