@@ -2983,11 +2983,20 @@ function QuizSettingsTab({ enabled, onEnable, topics, onChangeTopics, assessment
   onChangeTopics: (t: CourseTopic[]) => void
   assessments: Assessment[]
 }) {
-  const quizLessons = topics
+  // A course has ONE graded quiz, sat after the material and — when the
+  // pre-test toggle is on — before it as well. So this lists a single card,
+  // not one per quiz lesson: whichever quiz lesson already carries a role,
+  // else the first quiz lesson in the course.
+  const allQuizLessons = topics
     .slice()
     .sort((a, b) => a.order - b.order)
     .flatMap((t) => t.lessons.slice().sort((a, b) => a.order - b.order).map((l) => ({ topic: t, lesson: l })))
     .filter(({ lesson }) => lesson.type === 'quiz')
+  const quizLessons = (() => {
+    const tagged = allQuizLessons.find(({ lesson }) => !!lesson.quizRole)
+    const chosen = tagged ?? allQuizLessons[0]
+    return chosen ? [chosen] : []
+  })()
 
   // Setting a role clears whichever OTHER lesson held it — at most one lesson
   // per course may be the pre-test, and one the post-test.
@@ -3048,16 +3057,15 @@ function QuizSettingsTab({ enabled, onEnable, topics, onChangeTopics, assessment
   return (
     <div className="w-full px-6 py-8 space-y-4">
       <p className="text-xs text-gray-400">
-        เปิดใช้งานบทเรียนที่จะใช้เป็นแบบทดสอบ — ค่าเริ่มต้นคือแบบทดสอบหลังเรียน หากต้องการให้ผู้เรียนทำก่อนเรียนด้วย ให้เปิด &ldquo;ใช้เป็นแบบทดสอบก่อนเรียน&rdquo; ข้างใน
+        คอร์สนี้ใช้แบบทดสอบหลังเรียน — หากต้องการให้ผู้เรียนทำชุดเดียวกันนี้ก่อนเรียนด้วย เพื่อเทียบคะแนนก่อน-หลัง ให้เปิด &ldquo;ใช้เป็นแบบทดสอบก่อนเรียน&rdquo;
       </p>
       {quizLessons.map(({ topic, lesson }) => (
         <QuizLessonSettingsCard
           key={lesson.id}
+          onEnsureRole={() => setQuizRole(lesson.id, 'post_test')}
           topicTitle={topic.title}
           lesson={lesson}
           assessments={assessments}
-          otherPreTestTitle={topics.flatMap((t) => t.lessons).find((l) => l.id !== lesson.id && l.quizRole === 'pre_test')?.title}
-          otherPostTestTitle={topics.flatMap((t) => t.lessons).find((l) => l.id !== lesson.id && l.quizRole === 'post_test')?.title}
           onSetQuizRole={(role) => setQuizRole(lesson.id, role)}
           onSetAssessment={(id) => setLessonAssessment(lesson.id, id)}
         />
@@ -3067,19 +3075,26 @@ function QuizSettingsTab({ enabled, onEnable, topics, onChangeTopics, assessment
 }
 
 function QuizLessonSettingsCard({
-  topicTitle, lesson, assessments, otherPreTestTitle, otherPostTestTitle,
+  topicTitle, lesson, assessments, onEnsureRole,
   onSetQuizRole, onSetAssessment,
 }: {
   topicTitle: string
   lesson: CourseLesson
   assessments: Assessment[]
-  otherPreTestTitle?: string
-  otherPostTestTitle?: string
+  onEnsureRole: () => void
   onSetQuizRole: (role: 'pre_test' | 'post_test' | undefined) => void
   onSetAssessment: (assessmentId: string | undefined) => void
 }) {
   const router = useRouter()
-  const enabled = !!lesson.quizRole
+  // The card being visible means the course's quizzes are on, so the lesson it
+  // shows must actually carry a role — otherwise nothing would be graded and
+  // the Pre/Post columns would stay empty. Default it to the post-test. Held in
+  // a ref so this fires on the lesson's role changing, not on every re-render
+  // (the parent rebuilds the callback each time).
+  const ensureRoleRef = useRef(onEnsureRole)
+  ensureRoleRef.current = onEnsureRole
+  const hasRole = !!lesson.quizRole
+  useEffect(() => { if (!hasRole) ensureRoleRef.current() }, [hasRole])
   const currentAssessment = assessments.find((a) => a.id === lesson.assessmentId)
   const [source, setSource] = useState<'self' | 'google_form'>(
     currentAssessment?.googleFormUrl ? 'google_form' : 'self',
@@ -3117,32 +3132,12 @@ function QuizLessonSettingsCard({
   }, [currentAssessment?.id, currentAssessment?.title, currentAssessment?.timeLimitMinutes,
     currentAssessment?.antiCheatEnabled, currentAssessment?.description, currentAssessment?.passingScore])
 
-  // Enabling the course's quizzes (the sidebar switch) already means "there is
-  // a post-test". This row switch turns THIS lesson into one of the course's
-  // graded quizzes, defaulting to the post-test; the toggle inside then
-  // promotes it to also being sat before the course.
-  async function toggleEnabled() {
-    if (enabled) { onSetQuizRole(undefined); return }
-    onSetQuizRole('post_test')
-  }
-
-  // "ใช้เป็นแบบทดสอบก่อนเรียน": ON means the learner sits this quiz BEFORE the
-  // course as well as after, so the pair produces a before/after score; OFF
-  // means it is the post-test only. Claiming a role another lesson already
-  // holds re-tags it here and clears it there, confirmed first.
-  async function handleSetRole(next: boolean) {
-    const role = next ? 'pre_test' : 'post_test'
-    const holder = next ? otherPreTestTitle : otherPostTestTitle
-    if (holder) {
-      const ok = await confirmAction({
-        title: next ? 'ย้ายป้าย Pre-Test มาที่บทเรียนนี้?' : 'ย้ายป้าย Post-Test มาที่บทเรียนนี้?',
-        text: `บทเรียน "${holder}" กำลังถือป้ายนี้อยู่ — จะถูกยกเลิกป้ายนั้นให้อัตโนมัติ`,
-        confirmText: 'ยืนยัน',
-        cancelText: 'ยกเลิก',
-      })
-      if (!ok) return
-    }
-    onSetQuizRole(role)
+  // "ใช้เป็นแบบทดสอบก่อนเรียน": ON means the learner also sits this quiz
+  // BEFORE the course, so the pair produces a before/after score; OFF leaves
+  // it as the post-test only. Same lesson either way — this only widens or
+  // narrows when it is taken, so there is no tag to move between lessons.
+  function handleSetRole(next: boolean) {
+    onSetQuizRole(next ? 'pre_test' : 'post_test')
   }
 
   // Swapping the linked assessment changes what learners already in progress
@@ -3201,28 +3196,18 @@ function QuizLessonSettingsCard({
     .filter((a) => a.title.toLowerCase().includes(search.trim().toLowerCase()))
 
   return (
-    <div className={`rounded-2xl border bg-white transition-all ${enabled ? 'border-freshket-200 shadow-sm' : 'border-gray-100'}`}>
+    <div className="rounded-2xl border border-freshket-200 bg-white shadow-sm transition-all">
       <div className="flex items-center justify-between gap-3 p-4">
         <div className="min-w-0">
           <p className="text-xs text-gray-400 truncate">{topicTitle}</p>
           <p className="text-sm font-bold text-gray-900 truncate">{lesson.title || 'บทเรียนแบบฝึกหัด'}</p>
         </div>
-        <div className="flex items-center gap-2.5 shrink-0">
-          {enabled && (
-            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700">
-              {isPreTest ? 'Pre-Test + Post-Test' : 'Post-Test'}
-            </span>
-          )}
-          <button type="button" onClick={toggleEnabled}
-            title={enabled ? 'ปิดใช้งานแบบทดสอบของบทเรียนนี้' : 'เปิดใช้งานแบบทดสอบของบทเรียนนี้'}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${enabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-            <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${enabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-          </button>
-        </div>
+        <span className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700">
+          {isPreTest ? 'Pre-Test + Post-Test' : 'Post-Test'}
+        </span>
       </div>
 
-      {enabled && (
-        <div className="px-4 pb-4 space-y-4 border-t border-gray-100 pt-4">
+      <div className="px-4 pb-4 space-y-4 border-t border-gray-100 pt-4">
 
           {/* Source tab — which kind of assessment this lesson uses. */}
           <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
@@ -3351,8 +3336,7 @@ function QuizLessonSettingsCard({
           ) : (
             <p className="text-xs text-gray-400">เลือกแบบทดสอบก่อน จึงจะตั้งค่ารายละเอียดได้</p>
           )}
-        </div>
-      )}
+      </div>
     </div>
   )
 }
