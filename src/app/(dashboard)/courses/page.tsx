@@ -2721,7 +2721,7 @@ function AssessmentPreviewContent({ assessment }: { assessment: Assessment }) {
             กำลังตรวจสอบลิงก์แบบฟอร์ม...
           </div>
         ) : embedUrl ? (
-          <div className="rounded-xl overflow-hidden border border-gray-200" style={{ height: '70vh' }}>
+          <div className="w-full max-w-md rounded-xl overflow-hidden border border-gray-200 shadow-sm" style={{ height: '420px' }}>
             <iframe src={embedUrl} className="w-full h-full" title={assessment.title} style={{ border: 'none' }} />
           </div>
         ) : (
@@ -2808,11 +2808,11 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
 
   return (
     <div className="h-full flex gap-6">
-      <div className="w-[26rem] shrink-0 space-y-5 overflow-y-auto pr-1">
+      <div className="w-80 shrink-0 space-y-5 overflow-y-auto pr-1">
       {/* Format cards — large tile selector */}
       <div>
         <label className="text-xs font-bold text-gray-600 block mb-2">รูปแบบบทเรียน</label>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2.5">
+        <div className="grid grid-cols-2 gap-2.5">
           {LESSON_TYPES.map((t) => {
             const active = lesson.type === t
             return (
@@ -2924,22 +2924,22 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
       </div>
       </div>
 
-      {/* Right: live preview of the lesson content — the same embed a learner
-          would see, so a broken/unshared link is obvious immediately instead
-          of only surfacing in the separate "พรีวิวมุมมองผู้เรียน" flow. */}
+      {/* Right: a small fixed-size preview window — capped, not stretched to
+          the pane's full height, so it reads as a thumbnail of the embed a
+          learner would see rather than taking over the layout. */}
       <div className="flex-1 min-w-0 overflow-y-auto border-l border-gray-100 pl-6">
         {lesson.type === 'video' || lesson.type === 'file' ? (
           embedUrl ? (
-            <div className="rounded-xl overflow-hidden border border-gray-200 h-full" style={lesson.type === 'video' ? { aspectRatio: '16/9', height: 'auto' } : undefined}>
-              <iframe src={embedUrl} className="w-full h-full" allowFullScreen title={lesson.title || 'preview'} style={{ border: 'none', minHeight: lesson.type === 'file' ? '70vh' : undefined }} />
+            <div className="w-full max-w-sm rounded-xl overflow-hidden border border-gray-200 shadow-sm" style={{ aspectRatio: '16/9' }}>
+              <iframe src={embedUrl} className="w-full h-full" allowFullScreen title={lesson.title || 'preview'} style={{ border: 'none' }} />
             </div>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center gap-2 text-sm text-gray-300 text-center px-6">
-              <svg className="size-10 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
+            <div className="w-full max-w-sm rounded-xl border border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 text-sm text-gray-300 text-center px-6 py-10" style={{ aspectRatio: '16/9' }}>
+              <svg className="size-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              <p>{lesson.type === 'video' ? (lesson.videoUrl ? 'ไม่สามารถแสดงตัวอย่างวิดีโอนี้ได้' : 'วางลิงก์วิดีโอทางซ้ายเพื่อดูตัวอย่าง') : (lesson.fileUrl ? 'ไม่สามารถแสดงตัวอย่าง Google Slide นี้ได้ — ตรวจสอบว่าตั้งค่าแชร์เป็น "ทุกคนที่มีลิงก์" แล้ว' : 'วางลิงก์ Google Slide ทางซ้ายเพื่อดูตัวอย่าง')}</p>
+              <p className="text-xs">{lesson.type === 'video' ? (lesson.videoUrl ? 'ไม่สามารถแสดงตัวอย่างวิดีโอนี้ได้' : 'วางลิงก์วิดีโอทางซ้ายเพื่อดูตัวอย่าง') : (lesson.fileUrl ? 'ไม่สามารถแสดงตัวอย่าง Google Slide นี้ได้ — ตรวจสอบว่าตั้งค่าแชร์เป็น "ทุกคนที่มีลิงก์" แล้ว' : 'วางลิงก์ Google Slide ทางซ้ายเพื่อดูตัวอย่าง')}</p>
             </div>
           )
         ) : (
