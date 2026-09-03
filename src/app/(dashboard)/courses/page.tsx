@@ -2104,13 +2104,15 @@ function SaveConfirmationModal({ recipientCount, skippedCount, saving, onBack, o
 }
 
 // ── Course Builder (full-page, sidebar tabs) ──────────────────────────────────
-type BuilderTab = 'details' | 'lessons' | 'learners' | 'summary'
+type BuilderTab = 'details' | 'lessons' | 'quiz' | 'learners' | 'summary'
 
 // Order = setup first, then the read-only report. "สรุปผลการเรียน" sits last
-// because it reports on the course rather than configuring it.
+// because it reports on the course rather than configuring it. "แบบทดสอบ"
+// follows "บทเรียน" because it configures the quiz lessons created there.
 const BUILDER_TABS: { id: BuilderTab; label: string }[] = [
   { id: 'details',  label: 'รายละเอียดคอร์ส' },
   { id: 'lessons',  label: 'บทเรียน' },
+  { id: 'quiz',     label: 'แบบทดสอบ' },
   { id: 'learners', label: 'กำหนดผู้เรียน' },
   { id: 'summary',  label: 'สรุปผลการเรียน' },
 ]
@@ -2768,206 +2770,22 @@ function AssessmentPreviewContent({ assessment }: { assessment: Assessment }) {
 }
 
 // ── Lesson Editor (right pane of the Lessons tab) ─────────────────────────────
-// Compact overlay for the settings behind the gear icon in the quiz picker:
-// the assessment's time limit and anti-cheat (stored on the Assessment doc,
-// shared by every lesson that links it) plus this lesson's pre/post role
-// (stored on the lesson, part of the course draft). The role toggle applies
-// immediately since it belongs to the unsaved course form; the two assessment
-// fields are committed by the save button.
-function QuizSettingsModal({
-  assessment, timeLimitMinutes, onTimeLimitChange, antiCheatEnabled, onAntiCheatChange,
-  isPreTest, onIsPreTestChange, saving, onSave, onClose,
-}: {
-  assessment: Assessment
-  timeLimitMinutes: string; onTimeLimitChange: (v: string) => void
-  antiCheatEnabled: boolean; onAntiCheatChange: (v: boolean) => void
-  isPreTest: boolean; onIsPreTestChange: (v: boolean) => void
-  saving: boolean; onSave: () => void; onClose: () => void
-}) {
-  return (
-    <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()}
-        className="animate-pop-in bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
-          <div className="min-w-0">
-            <h3 className="text-sm font-bold text-gray-900">ตั้งค่าแบบทดสอบ</h3>
-            <p className="text-xs text-gray-400 truncate mt-0.5">{assessment.title}</p>
-          </div>
-          <button type="button" onClick={onClose}
-            className="shrink-0 size-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-all">
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="px-5 pb-5 space-y-4">
-          <div>
-            <label className="text-xs font-bold text-gray-600 block mb-1.5">เวลาในการทำแบบทดสอบ</label>
-            <div className="relative">
-              <input type="number" min={0} value={timeLimitMinutes}
-                onChange={(e) => onTimeLimitChange(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:border-freshket-500 pr-12" />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">นาที</span>
-            </div>
-            <p className="text-xs text-gray-400 mt-1">ใส่ 0 = ไม่จำกัดเวลา</p>
-          </div>
-
-          <div className="flex items-center justify-between gap-3 pt-1">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <label className="text-xs font-bold text-gray-600">ใช้เป็นแบบทดสอบก่อนเรียน</label>
-              <InfoTooltip text="เปิด = บทเรียนนี้คือแบบทดสอบก่อนเรียนของหลักสูตร ปิด = เป็นแบบทดสอบหลังเรียน คะแนนจะถูกแยกเป็นคอลัมน์ Pre-Test / Post-Test ในตารางผู้เรียน" />
-            </div>
-            <button type="button" onClick={() => onIsPreTestChange(!isPreTest)}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${isPreTest ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${isPreTest ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-            </button>
-          </div>
-          <p className="-mt-2.5 text-xs text-gray-400">
-            {isPreTest ? 'ตอนนี้เป็น: แบบทดสอบก่อนเรียน (Pre-Test)' : 'ตอนนี้เป็น: แบบทดสอบหลังเรียน (Post-Test)'}
-          </p>
-
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <label className="text-xs font-bold text-gray-600">ระบบป้องกันการทุจริต (Anti-Cheat)</label>
-              <InfoTooltip text="บังคับเข้าโหมดเต็มจอ ห้ามสลับแท็บ/หน้าต่างระหว่างทำแบบทดสอบ ระบบแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และส่งคำตอบอัตโนมัติเมื่อแจ้งเตือนครบ 3 ครั้ง" />
-            </div>
-            <button type="button" onClick={() => onAntiCheatChange(!antiCheatEnabled)}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${antiCheatEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${antiCheatEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-            </button>
-          </div>
-
-          <button type="button" onClick={onSave} disabled={saving}
-            className="w-full py-2.5 rounded-xl bg-freshket-500 text-white text-xs font-bold hover:bg-freshket-600 transition-all disabled:opacity-60 flex items-center justify-center gap-1.5">
-            {saving
-              ? <span className="size-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              : <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
-            {saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function LessonEditor({ lesson, assessments, topics, onChange, onSetQuizRole, onDelete }: {
-  lesson: CourseLesson; assessments: Assessment[]; topics: CourseTopic[]
+// Pre/post roles and per-assessment timer/anti-cheat settings are NOT edited
+// here — they live in the course builder's "แบบทดสอบ" tab, which sees every
+// quiz lesson at once and so can enforce "one pre-test, one post-test" across
+// the whole course. This editor only picks WHICH assessment a lesson links to.
+function LessonEditor({ lesson, assessments, onChange, onDelete }: {
+  lesson: CourseLesson; assessments: Assessment[]
   onChange: (patch: Partial<CourseLesson>) => void
-  onSetQuizRole: (role: 'pre_test' | 'post_test' | undefined) => void
   onDelete: () => void
 }) {
-  const router = useRouter()
-  const [quizSearch, setQuizSearch] = useState('')
-  // At most one lesson per course should carry each pre/post role — find
-  // whichever OTHER lesson already claims a role so the picker can warn
-  // before silently double-assigning it.
-  const otherPreTestLesson = topics.flatMap((t) => t.lessons).find((l) => l.id !== lesson.id && l.quizRole === 'pre_test')
-  const otherPostTestLesson = topics.flatMap((t) => t.lessons).find((l) => l.id !== lesson.id && l.quizRole === 'post_test')
-  // "แก้ไข" configures the lesson/quiz link; "ตัวอย่างแบบทดสอบ" (only shown
-  // once an assessment is linked) previews its actual content — embedded form
-  // or full question list — without leaving this pane. Resets to "แก้ไข" on
-  // lesson switch so opening a different lesson never lands mid-preview.
+  // "แก้ไข" configures the lesson; "ตัวอย่างแบบทดสอบ" (only shown once an
+  // assessment is linked) previews its actual content — embedded form or full
+  // question list — without leaving this pane. Resets to "แก้ไข" on lesson
+  // switch so opening a different lesson never lands mid-preview.
   const [editorTab, setEditorTab] = useState<'edit' | 'preview'>('edit')
   useEffect(() => { setEditorTab('edit') }, [lesson.id])
   const currentAssessment = assessments.find((a) => a.id === lesson.assessmentId)
-
-  // Timer/anti-cheat settings for the Google Form assessment currently linked
-  // to this lesson. These live on the Assessment document itself (shared by
-  // every lesson/course that reuses it), so this writes straight to Firestore
-  // instead of going through the course draft's save button.
-  const [showFormSettings, setShowFormSettings] = useState(false)
-  const [savingFormSettings, setSavingFormSettings] = useState(false)
-  const [formTimeLimitMinutes, setFormTimeLimitMinutes] = useState('0')
-  const [formAntiCheatEnabled, setFormAntiCheatEnabled] = useState(false)
-  useEffect(() => {
-    setFormTimeLimitMinutes(String(currentAssessment?.timeLimitMinutes ?? 0))
-    setFormAntiCheatEnabled(currentAssessment?.antiCheatEnabled ?? false)
-  }, [currentAssessment?.id, currentAssessment?.timeLimitMinutes, currentAssessment?.antiCheatEnabled])
-
-  // The pre/post role is a single toggle: on = this is the course's pre-test,
-  // off = its post-test. There is no "untagged" state from here — a quiz
-  // reached through this panel is always one or the other. Only one lesson per
-  // course may hold each role, so claiming one that another lesson already has
-  // re-tags it here and clears it there (confirmed first).
-  async function handleTogglePreTest(next: boolean) {
-    const role = next ? 'pre_test' : 'post_test'
-    const holder = next ? otherPreTestLesson : otherPostTestLesson
-    if (holder) {
-      const ok = await confirmAction({
-        title: next ? 'ย้ายป้าย Pre-Test มาที่บทเรียนนี้?' : 'ย้ายป้าย Post-Test มาที่บทเรียนนี้?',
-        text: `บทเรียน "${holder.title}" กำลังถือป้ายนี้อยู่ — จะถูกยกเลิกป้ายนั้นให้อัตโนมัติ`,
-        confirmText: 'ยืนยัน',
-        cancelText: 'ยกเลิก',
-      })
-      if (!ok) return
-    }
-    onSetQuizRole(role)
-  }
-
-  async function handleSaveFormSettings() {
-    if (!currentAssessment) return
-    setSavingFormSettings(true)
-    try {
-      const patch = {
-        timeLimitMinutes: Number(formTimeLimitMinutes) || 0,
-        antiCheatEnabled: formAntiCheatEnabled,
-      }
-      if (!DEMO_MODE) {
-        await updateDoc(doc(getClientFirestore(), 'assessments', currentAssessment.id), patch)
-      }
-      setShowFormSettings(false)
-    } catch (e) {
-      void alertError('บันทึกการตั้งค่าไม่สำเร็จ', e instanceof Error ? e.message : String(e))
-    } finally {
-      setSavingFormSettings(false)
-    }
-  }
-  // Each Assessment already carries its own self/Google Form mode (set on the
-  // /assessment authoring page) — this only filters which kind the picker
-  // shows, it doesn't create or change an assessment's mode. Starts on
-  // whichever mode the lesson's OWN assessment already uses (not a hardcoded
-  // 'self') so opening an already-configured Google Form lesson doesn't land
-  // on a filter that hides its current pick.
-  const [quizModeFilter, setQuizModeFilter] = useState<'self' | 'google_form'>(
-    currentAssessment?.googleFormUrl ? 'google_form' : 'self',
-  )
-  const published = assessments.filter((a) => a.isPublished && (quizModeFilter === 'google_form' ? !!a.googleFormUrl : !a.googleFormUrl))
-  const filteredAssessments = quizSearch.trim() ? published.filter((a) => a.title.toLowerCase().includes(quizSearch.toLowerCase())) : published
-
-  // Swapping the linked assessment changes what learners already in progress
-  // see next time they open this lesson — confirm before committing, same
-  // reasoning as handleCreateNewAssessment leaving the page.
-  async function handleSelectAssessment(a: Assessment) {
-    if (a.id === lesson.assessmentId) return
-    if (lesson.assessmentId) {
-      const ok = await confirmAction({
-        title: 'เปลี่ยนแบบทดสอบของบทเรียนนี้?',
-        text: `จาก "${currentAssessment?.title ?? '(ไม่พบแบบฝึกหัดนี้แล้ว)'}" เป็น "${a.title}"`,
-        confirmText: 'ยืนยันเปลี่ยน',
-        cancelText: 'ยกเลิก',
-      })
-      if (!ok) return
-    }
-    onChange({ assessmentId: a.id })
-  }
-
-  // /assessment is a full page, not a modal — navigating there leaves this
-  // course draft behind unsaved (CourseFormModal's form state isn't
-  // persisted). Confirm first so a stray click doesn't silently lose an
-  // in-progress edit; a learner who actually wants to create a quiz will
-  // come straight back once it's published.
-  async function handleCreateNewAssessment() {
-    const ok = await confirmAction({
-      title: 'ออกจากหน้าแก้ไขหลักสูตร?',
-      text: 'การเปลี่ยนแปลงที่ยังไม่ได้บันทึกในหลักสูตรนี้จะหายไป — สร้างแบบทดสอบเสร็จแล้วค่อยกลับมาเลือกได้',
-      confirmText: 'ไปสร้างแบบทดสอบ',
-      cancelText: 'อยู่หน้านี้ต่อ',
-      danger: true,
-    })
-    if (ok) router.push('/assessment')
-  }
 
   return (
     <>
@@ -3078,108 +2896,23 @@ function LessonEditor({ lesson, assessments, topics, onChange, onSetQuizRole, on
       )}
 
       {lesson.type === 'quiz' && (
-        <div className="space-y-2">
-
-          <label className="text-xs font-bold text-gray-600 block">เลือกแบบฝึกหัด</label>
-
-          {/* Current pick — shown regardless of which mode filter is active
-              below, so switching the filter to browse the other kind never
-              looks like the lesson lost its assessment. */}
-          <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-xs ${
-            currentAssessment ? 'bg-freshket-50 border-freshket-200' : 'bg-gray-50 border-gray-200'
-          }`}>
-            <svg className={`size-4 shrink-0 ${currentAssessment ? 'text-freshket-500' : 'text-gray-300'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
-            </svg>
-            <span className="flex-1 min-w-0">
-              <span className="text-gray-500">กำลังใช้งาน: </span>
-              {lesson.assessmentId ? (
-                <span className="font-bold text-freshket-700">{currentAssessment?.title ?? '(ไม่พบแบบฝึกหัดนี้แล้ว)'}</span>
-              ) : (
-                <span className="text-gray-400">ยังไม่ได้เลือกแบบฝึกหัด</span>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3.5">
+          <p className="text-xs font-bold text-gray-600 mb-1">แบบทดสอบของบทเรียนนี้</p>
+          {currentAssessment ? (
+            <p className="text-xs text-gray-500">
+              กำลังใช้งาน: <span className="font-bold text-freshket-700">{currentAssessment.title}</span>
+              {lesson.quizRole && (
+                <span className="ml-1.5 text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">
+                  {lesson.quizRole === 'pre_test' ? 'Pre-Test' : 'Post-Test'}
+                </span>
               )}
-            </span>
-            {currentAssessment && (
-              <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${currentAssessment.googleFormUrl ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'}`}>
-                {currentAssessment.googleFormUrl ? 'Google Form' : 'สร้างเอง'}
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="flex-1 grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => setQuizModeFilter('self')}
-                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${quizModeFilter === 'self' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
-                สร้างเอง
-              </button>
-              <button type="button" onClick={() => setQuizModeFilter('google_form')}
-                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${quizModeFilter === 'google_form' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
-                Google Form
-              </button>
-            </div>
-            {/* Timer / pre-test role for the assessment currently linked to this
-                lesson — hidden until there IS one, since these settings belong
-                to that specific assessment, not to a picker mode in the
-                abstract. Opens a small overlay card rather than pushing the
-                picker below the fold. */}
-            {currentAssessment && (
-              <button type="button" onClick={() => setShowFormSettings(true)}
-                title="ตั้งค่าเวลา / แบบทดสอบก่อน-หลังเรียน"
-                className={`shrink-0 size-9 rounded-lg flex items-center justify-center border transition-all ${
-                  showFormSettings ? 'bg-freshket-500 border-freshket-500 text-white' : 'bg-white border-gray-200 text-gray-500 hover:border-freshket-300 hover:text-freshket-600'
-                }`}>
-                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </button>
-            )}
-          </div>
-
-          {showFormSettings && currentAssessment && (
-            <QuizSettingsModal
-              assessment={currentAssessment}
-              timeLimitMinutes={formTimeLimitMinutes}
-              onTimeLimitChange={setFormTimeLimitMinutes}
-              antiCheatEnabled={formAntiCheatEnabled}
-              onAntiCheatChange={setFormAntiCheatEnabled}
-              isPreTest={lesson.quizRole === 'pre_test'}
-              onIsPreTestChange={handleTogglePreTest}
-              saving={savingFormSettings}
-              onSave={handleSaveFormSettings}
-              onClose={() => setShowFormSettings(false)}
-            />
+            </p>
+          ) : (
+            <p className="text-xs text-gray-400">ยังไม่ได้เลือกแบบทดสอบ</p>
           )}
-
-          <input type="text" value={quizSearch} onChange={(e) => setQuizSearch(e.target.value)} placeholder="ค้นหาแบบฝึกหัด..."
-            className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
-          />
-          <div className="max-h-48 overflow-y-auto space-y-1 border border-gray-100 rounded-xl p-1.5 bg-gray-50/50">
-            {filteredAssessments.length === 0
-              ? <p className="text-xs text-gray-400 text-center py-4">ไม่พบแบบฝึกหัด</p>
-              : filteredAssessments.map((a) => {
-                const active = lesson.assessmentId === a.id
-                return (
-                  <button key={a.id} type="button" onClick={() => handleSelectAssessment(a)}
-                    className={`w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg text-xs transition-all border ${
-                      active ? 'bg-freshket-100 text-freshket-700 font-bold border-freshket-300' : 'bg-white hover:bg-gray-100 text-gray-700 border-transparent'
-                    }`}>
-                    <span className={`shrink-0 size-4 rounded-full border-2 flex items-center justify-center ${active ? 'border-freshket-500 bg-freshket-500' : 'border-gray-300'}`}>
-                      {active && <svg className="size-2.5 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" /></svg>}
-                    </span>
-                    <span className="flex-1 truncate">{a.title}</span>
-                    <span className="text-gray-400 shrink-0">({a.questions.length} ข้อ)</span>
-                  </button>
-                )
-              })}
-          </div>
-          <button type="button" onClick={handleCreateNewAssessment}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-gray-300 text-xs font-bold text-gray-500 hover:border-freshket-400 hover:text-freshket-600 transition-all">
-            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            สร้างแบบทดสอบใหม่
-          </button>
+          <p className="text-xs text-gray-400 mt-1.5">
+            เลือกแบบทดสอบและตั้งค่าเวลา / ก่อน-หลังเรียน ได้ที่แท็บ &quot;แบบทดสอบ&quot; ในเมนูด้านซ้าย
+          </p>
         </div>
       )}
 
@@ -3217,6 +2950,315 @@ function LessonEditor({ lesson, assessments, topics, onChange, onSetQuizRole, on
 }
 
 // ── Lessons Builder (topics + lessons, two-pane) ──────────────────────────────
+// ── Quiz tab (course builder sidebar) ────────────────────────────────────────
+// One row per quiz lesson in the course. Each row is switched on by its own
+// toggle; switching it on is what assigns a pre/post role, picks the source
+// (internal or Google Form) and reveals the timer / anti-cheat settings.
+//
+// Two different stores are written from here, which is why saving is split:
+//   · quizRole lives on the LESSON, part of the unsaved course draft — applied
+//     immediately through onChangeTopics, committed by the course's own save.
+//   · timeLimitMinutes / antiCheatEnabled live on the ASSESSMENT document,
+//     shared by every course that links it, so they go straight to Firestore.
+function QuizSettingsTab({ topics, onChangeTopics, assessments }: {
+  topics: CourseTopic[]
+  onChangeTopics: (t: CourseTopic[]) => void
+  assessments: Assessment[]
+}) {
+  const quizLessons = topics
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .flatMap((t) => t.lessons.slice().sort((a, b) => a.order - b.order).map((l) => ({ topic: t, lesson: l })))
+    .filter(({ lesson }) => lesson.type === 'quiz')
+
+  // Setting a role clears whichever OTHER lesson held it — at most one lesson
+  // per course may be the pre-test, and one the post-test.
+  function setQuizRole(lessonId: string, role: 'pre_test' | 'post_test' | undefined) {
+    onChangeTopics(topics.map((t) => ({
+      ...t,
+      lessons: t.lessons.map((l) => {
+        if (l.id === lessonId) return { ...l, quizRole: role }
+        if (role && l.quizRole === role) return { ...l, quizRole: undefined }
+        return l
+      }),
+    })))
+  }
+
+  function setLessonAssessment(lessonId: string, assessmentId: string | undefined) {
+    onChangeTopics(topics.map((t) => ({
+      ...t,
+      lessons: t.lessons.map((l) => (l.id === lessonId ? { ...l, assessmentId } : l)),
+    })))
+  }
+
+  if (quizLessons.length === 0) {
+    return (
+      <div className="w-full px-6 py-8">
+        <div className="rounded-2xl border border-gray-100 bg-white p-10 text-center">
+          <div className="size-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
+            <svg className="size-6 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+            </svg>
+          </div>
+          <p className="text-sm font-bold text-gray-700 mb-1">ยังไม่มีบทเรียนแบบฝึกหัดในหลักสูตรนี้</p>
+          <p className="text-sm text-gray-400">ไปที่แท็บ &quot;บทเรียน&quot; แล้วเพิ่มบทเรียนชนิด &quot;แบบฝึกหัด&quot; ก่อน จากนั้นกลับมาตั้งค่าที่นี่</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="w-full px-6 py-8 space-y-4">
+      <p className="text-xs text-gray-400">
+        เปิดใช้งานแบบทดสอบของแต่ละบทเรียน แล้วเลือกว่าเป็นแบบทดสอบก่อนเรียนหรือหลังเรียน และใช้แบบทดสอบจากที่ใด
+      </p>
+      {quizLessons.map(({ topic, lesson }) => (
+        <QuizLessonSettingsCard
+          key={lesson.id}
+          topicTitle={topic.title}
+          lesson={lesson}
+          assessments={assessments}
+          otherPreTestTitle={topics.flatMap((t) => t.lessons).find((l) => l.id !== lesson.id && l.quizRole === 'pre_test')?.title}
+          otherPostTestTitle={topics.flatMap((t) => t.lessons).find((l) => l.id !== lesson.id && l.quizRole === 'post_test')?.title}
+          onSetQuizRole={(role) => setQuizRole(lesson.id, role)}
+          onSetAssessment={(id) => setLessonAssessment(lesson.id, id)}
+        />
+      ))}
+    </div>
+  )
+}
+
+function QuizLessonSettingsCard({
+  topicTitle, lesson, assessments, otherPreTestTitle, otherPostTestTitle,
+  onSetQuizRole, onSetAssessment,
+}: {
+  topicTitle: string
+  lesson: CourseLesson
+  assessments: Assessment[]
+  otherPreTestTitle?: string
+  otherPostTestTitle?: string
+  onSetQuizRole: (role: 'pre_test' | 'post_test' | undefined) => void
+  onSetAssessment: (assessmentId: string | undefined) => void
+}) {
+  const router = useRouter()
+  const enabled = !!lesson.quizRole
+  const currentAssessment = assessments.find((a) => a.id === lesson.assessmentId)
+  const [source, setSource] = useState<'self' | 'google_form'>(
+    currentAssessment?.googleFormUrl ? 'google_form' : 'self',
+  )
+  const [search, setSearch] = useState('')
+
+  // /assessment is a full page, not a modal — navigating there leaves this
+  // course draft behind unsaved (CourseFormModal's form state isn't
+  // persisted). Confirm first so a stray click doesn't silently lose an
+  // in-progress edit.
+  async function handleCreateNewAssessment() {
+    const ok = await confirmAction({
+      title: 'ออกจากหน้าแก้ไขหลักสูตร?',
+      text: 'การเปลี่ยนแปลงที่ยังไม่ได้บันทึกในหลักสูตรนี้จะหายไป — สร้างแบบทดสอบเสร็จแล้วค่อยกลับมาเลือกได้',
+      confirmText: 'ไปสร้างแบบทดสอบ',
+      cancelText: 'อยู่หน้านี้ต่อ',
+      danger: true,
+    })
+    if (ok) router.push('/assessment')
+  }
+
+  // Assessment-level settings, written straight to Firestore on save.
+  const [saving, setSaving] = useState(false)
+  const [timeLimitMinutes, setTimeLimitMinutes] = useState('0')
+  const [antiCheatEnabled, setAntiCheatEnabled] = useState(false)
+  useEffect(() => {
+    setTimeLimitMinutes(String(currentAssessment?.timeLimitMinutes ?? 0))
+    setAntiCheatEnabled(currentAssessment?.antiCheatEnabled ?? false)
+  }, [currentAssessment?.id, currentAssessment?.timeLimitMinutes, currentAssessment?.antiCheatEnabled])
+
+  // Turning the row on defaults to post-test, the commoner case; turning it off
+  // clears the role AND the pre/post column this lesson fed.
+  async function toggleEnabled() {
+    if (enabled) { onSetQuizRole(undefined); return }
+    onSetQuizRole('post_test')
+  }
+
+  async function handleSetRole(next: boolean) {
+    const role = next ? 'pre_test' : 'post_test'
+    const holder = next ? otherPreTestTitle : otherPostTestTitle
+    if (holder) {
+      const ok = await confirmAction({
+        title: next ? 'ย้ายป้าย Pre-Test มาที่บทเรียนนี้?' : 'ย้ายป้าย Post-Test มาที่บทเรียนนี้?',
+        text: `บทเรียน "${holder}" กำลังถือป้ายนี้อยู่ — จะถูกยกเลิกป้ายนั้นให้อัตโนมัติ`,
+        confirmText: 'ยืนยัน',
+        cancelText: 'ยกเลิก',
+      })
+      if (!ok) return
+    }
+    onSetQuizRole(role)
+  }
+
+  // Swapping the linked assessment changes what learners already in progress
+  // see next time they open this lesson — confirm before committing.
+  async function handlePickAssessment(a: Assessment, active: boolean) {
+    if (active) { onSetAssessment(undefined); return }
+    if (lesson.assessmentId) {
+      const ok = await confirmAction({
+        title: 'เปลี่ยนแบบทดสอบของบทเรียนนี้?',
+        text: `จาก "${currentAssessment?.title ?? '(ไม่พบแบบทดสอบนี้แล้ว)'}" เป็น "${a.title}"`,
+        confirmText: 'ยืนยันเปลี่ยน',
+        cancelText: 'ยกเลิก',
+      })
+      if (!ok) return
+    }
+    onSetAssessment(a.id)
+  }
+
+  async function handleSaveSettings() {
+    if (!currentAssessment) return
+    setSaving(true)
+    try {
+      if (!DEMO_MODE) {
+        await updateDoc(doc(getClientFirestore(), 'assessments', currentAssessment.id), {
+          timeLimitMinutes: Number(timeLimitMinutes) || 0,
+          antiCheatEnabled,
+        })
+      }
+    } catch (e) {
+      void alertError('บันทึกการตั้งค่าไม่สำเร็จ', e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const isPreTest = lesson.quizRole === 'pre_test'
+  // Unpublished assessments are drafts — a learner opening the lesson would hit
+  // a 403 from /api/assessment/[id]/take, so they must not be selectable here.
+  const filtered = assessments
+    .filter((a) => a.isPublished)
+    .filter((a) => (source === 'google_form' ? !!a.googleFormUrl : !a.googleFormUrl))
+    .filter((a) => a.title.toLowerCase().includes(search.trim().toLowerCase()))
+
+  return (
+    <div className={`rounded-2xl border bg-white transition-all ${enabled ? 'border-freshket-200 shadow-sm' : 'border-gray-100'}`}>
+      <div className="flex items-center justify-between gap-3 p-4">
+        <div className="min-w-0">
+          <p className="text-xs text-gray-400 truncate">{topicTitle}</p>
+          <p className="text-sm font-bold text-gray-900 truncate">{lesson.title || 'บทเรียนแบบฝึกหัด'}</p>
+        </div>
+        <div className="flex items-center gap-2.5 shrink-0">
+          {enabled && (
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700">
+              {isPreTest ? 'Pre-Test' : 'Post-Test'}
+            </span>
+          )}
+          <button type="button" onClick={toggleEnabled}
+            title={enabled ? 'ปิดใช้งานแบบทดสอบของบทเรียนนี้' : 'เปิดใช้งานแบบทดสอบของบทเรียนนี้'}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${enabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+            <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
+      </div>
+
+      {enabled && (
+        <div className="px-4 pb-4 space-y-4 border-t border-gray-100 pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <label className="text-xs font-bold text-gray-600">ใช้เป็นแบบทดสอบก่อนเรียน</label>
+              <InfoTooltip text="เปิด = บทเรียนนี้คือแบบทดสอบก่อนเรียนของหลักสูตร ปิด = เป็นแบบทดสอบหลังเรียน คะแนนจะถูกแยกเป็นคอลัมน์ Pre-Test / Post-Test ในตารางผู้เรียน" />
+            </div>
+            <button type="button" onClick={() => handleSetRole(!isPreTest)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${isPreTest ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${isPreTest ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-gray-600 block mb-1.5">ใช้แบบทดสอบจาก</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setSource('self')}
+                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${source === 'self' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
+                สร้างเอง (Internal)
+              </button>
+              <button type="button" onClick={() => setSource('google_form')}
+                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${source === 'google_form' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
+                Google Form
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาแบบทดสอบ..."
+              className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300 mb-1.5"
+            />
+            <div className="max-h-40 overflow-y-auto space-y-1 border border-gray-100 rounded-xl p-1.5 bg-gray-50/50">
+              {filtered.length === 0
+                ? (
+                  <div className="text-center py-4 space-y-2">
+                    <p className="text-xs text-gray-400">ไม่พบแบบทดสอบ{source === 'google_form' ? 'ชนิด Google Form' : 'ที่สร้างเอง'}</p>
+                    <button type="button" onClick={handleCreateNewAssessment}
+                      className="text-xs font-bold text-freshket-600 hover:text-freshket-700 hover:underline">
+                      + สร้างแบบทดสอบใหม่
+                    </button>
+                  </div>
+                )
+                : filtered.map((a) => {
+                  const active = lesson.assessmentId === a.id
+                  return (
+                    <button key={a.id} type="button" onClick={() => handlePickAssessment(a, active)}
+                      className={`w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg text-xs transition-all border ${
+                        active ? 'bg-freshket-100 text-freshket-700 font-bold border-freshket-300' : 'bg-white hover:bg-gray-100 text-gray-700 border-transparent'
+                      }`}>
+                      <span className={`shrink-0 size-4 rounded-full border-2 flex items-center justify-center ${active ? 'border-freshket-500 bg-freshket-500' : 'border-gray-300'}`}>
+                        {active && <svg className="size-2.5 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" /></svg>}
+                      </span>
+                      <span className="flex-1 truncate">{a.title}</span>
+                      <span className="text-gray-400 shrink-0">({a.questions.length} ข้อ)</span>
+                    </button>
+                  )
+                })}
+            </div>
+          </div>
+
+          {currentAssessment ? (
+            <>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1.5">เวลาในการทำแบบทดสอบ</label>
+                <div className="relative">
+                  <input type="number" min={0} value={timeLimitMinutes} onChange={(e) => setTimeLimitMinutes(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:border-freshket-500 pr-12" />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">นาที</span>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">ใส่ 0 = ไม่จำกัดเวลา</p>
+              </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <label className="text-xs font-bold text-gray-600">ระบบป้องกันการทุจริต (Anti-Cheat)</label>
+                  <InfoTooltip text="บังคับเข้าโหมดเต็มจอ ห้ามสลับแท็บ/หน้าต่างระหว่างทำแบบทดสอบ ระบบแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และส่งคำตอบอัตโนมัติเมื่อแจ้งเตือนครบ 3 ครั้ง" />
+                </div>
+                <button type="button" onClick={() => setAntiCheatEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${antiCheatEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                  <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${antiCheatEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+
+              {/* These two fields belong to the assessment document, not the
+                  course draft, so they need their own save — the course's
+                  "บันทึกการแก้ไข" button never touches them. */}
+              <button type="button" onClick={handleSaveSettings} disabled={saving}
+                className="w-full py-2.5 rounded-xl bg-freshket-500 text-white text-xs font-bold hover:bg-freshket-600 transition-all disabled:opacity-60 flex items-center justify-center gap-1.5">
+                {saving
+                  ? <span className="size-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  : <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
+                {saving ? 'กำลังบันทึก...' : 'บันทึกเวลา / Anti-Cheat'}
+              </button>
+            </>
+          ) : (
+            <p className="text-xs text-gray-400">เลือกแบบทดสอบก่อน จึงจะตั้งเวลาและ Anti-Cheat ได้</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function LessonsBuilder({ topics, onChange, assessments }: {
   topics: CourseTopic[]; onChange: (t: CourseTopic[]) => void; assessments: Assessment[]
 }) {
@@ -3260,16 +3302,6 @@ function LessonsBuilder({ topics, onChange, assessments }: {
   // Exactly one lesson per course may hold each pre/post role — assigning it
   // here strips it from whichever OTHER lesson held it, across every topic,
   // in the same update so the two writes can't land as separate saves.
-  function setQuizRole(lessonId: string, role: 'pre_test' | 'post_test' | undefined) {
-    onChange(topics.map((t) => ({
-      ...t,
-      lessons: t.lessons.map((l) => {
-        if (l.id === lessonId) return { ...l, quizRole: role }
-        if (role && l.quizRole === role) return { ...l, quizRole: undefined }
-        return l
-      }),
-    })))
-  }
   function removeLesson(topicId: string, lessonId: string) {
     const topic = topics.find((t) => t.id === topicId)
     if (!topic) return
@@ -3389,9 +3421,7 @@ function LessonsBuilder({ topics, onChange, assessments }: {
           <LessonEditor
             lesson={selectedLesson}
             assessments={assessments}
-            topics={topics}
             onChange={(patch) => updateLesson(selectedTopic!.id, selectedLesson!.id, patch)}
-            onSetQuizRole={(role) => setQuizRole(selectedLesson!.id, role)}
             onDelete={() => removeLesson(selectedTopic!.id, selectedLesson!.id)}
           />
         ) : (
@@ -3907,6 +3937,15 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
               <div className="h-full">
                 <LessonsBuilder topics={form.topics} onChange={(topics) => set('topics', topics)} assessments={assessments} />
               </div>
+              )}
+
+              {/* ── Quiz tab ── */}
+              {tab === 'quiz' && (
+                <QuizSettingsTab
+                  topics={form.topics}
+                  onChangeTopics={(topics) => set('topics', topics)}
+                  assessments={assessments}
+                />
               )}
 
               {/* ── Assign Learners tab ── */}
