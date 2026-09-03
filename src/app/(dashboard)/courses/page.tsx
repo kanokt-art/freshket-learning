@@ -2790,45 +2790,25 @@ function AssessmentPreviewContent({ assessment }: { assessment: Assessment }) {
 }
 
 // ── Lesson Editor (right pane of the Lessons tab) ─────────────────────────────
-// Pre/post roles and per-assessment timer/anti-cheat settings are NOT edited
-// here — they live in the course builder's "แบบทดสอบ" tab, which sees every
-// quiz lesson at once and so can enforce "one pre-test, one post-test" across
-// the whole course. This editor only picks WHICH assessment a lesson links to.
+// Edits video / file / link / assignment lessons with a live preview on the
+// right. Quiz lessons are handled entirely by the "แบบทดสอบ" tab instead
+// (see QuizSettingsTab / QuizStripPreview) and never reach this component.
 function LessonEditor({ lesson, assessments, onChange, onDelete }: {
   lesson: CourseLesson; assessments: Assessment[]
   onChange: (patch: Partial<CourseLesson>) => void
   onDelete: () => void
 }) {
-  // "แก้ไข" configures the lesson; "ตัวอย่างแบบทดสอบ" (only shown once an
-  // assessment is linked) previews its actual content — embedded form or full
-  // question list — without leaving this pane. Resets to "แก้ไข" on lesson
-  // switch so opening a different lesson never lands mid-preview.
-  const [editorTab, setEditorTab] = useState<'edit' | 'preview'>('edit')
-  useEffect(() => { setEditorTab('edit') }, [lesson.id])
-  const currentAssessment = assessments.find((a) => a.id === lesson.assessmentId)
+  // Quiz lessons never reach this editor — they are system-managed and hidden
+  // from the Lessons tab entirely (see LessonsBuilder / QuizStripPreview), so
+  // this only ever edits video / file / link / assignment. The right column
+  // shows a live preview of whatever is currently filled in on the left.
+  const embedUrl = lesson.type === 'video' ? toPreviewEmbedUrl(lesson.videoUrl ?? '')
+    : lesson.type === 'file' ? toPreviewEmbedUrl(lesson.fileUrl ?? '')
+    : null
 
   return (
-    <>
-    {/* Sub-tabs: "แก้ไข" configures the lesson; "ตัวอย่างแบบทดสอบ" (quiz
-        lessons with an assessment linked only) previews it in place — no
-        modal, so switching back and forth keeps the same scroll position. */}
-    {lesson.type === 'quiz' && currentAssessment && (
-      <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit mb-5">
-        <button type="button" onClick={() => setEditorTab('edit')}
-          className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${editorTab === 'edit' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-          แก้ไข
-        </button>
-        <button type="button" onClick={() => setEditorTab('preview')}
-          className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${editorTab === 'preview' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-          ตัวอย่างแบบทดสอบ
-        </button>
-      </div>
-    )}
-
-    {lesson.type === 'quiz' && currentAssessment && editorTab === 'preview' ? (
-      <AssessmentPreviewContent assessment={currentAssessment} />
-    ) : (
-    <div className="max-w-2xl space-y-5">
+    <div className="h-full flex gap-6">
+      <div className="w-[26rem] shrink-0 space-y-5 overflow-y-auto pr-1">
       {/* Format cards — large tile selector */}
       <div>
         <label className="text-xs font-bold text-gray-600 block mb-2">รูปแบบบทเรียน</label>
@@ -2915,27 +2895,6 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
         </div>
       )}
 
-      {lesson.type === 'quiz' && (
-        <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3.5">
-          <p className="text-xs font-bold text-gray-600 mb-1">แบบทดสอบของบทเรียนนี้</p>
-          {currentAssessment ? (
-            <p className="text-xs text-gray-500">
-              กำลังใช้งาน: <span className="font-bold text-freshket-700">{currentAssessment.title}</span>
-              {lesson.quizRole && (
-                <span className="ml-1.5 text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">
-                  {lesson.quizRole === 'pre_test' ? 'Pre-Test' : 'Post-Test'}
-                </span>
-              )}
-            </p>
-          ) : (
-            <p className="text-xs text-gray-400">ยังไม่ได้เลือกแบบทดสอบ</p>
-          )}
-          <p className="text-xs text-gray-400 mt-1.5">
-            เลือกแบบทดสอบและตั้งค่าเวลา / ก่อน-หลังเรียน ได้ที่แท็บ &quot;แบบทดสอบ&quot; ในเมนูด้านซ้าย
-          </p>
-        </div>
-      )}
-
       {lesson.type === 'assignment' && (
         <div>
           <label className="text-xs font-bold text-gray-600 block mb-1.5">โจทย์การบ้าน</label>
@@ -2963,9 +2922,33 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
           ลบบทเรียนนี้
         </button>
       </div>
+      </div>
+
+      {/* Right: live preview of the lesson content — the same embed a learner
+          would see, so a broken/unshared link is obvious immediately instead
+          of only surfacing in the separate "พรีวิวมุมมองผู้เรียน" flow. */}
+      <div className="flex-1 min-w-0 overflow-y-auto border-l border-gray-100 pl-6">
+        {lesson.type === 'video' || lesson.type === 'file' ? (
+          embedUrl ? (
+            <div className="rounded-xl overflow-hidden border border-gray-200 h-full" style={lesson.type === 'video' ? { aspectRatio: '16/9', height: 'auto' } : undefined}>
+              <iframe src={embedUrl} className="w-full h-full" allowFullScreen title={lesson.title || 'preview'} style={{ border: 'none', minHeight: lesson.type === 'file' ? '70vh' : undefined }} />
+            </div>
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center gap-2 text-sm text-gray-300 text-center px-6">
+              <svg className="size-10 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <p>{lesson.type === 'video' ? (lesson.videoUrl ? 'ไม่สามารถแสดงตัวอย่างวิดีโอนี้ได้' : 'วางลิงก์วิดีโอทางซ้ายเพื่อดูตัวอย่าง') : (lesson.fileUrl ? 'ไม่สามารถแสดงตัวอย่าง Google Slide นี้ได้ — ตรวจสอบว่าตั้งค่าแชร์เป็น "ทุกคนที่มีลิงก์" แล้ว' : 'วางลิงก์ Google Slide ทางซ้ายเพื่อดูตัวอย่าง')}</p>
+            </div>
+          )
+        ) : (
+          <div className="h-full flex items-center justify-center text-sm text-gray-300">
+            บทเรียนประเภทนี้ไม่มีตัวอย่างแสดงผล
+          </div>
+        )}
+      </div>
     </div>
-    )}
-    </>
   )
 }
 
@@ -3378,66 +3361,74 @@ function QuizStripPreview({ lesson, role, assessments }: {
   const roleLabel = role === 'pre' ? 'Pre-Test' : 'Post-Test'
 
   return (
-    <div className="max-w-3xl space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
+    <div className="h-full flex gap-6">
+      {/* Left: read-only settings summary — fixed width so the question
+          preview on the right gets the room it needs to lay out its own grid. */}
+      <div className="w-80 shrink-0 space-y-5 overflow-y-auto">
+        <div>
           <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700 mb-1.5">
             {roleLabel}
           </span>
           <h3 className="text-base font-bold text-gray-900 truncate">{lesson?.title || roleLabel}</h3>
         </div>
-      </div>
 
-      <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 flex items-start gap-2">
-        <svg className="size-4 shrink-0 mt-0.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-        </svg>
-        <p className="text-xs text-gray-500">
-          บทเรียนนี้จัดการโดยระบบ ({roleLabel}) แก้ไขชื่อ เวลา Anti-Cheat คำอธิบาย เกณฑ์ผ่าน และแบบทดสอบที่ใช้ ได้ที่แท็บ &quot;แบบทดสอบ&quot;
-        </p>
-      </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 flex items-start gap-2">
+          <svg className="size-4 shrink-0 mt-0.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+          </svg>
+          <p className="text-xs text-gray-500">
+            บทเรียนนี้จัดการโดยระบบ ({roleLabel}) แก้ไขชื่อ เวลา Anti-Cheat คำอธิบาย เกณฑ์ผ่าน และแบบทดสอบที่ใช้ ได้ที่แท็บ &quot;แบบทดสอบ&quot;
+          </p>
+        </div>
 
-      {!assessment ? (
-        <p className="text-sm text-gray-400">ยังไม่ได้เลือกแบบทดสอบ — ไปที่แท็บ &quot;แบบทดสอบ&quot; เพื่อเลือก</p>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
-              <p className="text-xs text-gray-400 mb-1">ชื่อแบบทดสอบ</p>
-              <p className="text-sm font-bold text-gray-800 truncate">{assessment.title}</p>
-            </div>
-            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
-              <p className="text-xs text-gray-400 mb-1">แหล่งแบบทดสอบ</p>
-              <p className="text-sm font-bold text-gray-800">{assessment.googleFormUrl ? 'Google Form' : 'สร้างเอง (Internal)'}</p>
-            </div>
-            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
-              <p className="text-xs text-gray-400 mb-1">เวลาในการทำแบบทดสอบ</p>
-              <p className="text-sm font-bold text-gray-800">{Number(assessment.timeLimitMinutes) > 0 ? `${assessment.timeLimitMinutes} นาที` : 'ไม่จำกัดเวลา'}</p>
-            </div>
-            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
-              <p className="text-xs text-gray-400 mb-1">ระบบป้องกันการทุจริต</p>
-              <p className="text-sm font-bold text-gray-800">{assessment.antiCheatEnabled ? 'เปิด' : 'ปิด'}</p>
-            </div>
-            {!assessment.googleFormUrl && (
+        {!assessment ? (
+          <p className="text-sm text-gray-400">ยังไม่ได้เลือกแบบทดสอบ — ไปที่แท็บ &quot;แบบทดสอบ&quot; เพื่อเลือก</p>
+        ) : (
+          <>
+            <div className="space-y-3">
               <div className="rounded-xl border border-gray-100 bg-white p-3.5">
-                <p className="text-xs text-gray-400 mb-1">เกณฑ์ผ่าน</p>
-                <p className="text-sm font-bold text-gray-800">{assessment.passingScore}%</p>
+                <p className="text-xs text-gray-400 mb-1">ชื่อแบบทดสอบ</p>
+                <p className="text-sm font-bold text-gray-800 truncate">{assessment.title}</p>
+              </div>
+              <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+                <p className="text-xs text-gray-400 mb-1">แหล่งแบบทดสอบ</p>
+                <p className="text-sm font-bold text-gray-800">{assessment.googleFormUrl ? 'Google Form' : 'สร้างเอง (Internal)'}</p>
+              </div>
+              <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+                <p className="text-xs text-gray-400 mb-1">เวลาในการทำแบบทดสอบ</p>
+                <p className="text-sm font-bold text-gray-800">{Number(assessment.timeLimitMinutes) > 0 ? `${assessment.timeLimitMinutes} นาที` : 'ไม่จำกัดเวลา'}</p>
+              </div>
+              <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+                <p className="text-xs text-gray-400 mb-1">ระบบป้องกันการทุจริต</p>
+                <p className="text-sm font-bold text-gray-800">{assessment.antiCheatEnabled ? 'เปิด' : 'ปิด'}</p>
+              </div>
+              {!assessment.googleFormUrl && (
+                <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+                  <p className="text-xs text-gray-400 mb-1">เกณฑ์ผ่าน</p>
+                  <p className="text-sm font-bold text-gray-800">{assessment.passingScore}%</p>
+                </div>
+              )}
+            </div>
+            {assessment.description && (
+              <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+                <p className="text-xs text-gray-400 mb-1">คำอธิบายแบบทดสอบ</p>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap">{assessment.description}</p>
               </div>
             )}
-          </div>
-          {assessment.description && (
-            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
-              <p className="text-xs text-gray-400 mb-1">คำอธิบายแบบทดสอบ</p>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{assessment.description}</p>
-            </div>
-          )}
+          </>
+        )}
+      </div>
 
-          <div className="pt-2 border-t border-gray-100">
-            <p className="text-xs font-bold text-gray-500 mb-3">ตัวอย่างแบบทดสอบ</p>
-            <AssessmentPreviewContent assessment={assessment} />
+      {/* Right: the actual question/choice content, or the Google Form embed. */}
+      <div className="flex-1 min-w-0 overflow-y-auto border-l border-gray-100 pl-6">
+        {assessment ? (
+          <AssessmentPreviewContent assessment={assessment} />
+        ) : (
+          <div className="h-full flex items-center justify-center text-sm text-gray-300">
+            เลือกแบบทดสอบก่อนเพื่อดูตัวอย่าง
           </div>
-        </>
-      )}
+        )}
+      </div>
     </div>
   )
 }
