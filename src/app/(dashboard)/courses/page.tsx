@@ -3369,6 +3369,12 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
     () => allTopics.map((t) => ({ ...t, lessons: t.lessons.filter((l) => l.type !== 'quiz') })),
     [allTopics],
   )
+  // Shown as read-only strips bracketing the topic list — quiz lessons are
+  // created and positioned by the "แบบทดสอบ" tab, not edited here, but an
+  // admin scanning the Lessons tab should still see that the course opens and
+  // closes with one, matching the actual learner-facing order.
+  const preTestLesson = allTopics.flatMap((t) => t.lessons).find((l) => l.quizRole === 'pre_test')
+  const postTestLesson = allTopics.flatMap((t) => t.lessons).find((l) => l.quizRole === 'post_test')
   function onChange(next: CourseTopic[]) {
     const quizzes = allTopics.flatMap((t) => t.lessons).filter((l) => l.type === 'quiz')
     const pre = quizzes.find((l) => l.quizRole === 'pre_test')
@@ -3460,6 +3466,13 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
+          {preTestLesson && (
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-freshket-200 bg-freshket-50 text-freshket-700">
+              <LessonTypeIcon type="quiz" className="size-4 shrink-0" />
+              <span className="flex-1 min-w-0 text-sm font-bold truncate">{preTestLesson.title || 'Pre-Test'}</span>
+              <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100">Pre-Test</span>
+            </div>
+          )}
           {topics.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-10 px-2">ยังไม่มีหัวข้อ — เริ่มด้วยการเพิ่มหัวข้อแรก</p>
           ) : topics.map((topic, ti) => (
@@ -3530,6 +3543,13 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
               </div>
             </div>
           ))}
+          {postTestLesson && (
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-freshket-200 bg-freshket-50 text-freshket-700">
+              <LessonTypeIcon type="quiz" className="size-4 shrink-0" />
+              <span className="flex-1 min-w-0 text-sm font-bold truncate">{postTestLesson.title || 'Post-Test'}</span>
+              <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100">Post-Test</span>
+            </div>
+          )}
         </div>
       </div>
 
