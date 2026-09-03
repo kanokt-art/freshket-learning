@@ -3362,6 +3362,86 @@ function QuizLessonSettingsCard({
 // them here would invite reordering or deleting a lesson the system owns. They
 // are stripped on the way in and re-attached on the way out, so an edit to the
 // content lessons never drops them.
+// Read-only view of a system-managed quiz lesson, opened from its strip in
+// the Lessons tab. Shows the same settings the "แบบทดสอบ" tab edits — name,
+// timer, anti-cheat, description, passing score, source — plus the full
+// question/choice content via AssessmentPreviewContent, but nothing here is
+// editable: that avoids two places writing to the same assessment document
+// with different validation (the tab enforces the 0-100 passing-score range
+// and the non-empty title; this view must not bypass that).
+function QuizStripPreview({ lesson, role, assessments }: {
+  lesson?: CourseLesson
+  role: 'pre' | 'post'
+  assessments: Assessment[]
+}) {
+  const assessment = assessments.find((a) => a.id === lesson?.assessmentId)
+  const roleLabel = role === 'pre' ? 'Pre-Test' : 'Post-Test'
+
+  return (
+    <div className="max-w-3xl space-y-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700 mb-1.5">
+            {roleLabel}
+          </span>
+          <h3 className="text-base font-bold text-gray-900 truncate">{lesson?.title || roleLabel}</h3>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 flex items-start gap-2">
+        <svg className="size-4 shrink-0 mt-0.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+        </svg>
+        <p className="text-xs text-gray-500">
+          บทเรียนนี้จัดการโดยระบบ ({roleLabel}) แก้ไขชื่อ เวลา Anti-Cheat คำอธิบาย เกณฑ์ผ่าน และแบบทดสอบที่ใช้ ได้ที่แท็บ &quot;แบบทดสอบ&quot;
+        </p>
+      </div>
+
+      {!assessment ? (
+        <p className="text-sm text-gray-400">ยังไม่ได้เลือกแบบทดสอบ — ไปที่แท็บ &quot;แบบทดสอบ&quot; เพื่อเลือก</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+              <p className="text-xs text-gray-400 mb-1">ชื่อแบบทดสอบ</p>
+              <p className="text-sm font-bold text-gray-800 truncate">{assessment.title}</p>
+            </div>
+            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+              <p className="text-xs text-gray-400 mb-1">แหล่งแบบทดสอบ</p>
+              <p className="text-sm font-bold text-gray-800">{assessment.googleFormUrl ? 'Google Form' : 'สร้างเอง (Internal)'}</p>
+            </div>
+            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+              <p className="text-xs text-gray-400 mb-1">เวลาในการทำแบบทดสอบ</p>
+              <p className="text-sm font-bold text-gray-800">{Number(assessment.timeLimitMinutes) > 0 ? `${assessment.timeLimitMinutes} นาที` : 'ไม่จำกัดเวลา'}</p>
+            </div>
+            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+              <p className="text-xs text-gray-400 mb-1">ระบบป้องกันการทุจริต</p>
+              <p className="text-sm font-bold text-gray-800">{assessment.antiCheatEnabled ? 'เปิด' : 'ปิด'}</p>
+            </div>
+            {!assessment.googleFormUrl && (
+              <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+                <p className="text-xs text-gray-400 mb-1">เกณฑ์ผ่าน</p>
+                <p className="text-sm font-bold text-gray-800">{assessment.passingScore}%</p>
+              </div>
+            )}
+          </div>
+          {assessment.description && (
+            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+              <p className="text-xs text-gray-400 mb-1">คำอธิบายแบบทดสอบ</p>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{assessment.description}</p>
+            </div>
+          )}
+
+          <div className="pt-2 border-t border-gray-100">
+            <p className="text-xs font-bold text-gray-500 mb-3">ตัวอย่างแบบทดสอบ</p>
+            <AssessmentPreviewContent assessment={assessment} />
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments }: {
   topics: CourseTopic[]; onChange: (t: CourseTopic[]) => void; assessments: Assessment[]
 }) {
@@ -3387,6 +3467,10 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
   }
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // Which quiz strip (if any) is open for read-only preview — selecting
+  // one clears the normal lesson selection and vice versa, since the right
+  // pane shows either a lesson editor or a quiz preview, never both.
+  const [selectedQuiz, setSelectedQuiz] = useState<'pre' | 'post' | null>(null)
   const [dragTopic, setDragTopic] = useState<number | null>(null)
   const [dragLesson, setDragLesson] = useState<{ topicId: string; index: number } | null>(null)
   const [dropTopic, setDropTopic] = useState<number | null>(null)
@@ -3467,11 +3551,14 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
         </div>
         <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
           {preTestLesson && (
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-freshket-200 bg-freshket-50 text-freshket-700">
+            <button type="button" onClick={() => { setSelectedQuiz('pre'); setSelectedKey(null) }}
+              className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-all ${
+                selectedQuiz === 'pre' ? 'bg-freshket-500 border-freshket-500 text-white' : 'border-freshket-200 bg-freshket-50 text-freshket-700 hover:bg-freshket-100'
+              }`}>
               <LessonTypeIcon type="quiz" className="size-4 shrink-0" />
-              <span className="flex-1 min-w-0 text-sm font-bold truncate">{preTestLesson.title || 'Pre-Test'}</span>
-              <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100">Pre-Test</span>
-            </div>
+              <span className="flex-1 min-w-0 text-sm font-bold truncate text-left">{preTestLesson.title || 'Pre-Test'}</span>
+              <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${selectedQuiz === 'pre' ? 'bg-white/20' : 'bg-freshket-100'}`}>Pre-Test</span>
+            </button>
           )}
           {topics.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-10 px-2">ยังไม่มีหัวข้อ — เริ่มด้วยการเพิ่มหัวข้อแรก</p>
@@ -3524,7 +3611,7 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
                       >
                         <svg className="size-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M9 5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm0 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm-1.5 8.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM18 5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm-1.5 8.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM18 19a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" /></svg>
                       </span>
-                      <button type="button" onClick={() => setSelectedKey(key)}
+                      <button type="button" onClick={() => { setSelectedKey(key); setSelectedQuiz(null) }}
                         className={`flex-1 min-w-0 flex items-center gap-2 px-1.5 py-2.5 text-left text-sm ${selected ? 'text-white' : 'text-gray-600'}`}>
                         <LessonTypeIcon type={lesson.type} className="size-4 shrink-0" />
                         <span className="flex-1 truncate">{lesson.title}</span>
@@ -3544,18 +3631,27 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
             </div>
           ))}
           {postTestLesson && (
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-freshket-200 bg-freshket-50 text-freshket-700">
+            <button type="button" onClick={() => { setSelectedQuiz('post'); setSelectedKey(null) }}
+              className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-all ${
+                selectedQuiz === 'post' ? 'bg-freshket-500 border-freshket-500 text-white' : 'border-freshket-200 bg-freshket-50 text-freshket-700 hover:bg-freshket-100'
+              }`}>
               <LessonTypeIcon type="quiz" className="size-4 shrink-0" />
-              <span className="flex-1 min-w-0 text-sm font-bold truncate">{postTestLesson.title || 'Post-Test'}</span>
-              <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100">Post-Test</span>
-            </div>
+              <span className="flex-1 min-w-0 text-sm font-bold truncate text-left">{postTestLesson.title || 'Post-Test'}</span>
+              <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${selectedQuiz === 'post' ? 'bg-white/20' : 'bg-freshket-100'}`}>Post-Test</span>
+            </button>
           )}
         </div>
       </div>
 
       {/* Right: lesson editor */}
       <div className="flex-1 overflow-y-auto p-6">
-        {selectedLesson && selectedTopic ? (
+        {selectedQuiz ? (
+          <QuizStripPreview
+            lesson={selectedQuiz === 'pre' ? preTestLesson : postTestLesson}
+            role={selectedQuiz}
+            assessments={assessments}
+          />
+        ) : selectedLesson && selectedTopic ? (
           <LessonEditor
             lesson={selectedLesson}
             assessments={assessments}
