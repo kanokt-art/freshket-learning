@@ -207,6 +207,28 @@ export default function CourseDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [course, id, user?.uid])
 
+  // A graded (pre/post-tagged) quiz lesson is completed by SUBMITTING it, not
+  // by opening it — the assessment page leaves this note on a successful
+  // submit and the lesson is ticked off here on the way back.
+  useEffect(() => {
+    if (!course || !user?.uid) return
+    let raw: string | null = null
+    try { raw = sessionStorage.getItem('assessment_graded_lesson') } catch { return }
+    if (!raw) return
+    try {
+      const { courseId, lessonId } = JSON.parse(raw) as { courseId?: string; lessonId?: string }
+      sessionStorage.removeItem('assessment_graded_lesson')
+      if (courseId !== course.id || !lessonId) return
+      setProgress((prev) => {
+        const done = prev.completedLessonIds ?? []
+        if (done.includes(lessonId)) return prev
+        const next = { ...prev, completedLessonIds: [...done, lessonId] }
+        saveProgress(user.uid, course.id, next)
+        return next
+      })
+    } catch { /* malformed note — ignore, the learner can retake */ }
+  }, [course, user?.uid])
+
   // ── Mirror progress to Firestore (the admin ↔ user link) ────────────────────
   // Single sync point: covers step completions, per-lesson completions, and the
   // scores the assessment page writes back to localStorage (picked up on focus).
@@ -220,9 +242,13 @@ export default function CourseDetailPage() {
       || (prog.completedLessonIds?.length ?? 0) > 0
     if (!started) return
     const status = checkAndSaveStatus(user.uid, course.id, course, prog)
+    // Drop the synthetic `<id>:post` markers (the second sitting of a pre-test
+    // lesson). They gate course completion locally but are not lessons, and
+    // counting them against totalLessons would push progress past 100%.
+    const realLessonIds = (prog.completedLessonIds ?? []).filter((id) => !id.endsWith(':post'))
     void syncTrainingRecord(user.uid, user.displayName, course, {
       status,
-      completedLessonIds: prog.completedLessonIds ?? [],
+      completedLessonIds: realLessonIds,
       totalLessons: countCourseLessons(course),
     })
   }, [course, user?.uid, user?.displayName, progressKey])
@@ -794,19 +820,24 @@ function LessonBrowserStep({
     selectedLesson = selectedTopic?.lessons.find((l) => l.id === lId)
   }
 
-  // Non-video lessons complete on open (there's nothing further to gate on).
-  // Video lessons are NOT auto-completed here — they only count once the gated
-  // player reports ≥95% watched, preserving the anti-skip rule.
+  // Most lessons complete on open (there's nothing further to gate on).
+  // Two exceptions, both anti-skip rules:
+  //   · video — only counts once the gated player reports ≥95% watched.
+  //   · a quiz tagged pre/post-test — only counts once it has actually been
+  //     submitted and graded (see the completedLessonIds write in the return
+  //     handler). Merely opening one must not tick it off, or the course could
+  //     be finished without ever being assessed.
   // The callback is held in a ref so this fires on lesson change only, not on
   // every parent re-render (the parent recreates onLessonComplete each render).
   const onLessonCompleteRef = useRef(onLessonComplete)
   onLessonCompleteRef.current = onLessonComplete
   const selectedLessonId = selectedLesson?.id
   const selectedLessonType = selectedLesson?.type
+  const selectedIsGradedQuiz = selectedLesson?.type === 'quiz' && !!selectedLesson.quizRole
   useEffect(() => {
-    if (!selectedLessonId || selectedLessonType === 'video') return
+    if (!selectedLessonId || selectedLessonType === 'video' || selectedIsGradedQuiz) return
     onLessonCompleteRef.current(selectedLessonId)
-  }, [selectedLessonId, selectedLessonType])
+  }, [selectedLessonId, selectedLessonType, selectedIsGradedQuiz])
 
   // Every YouTube-video lesson must be watched before the media step can be
   // marked done — this is the anti-skip gate (non-YouTube media isn't enforceable).
@@ -816,15 +847,32 @@ function LessonBrowserStep({
   const allVideosWatched = requiredVideoKeys.every((k) => watchedVideos.has(k))
   const selectedVideoId = selectedLesson?.type === 'video' ? youtubeVideoId(selectedLesson.videoUrl) : null
 
-  // Every lesson except the pre-test quiz itself. A pre-test is sat BEFORE the
-  // material, so requiring it to be done before the course counts as finished
-  // would deadlock the second sitting below.
-  const nonPreTestLessonIds = topics
+  // "Phase one done" = the learner has been through the CONTENT lessons.
+  // Quiz lessons are excluded on both sides: the pre-test is sat before the
+  // material, and the post-test is what this unlocks — counting either would
+  // deadlock the second sitting. Content lessons complete on open (videos on
+  // ≥95% watched), which is the intended bar here.
+  const contentLessonIds = topics
     .flatMap((t) => t.lessons)
-    .filter((l) => l.quizRole !== 'pre_test')
+    .filter((l) => l.type !== 'quiz')
     .map((l) => l.id)
-  const courseworkDone = nonPreTestLessonIds.length > 0
-    && nonPreTestLessonIds.every((id) => completedLessonIds.includes(id))
+  const courseworkDone = contentLessonIds.every((id) => completedLessonIds.includes(id))
+
+  // Finishing the course also requires the graded quizzes to have been sat:
+  // the pre-test before the material, and the post-test after it. Without this
+  // a learner could click through the content and mark the course complete
+  // having never been assessed, leaving the Pre/Post columns permanently
+  // empty. Untagged lesson quizzes are practice and don't gate anything.
+  //
+  // A pre_test lesson is sat twice, so one tick is not enough: the post sitting
+  // is recorded under a distinct `<id>:post` key (see quizCompletionKey) and
+  // both are required.
+  const gradedQuizLessons = topics.flatMap((t) => t.lessons).filter((l) => l.type === 'quiz' && !!l.quizRole)
+  const gradedQuizKeys = gradedQuizLessons.flatMap((l) =>
+    l.quizRole === 'pre_test' ? [l.id, `${l.id}:post`] : [l.id],
+  )
+  const gradedQuizzesDone = gradedQuizKeys.every((k) => completedLessonIds.includes(k))
+  const canFinish = allVideosWatched && courseworkDone && gradedQuizzesDone
 
   // A lesson tagged 'pre_test' is sat TWICE — once before the material and
   // again once the rest of the course is finished — so the pair yields a
@@ -840,9 +888,18 @@ function LessonBrowserStep({
     return courseworkDone ? 'post' : 'pre'
   }
 
+  // The pre sitting of a pre_test lesson ticks the lesson's own id; its post
+  // sitting ticks `<id>:post`, so the two are counted separately.
+  function quizCompletionKey(lesson: CourseLesson, step: 'pre' | 'post' | undefined) {
+    return lesson.quizRole === 'pre_test' && step === 'post' ? `${lesson.id}:post` : lesson.id
+  }
+
   function startQuiz(lesson: CourseLesson) {
     const step = quizStepFor(lesson)
-    sessionStorage.setItem('assessment_return', JSON.stringify({ courseId: course.id, ...(step ? { step } : {}) }))
+    sessionStorage.setItem('assessment_return', JSON.stringify({
+      courseId: course.id,
+      ...(step ? { step, lessonId: quizCompletionKey(lesson, step) } : {}),
+    }))
     router.push(`/assessment/${lesson.assessmentId}`)
   }
 
@@ -961,14 +1018,25 @@ function LessonBrowserStep({
                   {selectedLesson.quizRole === 'pre_test' && (
                     <p className="text-xs text-gray-400">
                       {courseworkDone
-                        ? 'คุณเรียนจบทุกบทเรียนแล้ว — ทำแบบทดสอบนี้อีกครั้งเพื่อวัดผลหลังเรียน'
-                        : 'แบบทดสอบก่อนเรียน — เมื่อเรียนจบครบทุกบทเรียนแล้วจะได้ทำอีกครั้งเพื่อเทียบคะแนน'}
+                        ? 'คุณเรียนจบเนื้อหาครบแล้ว — ทำแบบทดสอบนี้อีกครั้งเพื่อวัดผลหลังเรียน'
+                        : 'แบบทดสอบก่อนเรียน — เมื่อเรียนเนื้อหาครบแล้วจะได้ทำอีกครั้งเพื่อเทียบคะแนน'}
                     </p>
                   )}
-                  <button onClick={() => startQuiz(selectedLesson!)}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
-                    {selectedLesson.quizRole === 'pre_test' && courseworkDone ? 'ทำแบบทดสอบหลังเรียน' : 'เริ่มทำแบบฝึกหัด'}
-                  </button>
+                  {selectedLesson.quizRole
+                    && completedLessonIds.includes(quizCompletionKey(selectedLesson, quizStepFor(selectedLesson))) && (
+                    <p className="inline-flex items-center gap-1.5 text-xs font-bold text-freshket-700">
+                      <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                      ส่งคำตอบแล้ว
+                    </p>
+                  )}
+                  <div>
+                    <button onClick={() => startQuiz(selectedLesson!)}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
+                      {selectedLesson.quizRole === 'pre_test' && courseworkDone ? 'ทำแบบทดสอบหลังเรียน' : 'เริ่มทำแบบฝึกหัด'}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -992,9 +1060,14 @@ function LessonBrowserStep({
             ดูวิดีโอให้ครบทุกบทเรียนก่อนจึงจะจบขั้นตอนนี้ได้ ({requiredVideoKeys.filter((k) => watchedVideos.has(k)).length}/{requiredVideoKeys.length})
           </p>
         )}
+        {!done && allVideosWatched && !gradedQuizzesDone && (
+          <p className="text-xs font-bold text-amber-600 text-center">
+            ทำแบบทดสอบให้ครบก่อนจึงจะจบขั้นตอนนี้ได้ ({gradedQuizLessons.filter((l) => completedLessonIds.includes(l.id)).length}/{gradedQuizLessons.length})
+          </p>
+        )}
         <div className="flex gap-3">
         {!done ? (
-          <button onClick={onDone} disabled={!allVideosWatched}
+          <button onClick={onDone} disabled={!canFinish}
             className="flex-1 py-3 rounded-xl text-sm font-bold bg-freshket-500 text-white hover:bg-freshket-600 transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-freshket-500">
             <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />

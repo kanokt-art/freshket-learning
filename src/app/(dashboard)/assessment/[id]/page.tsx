@@ -63,9 +63,11 @@ export interface SubmitResult {
   }[]
 }
 
-// `step` is present only when the course lesson carried a pre/post tag
-// (CourseLesson.quizRole); a plain lesson quiz returns a courseId alone.
-type ReturnCtx = { courseId: string; step?: 'pre' | 'post' }
+// `step` and `lessonId` are present only when the course lesson carried a
+// pre/post tag (CourseLesson.quizRole); a plain lesson quiz returns a courseId
+// alone. `lessonId` lets a graded quiz tick its own lesson complete on submit —
+// those lessons deliberately do NOT auto-complete on open.
+type ReturnCtx = { courseId: string; step?: 'pre' | 'post'; lessonId?: string }
 
 const MAX_VIOLATIONS = 3
 
@@ -354,14 +356,21 @@ export default function TakeAssessmentPage() {
 
       const result: SubmitResult = await res.json()
 
-      // Course-level pre/post-test Progress fields (preDone/postDone) were
-      // removed along with the course-level pre/post-test concept, so there is
-      // no course step left to mark done here. The SCORE is intentionally not
-      // written to localStorage either — the server owns it (see
-      // /api/assessment/submit) and is kept in local state only for the result
-      // screen below. Lesson-level quiz completion is unaffected: it's driven
-      // by completedLessonIds, ticked when the lesson is opened, not by this
-      // return-context mechanism.
+      // The SCORE is intentionally not written to localStorage — the server
+      // owns it (see /api/assessment/submit) and it's kept in local state only
+      // for the result screen below.
+      //
+      // A graded (pre/post-tagged) quiz lesson does NOT auto-complete when
+      // opened, so that a learner can't finish a course without being
+      // assessed. Submitting is what completes it: leave a note the course
+      // page picks up when the learner returns.
+      if (returnCtx?.lessonId) {
+        try {
+          sessionStorage.setItem('assessment_graded_lesson', JSON.stringify({
+            courseId: returnCtx.courseId, lessonId: returnCtx.lessonId,
+          }))
+        } catch { /* storage blocked — the lesson stays untick, learner retakes */ }
+      }
       if (returnCtx) sessionStorage.removeItem('assessment_return')
 
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
