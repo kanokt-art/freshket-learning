@@ -3048,7 +3048,7 @@ function QuizSettingsTab({ enabled, onEnable, topics, onChangeTopics, assessment
   return (
     <div className="w-full px-6 py-8 space-y-4">
       <p className="text-xs text-gray-400">
-        เปิดใช้งานแบบทดสอบของแต่ละบทเรียน แล้วเลือกว่าเป็นแบบทดสอบก่อนเรียนหรือหลังเรียน และใช้แบบทดสอบจากที่ใด
+        เปิดใช้งานบทเรียนที่จะใช้เป็นแบบทดสอบ — ค่าเริ่มต้นคือแบบทดสอบหลังเรียน หากต้องการให้ผู้เรียนทำก่อนเรียนด้วย ให้เปิด &ldquo;ใช้เป็นแบบทดสอบก่อนเรียน&rdquo; ข้างใน
       </p>
       {quizLessons.map(({ topic, lesson }) => (
         <QuizLessonSettingsCard
@@ -3117,8 +3117,10 @@ function QuizLessonSettingsCard({
   }, [currentAssessment?.id, currentAssessment?.title, currentAssessment?.timeLimitMinutes,
     currentAssessment?.antiCheatEnabled, currentAssessment?.description, currentAssessment?.passingScore])
 
-  // Turning the row on defaults to post-test, the commoner case; turning it off
-  // clears the role AND the pre/post column this lesson fed.
+  // Enabling the course's quizzes (the sidebar switch) already means "there is
+  // a post-test". This row switch turns THIS lesson into one of the course's
+  // graded quizzes, defaulting to the post-test; the toggle inside then
+  // promotes it to also being sat before the course.
   async function toggleEnabled() {
     if (enabled) { onSetQuizRole(undefined); return }
     onSetQuizRole('post_test')
@@ -3208,7 +3210,7 @@ function QuizLessonSettingsCard({
         <div className="flex items-center gap-2.5 shrink-0">
           {enabled && (
             <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700">
-              {isPreTest ? 'ก่อน + หลังเรียน' : 'หลังเรียน'}
+              {isPreTest ? 'Pre-Test + Post-Test' : 'Post-Test'}
             </span>
           )}
           <button type="button" onClick={toggleEnabled}
@@ -3298,13 +3300,8 @@ function QuizLessonSettingsCard({
                   <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${isPreTest ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                 </button>
               </div>
-              <p className="-mt-2.5 text-xs text-gray-400">
-                {isPreTest
-                  ? 'ผู้เรียนจะทำแบบทดสอบนี้ทั้งก่อนเรียนและหลังเรียน (มีคะแนน Pre-Test และ Post-Test)'
-                  : 'ผู้เรียนจะทำแบบทดสอบนี้หลังเรียนจบเท่านั้น (มีเฉพาะคะแนน Post-Test)'}
-              </p>
 
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3 -mt-1.5">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <label className="text-xs font-bold text-gray-600">ระบบป้องกันการทุจริต (Anti-Cheat)</label>
                   <InfoTooltip text="บังคับเข้าโหมดเต็มจอ ห้ามสลับแท็บ/หน้าต่างระหว่างทำแบบทดสอบ ระบบแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และส่งคำตอบอัตโนมัติเมื่อแจ้งเตือนครบ 3 ครั้ง" />
