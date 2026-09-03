@@ -2210,9 +2210,13 @@ function BuilderTabIcon({ id, className }: { id: BuilderTab; className?: string 
 }
 
 // article/link/assignment removed from the picker — unused lesson formats.
-// Existing lessons of those types (if any) are left as-is in Firestore; this
+// 'quiz' is absent on purpose too, but for a different reason: quiz lessons
+// are system-managed. The "แบบทดสอบ" switch creates them and pins them to
+// the ends of the course, so hand-authoring one here would produce a quiz
+// sitting in the middle that nothing grades.
+// Existing lessons of the removed types are left as-is in Firestore; this
 // only stops new ones from being created.
-const LESSON_TYPES: LessonType[] = ['video', 'file', 'quiz']
+const LESSON_TYPES: LessonType[] = ['video', 'file']
 
 function LessonTypeIcon({ type, className }: { type: LessonType; className?: string }) {
   const cls = className ?? 'size-4'
@@ -2976,6 +2980,53 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
 //     immediately through onChangeTopics, committed by the course's own save.
 //   · timeLimitMinutes / antiCheatEnabled live on the ASSESSMENT document,
 //     shared by every course that links it, so they go straight to Firestore.
+// Quiz lessons are system-managed, not authored by hand. Given the course's
+// topics, returns them with exactly the quiz lessons the settings imply:
+// a post-test pinned to the very end, and — when `withPreTest` — a pre-test
+// pinned to the very front. Existing quiz lessons are reused (so the linked
+// assessment and title survive a toggle) rather than recreated.
+function withQuizLessons(topics: CourseTopic[], withPreTest: boolean): CourseTopic[] {
+  const existing = topics.flatMap((t) => t.lessons).filter((l) => l.type === 'quiz')
+  const keptPre = existing.find((l) => l.quizRole === 'pre_test')
+  // Any quiz that is not the pre-test can serve as the post-test; prefer one
+  // already tagged, else reuse whatever quiz lesson is left over.
+  const keptPost = existing.find((l) => l.quizRole === 'post_test')
+    ?? existing.find((l) => l.id !== keptPre?.id)
+
+  // Both sittings must run the SAME assessment for the before/after scores to
+  // be comparable, so a newly created lesson inherits whichever one is already
+  // linked rather than starting empty.
+  const linkedAssessmentId = (keptPost ?? keptPre)?.assessmentId
+
+  const preLesson: CourseLesson = {
+    ...(keptPre ?? { id: makeId(), title: 'Pre-Test', type: 'quiz' as const, order: 0 }),
+    type: 'quiz', quizRole: 'pre_test', assessmentId: linkedAssessmentId,
+  }
+  const postLesson: CourseLesson = {
+    ...(keptPost ?? { id: makeId(), title: 'Post-Test', type: 'quiz' as const, order: 0 }),
+    type: 'quiz', quizRole: 'post_test', assessmentId: linkedAssessmentId,
+  }
+
+  // Strip every existing quiz lesson, then re-insert at the two ends.
+  const stripped = topics.map((t) => ({
+    ...t,
+    lessons: t.lessons.filter((l) => l.type !== 'quiz').map((l, i) => ({ ...l, order: i })),
+  }))
+  if (stripped.length === 0) {
+    return [{
+      id: makeId(), title: 'แบบทดสอบ', order: 0,
+      lessons: (withPreTest ? [preLesson, postLesson] : [postLesson]).map((l, i) => ({ ...l, order: i })),
+    }]
+  }
+
+  const out = stripped.map((t) => ({ ...t, lessons: [...t.lessons] }))
+  if (withPreTest) {
+    out[0].lessons = [preLesson, ...out[0].lessons]
+  }
+  out[out.length - 1].lessons = [...out[out.length - 1].lessons, postLesson]
+  return out.map((t) => ({ ...t, lessons: t.lessons.map((l, i) => ({ ...l, order: i })) }))
+}
+
 function QuizSettingsTab({ enabled, onEnable, topics, onChangeTopics, assessments }: {
   enabled: boolean
   onEnable: () => void
@@ -2983,38 +3034,28 @@ function QuizSettingsTab({ enabled, onEnable, topics, onChangeTopics, assessment
   onChangeTopics: (t: CourseTopic[]) => void
   assessments: Assessment[]
 }) {
-  // A course has ONE graded quiz, sat after the material and — when the
-  // pre-test toggle is on — before it as well. So this lists a single card,
-  // not one per quiz lesson: whichever quiz lesson already carries a role,
-  // else the first quiz lesson in the course.
+  // The course's quiz lessons are system-managed (see withQuizLessons): a
+  // post-test at the end, plus a pre-test at the front when enabled. The card
+  // configures the post-test — the pre-test sits the same assessment, so
+  // there is nothing separate to configure for it.
   const allQuizLessons = topics
-    .slice()
-    .sort((a, b) => a.order - b.order)
-    .flatMap((t) => t.lessons.slice().sort((a, b) => a.order - b.order).map((l) => ({ topic: t, lesson: l })))
+    .flatMap((t) => t.lessons.map((l) => ({ topic: t, lesson: l })))
     .filter(({ lesson }) => lesson.type === 'quiz')
-  const quizLessons = (() => {
-    const tagged = allQuizLessons.find(({ lesson }) => !!lesson.quizRole)
-    const chosen = tagged ?? allQuizLessons[0]
-    return chosen ? [chosen] : []
-  })()
+  const postEntry = allQuizLessons.find(({ lesson }) => lesson.quizRole === 'post_test') ?? allQuizLessons[0]
+  const hasPreTest = allQuizLessons.some(({ lesson }) => lesson.quizRole === 'pre_test')
 
-  // Setting a role clears whichever OTHER lesson held it — at most one lesson
-  // per course may be the pre-test, and one the post-test.
-  function setQuizRole(lessonId: string, role: 'pre_test' | 'post_test' | undefined) {
-    onChangeTopics(topics.map((t) => ({
-      ...t,
-      lessons: t.lessons.map((l) => {
-        if (l.id === lessonId) return { ...l, quizRole: role }
-        if (role && l.quizRole === role) return { ...l, quizRole: undefined }
-        return l
-      }),
-    })))
+  // Adding/removing the pre-test rebuilds the quiz lessons so it lands at the
+  // front of the course, rather than wherever it happened to be.
+  function setPreTestEnabled(next: boolean) {
+    onChangeTopics(withQuizLessons(topics, next))
   }
 
-  function setLessonAssessment(lessonId: string, assessmentId: string | undefined) {
+  // Both sittings use the SAME assessment — that is what makes the before/
+  // after scores comparable — so this writes to every quiz lesson at once.
+  function setQuizAssessment(assessmentId: string | undefined) {
     onChangeTopics(topics.map((t) => ({
       ...t,
-      lessons: t.lessons.map((l) => (l.id === lessonId ? { ...l, assessmentId } : l)),
+      lessons: t.lessons.map((l) => (l.type === 'quiz' ? { ...l, assessmentId } : l)),
     })))
   }
 
@@ -3038,63 +3079,38 @@ function QuizSettingsTab({ enabled, onEnable, topics, onChangeTopics, assessment
     )
   }
 
-  if (quizLessons.length === 0) {
-    return (
-      <div className="w-full px-6 py-8">
-        <div className="rounded-2xl border border-gray-100 bg-white p-10 text-center">
-          <div className="size-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
-            <svg className="size-6 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
-            </svg>
-          </div>
-          <p className="text-sm font-bold text-gray-700 mb-1">ยังไม่มีบทเรียนแบบฝึกหัดในหลักสูตรนี้</p>
-          <p className="text-sm text-gray-400">ไปที่แท็บ &quot;บทเรียน&quot; แล้วเพิ่มบทเรียนชนิด &quot;แบบฝึกหัด&quot; ก่อน จากนั้นกลับมาตั้งค่าที่นี่</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="w-full px-6 py-8 space-y-4">
       <p className="text-xs text-gray-400">
         คอร์สนี้ใช้แบบทดสอบหลังเรียน — หากต้องการให้ผู้เรียนทำชุดเดียวกันนี้ก่อนเรียนด้วย เพื่อเทียบคะแนนก่อน-หลัง ให้เปิด &ldquo;ใช้เป็นแบบทดสอบก่อนเรียน&rdquo;
       </p>
-      {quizLessons.map(({ topic, lesson }) => (
+      {postEntry && (
         <QuizLessonSettingsCard
-          key={lesson.id}
-          onEnsureRole={() => setQuizRole(lesson.id, 'post_test')}
-          topicTitle={topic.title}
-          lesson={lesson}
+          key={postEntry.lesson.id}
+          topicTitle={postEntry.topic.title}
+          lesson={postEntry.lesson}
           assessments={assessments}
-          onSetQuizRole={(role) => setQuizRole(lesson.id, role)}
-          onSetAssessment={(id) => setLessonAssessment(lesson.id, id)}
+          hasPreTest={hasPreTest}
+          onSetPreTest={setPreTestEnabled}
+          onSetAssessment={setQuizAssessment}
         />
-      ))}
+      )}
     </div>
   )
 }
 
 function QuizLessonSettingsCard({
-  topicTitle, lesson, assessments, onEnsureRole,
-  onSetQuizRole, onSetAssessment,
+  topicTitle, lesson, assessments, hasPreTest,
+  onSetPreTest, onSetAssessment,
 }: {
   topicTitle: string
   lesson: CourseLesson
   assessments: Assessment[]
-  onEnsureRole: () => void
-  onSetQuizRole: (role: 'pre_test' | 'post_test' | undefined) => void
+  hasPreTest: boolean
+  onSetPreTest: (next: boolean) => void
   onSetAssessment: (assessmentId: string | undefined) => void
 }) {
   const router = useRouter()
-  // The card being visible means the course's quizzes are on, so the lesson it
-  // shows must actually carry a role — otherwise nothing would be graded and
-  // the Pre/Post columns would stay empty. Default it to the post-test. Held in
-  // a ref so this fires on the lesson's role changing, not on every re-render
-  // (the parent rebuilds the callback each time).
-  const ensureRoleRef = useRef(onEnsureRole)
-  ensureRoleRef.current = onEnsureRole
-  const hasRole = !!lesson.quizRole
-  useEffect(() => { if (!hasRole) ensureRoleRef.current() }, [hasRole])
   const currentAssessment = assessments.find((a) => a.id === lesson.assessmentId)
   const [source, setSource] = useState<'self' | 'google_form'>(
     currentAssessment?.googleFormUrl ? 'google_form' : 'self',
@@ -3137,7 +3153,7 @@ function QuizLessonSettingsCard({
   // it as the post-test only. Same lesson either way — this only widens or
   // narrows when it is taken, so there is no tag to move between lessons.
   function handleSetRole(next: boolean) {
-    onSetQuizRole(next ? 'pre_test' : 'post_test')
+    onSetPreTest(next)
   }
 
   // Swapping the linked assessment changes what learners already in progress
@@ -3187,7 +3203,7 @@ function QuizLessonSettingsCard({
     }
   }
 
-  const isPreTest = lesson.quizRole === 'pre_test'
+  const isPreTest = hasPreTest
   // Unpublished assessments are drafts — a learner opening the lesson would hit
   // a 403 from /api/assessment/[id]/take, so they must not be selectable here.
   const filtered = assessments
@@ -3341,9 +3357,29 @@ function QuizLessonSettingsCard({
   )
 }
 
-function LessonsBuilder({ topics, onChange, assessments }: {
+// Quiz lessons are hidden from this builder entirely: they are created and
+// positioned by the "แบบทดสอบ" switch, and configured in that tab. Showing
+// them here would invite reordering or deleting a lesson the system owns. They
+// are stripped on the way in and re-attached on the way out, so an edit to the
+// content lessons never drops them.
+function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments }: {
   topics: CourseTopic[]; onChange: (t: CourseTopic[]) => void; assessments: Assessment[]
 }) {
+  const topics = useMemo(
+    () => allTopics.map((t) => ({ ...t, lessons: t.lessons.filter((l) => l.type !== 'quiz') })),
+    [allTopics],
+  )
+  function onChange(next: CourseTopic[]) {
+    const quizzes = allTopics.flatMap((t) => t.lessons).filter((l) => l.type === 'quiz')
+    const pre = quizzes.find((l) => l.quizRole === 'pre_test')
+    const post = quizzes.find((l) => l.quizRole !== 'pre_test')
+    if (next.length === 0 || (!pre && !post)) { onChangeAll(next); return }
+    const out = next.map((t) => ({ ...t, lessons: [...t.lessons] }))
+    if (pre) out[0].lessons = [pre, ...out[0].lessons]
+    if (post) out[out.length - 1].lessons = [...out[out.length - 1].lessons, post]
+    onChangeAll(out.map((t) => ({ ...t, lessons: t.lessons.map((l, i) => ({ ...l, order: i })) })))
+  }
+
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [dragTopic, setDragTopic] = useState<number | null>(null)
   const [dragLesson, setDragLesson] = useState<{ topicId: string; index: number } | null>(null)
@@ -3635,17 +3671,18 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     setForm((p) => ({ ...p, assignedUserIds: p.assignedUserIds.filter((id) => id !== uid) }))
   }
 
-  // Master switch for the course's quizzes. Turning it OFF strips every
-  // lesson's pre/post role — that's what stops scores reaching the Pre-Test /
-  // Post-Test columns — so it's confirmed first when roles are actually set.
-  // Turning it back on leaves the lessons unassigned; the tab reassigns them.
+  // Master switch for the course's quiz. Quiz lessons are system-managed: they
+  // are not authored in the Lessons tab, they are created by this switch and
+  // pinned to the ends of the course — the pre-test first, the post-test last
+  // — which is where a before/after pair has to sit to mean anything. Turning
+  // the switch off deletes them again.
   async function toggleQuizEnabled() {
     if (form.quizEnabled) {
-      const tagged = form.topics.flatMap((t) => t.lessons).filter((l) => !!l.quizRole)
-      if (tagged.length > 0) {
+      const quizzes = form.topics.flatMap((t) => t.lessons).filter((l) => l.type === 'quiz')
+      if (quizzes.length > 0) {
         const ok = await confirmAction({
           title: 'ปิดใช้งานแบบทดสอบทั้งคอร์ส?',
-          text: `บทเรียน ${tagged.length} รายการจะถูกยกเลิกป้าย Pre-Test / Post-Test และคะแนนจะไม่ถูกบันทึกลงคอลัมน์ทั้งสองอีก`,
+          text: `บทเรียนแบบทดสอบ ${quizzes.length} รายการจะถูกลบออกจากหลักสูตร และคะแนนจะไม่ถูกบันทึกลงคอลัมน์ Pre/Post อีก`,
           confirmText: 'ปิดใช้งาน',
           cancelText: 'ยกเลิก',
           danger: true,
@@ -3655,11 +3692,11 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
       setForm((p) => ({
         ...p,
         quizEnabled: false,
-        topics: p.topics.map((t) => ({ ...t, lessons: t.lessons.map((l) => ({ ...l, quizRole: undefined })) })),
+        topics: p.topics.map((t) => ({ ...t, lessons: t.lessons.filter((l) => l.type !== 'quiz') })),
       }))
       return
     }
-    setForm((p) => ({ ...p, quizEnabled: true }))
+    setForm((p) => ({ ...p, quizEnabled: true, topics: withQuizLessons(p.topics, false) }))
     setTab('quiz')
   }
 
@@ -3743,7 +3780,10 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     }
   }
 
-  const lessonCount = form.topics.reduce((s, t) => s + t.lessons.length, 0)
+  // Counts what the Lessons tab actually lists — quiz lessons are managed by
+  // the แบบทดสอบ switch and hidden there, so counting them would make the
+  // badge disagree with the list.
+  const lessonCount = form.topics.reduce((s, t) => s + t.lessons.filter((l) => l.type !== 'quiz').length, 0)
   // "สรุปผลการเรียน" only makes sense once the course exists and can have real
   // training records — hide it while creating a brand-new course.
   const visibleTabs = isEdit ? BUILDER_TABS : BUILDER_TABS.filter((t) => t.id !== 'summary')
