@@ -550,11 +550,11 @@ function MandatoryFormModal({
             <button
               type="button"
               onClick={() => set('isPublished', !form.isPublished)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
                 form.isPublished ? 'bg-freshket-500' : 'bg-gray-200'
               }`}
             >
-              <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform ${
+              <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${
                 form.isPublished ? 'translate-x-6' : 'translate-x-1'
               }`} />
             </button>

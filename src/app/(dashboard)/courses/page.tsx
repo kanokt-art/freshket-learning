@@ -1110,8 +1110,8 @@ function CourseOverviewModal({ course, allUsers, allTrainingRecords, onClose, on
                 </p>
               </div>
               <button type="button" disabled={toggling} onClick={handleTogglePublish}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 disabled:opacity-60 ${course.isPublished ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                <span className={`inline-block size-4.5 transform rounded-full bg-white shadow transition-transform ${course.isPublished ? 'translate-x-5.5' : 'translate-x-0.5'}`} />
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 shrink-0 disabled:opacity-60 ${course.isPublished ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                <span className={`inline-block size-4.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${course.isPublished ? 'translate-x-5.5' : 'translate-x-0.5'}`} />
               </button>
             </div>
           </div>
@@ -2131,6 +2131,7 @@ type FormState = {
   topics: CourseTopic[]
   assignedUserIds: string[]
   hasKeyTakeAway: boolean; keyTakeAwayPrompt: string
+  quizEnabled: boolean
   isPublished: boolean
   // Challenge
   isChallenge: boolean
@@ -2161,6 +2162,10 @@ function formFromCourse(c: Course): FormState {
     assignedUserIds: c.assignedUserIds ?? [],
     hasKeyTakeAway: !!c.hasKeyTakeAway,
     keyTakeAwayPrompt: c.keyTakeAwayPrompt ?? '',
+    // Older courses predate this flag: infer it from whether any lesson
+    // already carries a pre/post role, so opening one doesn't silently read
+    // as "quizzes off" and strip the roles on the next save.
+    quizEnabled: c.quizEnabled ?? (c.topics ?? []).some((t) => t.lessons.some((l) => !!l.quizRole)),
     isPublished: c.isPublished,
     isChallenge: !!c.isChallenge,
     challengeWindowStart: toInputDate(c.challengeWindowStart),
@@ -2960,7 +2965,9 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
 //     immediately through onChangeTopics, committed by the course's own save.
 //   · timeLimitMinutes / antiCheatEnabled live on the ASSESSMENT document,
 //     shared by every course that links it, so they go straight to Firestore.
-function QuizSettingsTab({ topics, onChangeTopics, assessments }: {
+function QuizSettingsTab({ enabled, onEnable, topics, onChangeTopics, assessments }: {
+  enabled: boolean
+  onEnable: () => void
   topics: CourseTopic[]
   onChangeTopics: (t: CourseTopic[]) => void
   assessments: Assessment[]
@@ -2989,6 +2996,26 @@ function QuizSettingsTab({ topics, onChangeTopics, assessments }: {
       ...t,
       lessons: t.lessons.map((l) => (l.id === lessonId ? { ...l, assessmentId } : l)),
     })))
+  }
+
+  if (!enabled) {
+    return (
+      <div className="w-full px-6 py-8">
+        <div className="rounded-2xl border border-gray-100 bg-white p-10 text-center">
+          <div className="size-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
+            <svg className="size-6 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+            </svg>
+          </div>
+          <p className="text-sm font-bold text-gray-700 mb-1">ยังไม่เปิดใช้งานแบบทดสอบ</p>
+          <p className="text-sm text-gray-400 mb-5">เปิดใช้งานเพื่อกำหนดค่าแบบทดสอบสำหรับหลักสูตรนี้</p>
+          <button type="button" onClick={onEnable}
+            className="px-5 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all">
+            เปิดใช้งานแบบทดสอบ
+          </button>
+        </div>
+      </div>
+    )
   }
 
   if (quizLessons.length === 0) {
@@ -3067,10 +3094,12 @@ function QuizLessonSettingsCard({
   const [saving, setSaving] = useState(false)
   const [timeLimitMinutes, setTimeLimitMinutes] = useState('0')
   const [antiCheatEnabled, setAntiCheatEnabled] = useState(false)
+  const [description, setDescription] = useState('')
   useEffect(() => {
     setTimeLimitMinutes(String(currentAssessment?.timeLimitMinutes ?? 0))
     setAntiCheatEnabled(currentAssessment?.antiCheatEnabled ?? false)
-  }, [currentAssessment?.id, currentAssessment?.timeLimitMinutes, currentAssessment?.antiCheatEnabled])
+    setDescription(currentAssessment?.description ?? '')
+  }, [currentAssessment?.id, currentAssessment?.timeLimitMinutes, currentAssessment?.antiCheatEnabled, currentAssessment?.description])
 
   // Turning the row on defaults to post-test, the commoner case; turning it off
   // clears the role AND the pre/post column this lesson fed.
@@ -3118,6 +3147,7 @@ function QuizLessonSettingsCard({
         await updateDoc(doc(getClientFirestore(), 'assessments', currentAssessment.id), {
           timeLimitMinutes: Number(timeLimitMinutes) || 0,
           antiCheatEnabled,
+          description: description.trim(),
         })
       }
     } catch (e) {
@@ -3150,8 +3180,8 @@ function QuizLessonSettingsCard({
           )}
           <button type="button" onClick={toggleEnabled}
             title={enabled ? 'ปิดใช้งานแบบทดสอบของบทเรียนนี้' : 'เปิดใช้งานแบบทดสอบของบทเรียนนี้'}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${enabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-            <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${enabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+            <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${enabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
           </button>
         </div>
       </div>
@@ -3164,8 +3194,8 @@ function QuizLessonSettingsCard({
               <InfoTooltip text="เปิด = บทเรียนนี้คือแบบทดสอบก่อนเรียนของหลักสูตร ปิด = เป็นแบบทดสอบหลังเรียน คะแนนจะถูกแยกเป็นคอลัมน์ Pre-Test / Post-Test ในตารางผู้เรียน" />
             </div>
             <button type="button" onClick={() => handleSetRole(!isPreTest)}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${isPreTest ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${isPreTest ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 shrink-0 ${isPreTest ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${isPreTest ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
             </button>
           </div>
 
@@ -3234,12 +3264,21 @@ function QuizLessonSettingsCard({
                   <InfoTooltip text="บังคับเข้าโหมดเต็มจอ ห้ามสลับแท็บ/หน้าต่างระหว่างทำแบบทดสอบ ระบบแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และส่งคำตอบอัตโนมัติเมื่อแจ้งเตือนครบ 3 ครั้ง" />
                 </div>
                 <button type="button" onClick={() => setAntiCheatEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${antiCheatEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                  <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${antiCheatEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 shrink-0 ${antiCheatEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                  <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${antiCheatEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                 </button>
               </div>
 
-              {/* These two fields belong to the assessment document, not the
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1.5">คำอธิบายแบบทดสอบ</label>
+                <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)}
+                  placeholder="กรอกคำอธิบายแบบทดสอบ"
+                  className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300 resize-none"
+                />
+                <p className="text-xs text-gray-400 mt-1">แสดงให้ผู้เรียนเห็นก่อนเริ่มทำแบบทดสอบ</p>
+              </div>
+
+              {/* These fields belong to the assessment document, not the
                   course draft, so they need their own save — the course's
                   "บันทึกการแก้ไข" button never touches them. */}
               <button type="button" onClick={handleSaveSettings} disabled={saving}
@@ -3247,7 +3286,7 @@ function QuizLessonSettingsCard({
                 {saving
                   ? <span className="size-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   : <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>}
-                {saving ? 'กำลังบันทึก...' : 'บันทึกเวลา / Anti-Cheat'}
+                {saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่าแบบทดสอบ'}
               </button>
             </>
           ) : (
@@ -3514,7 +3553,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     instructorId: '', courseAdminIds: [], introVideoUrl: '',
     hasCertificate: false, allowRetake: false, topics: [],
     assignedUserIds: [],
-    hasKeyTakeAway: false, keyTakeAwayPrompt: '',
+    hasKeyTakeAway: false, keyTakeAwayPrompt: '', quizEnabled: false,
     isPublished: true,
     isChallenge: false, challengeWindowStart: '', challengeWindowEnd: '', challengeMultiplier: '2',
   })
@@ -3550,6 +3589,34 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
 
   function removeAssignedUser(uid: string) {
     setForm((p) => ({ ...p, assignedUserIds: p.assignedUserIds.filter((id) => id !== uid) }))
+  }
+
+  // Master switch for the course's quizzes. Turning it OFF strips every
+  // lesson's pre/post role — that's what stops scores reaching the Pre-Test /
+  // Post-Test columns — so it's confirmed first when roles are actually set.
+  // Turning it back on leaves the lessons unassigned; the tab reassigns them.
+  async function toggleQuizEnabled() {
+    if (form.quizEnabled) {
+      const tagged = form.topics.flatMap((t) => t.lessons).filter((l) => !!l.quizRole)
+      if (tagged.length > 0) {
+        const ok = await confirmAction({
+          title: 'ปิดใช้งานแบบทดสอบทั้งคอร์ส?',
+          text: `บทเรียน ${tagged.length} รายการจะถูกยกเลิกป้าย Pre-Test / Post-Test และคะแนนจะไม่ถูกบันทึกลงคอลัมน์ทั้งสองอีก`,
+          confirmText: 'ปิดใช้งาน',
+          cancelText: 'ยกเลิก',
+          danger: true,
+        })
+        if (!ok) return
+      }
+      setForm((p) => ({
+        ...p,
+        quizEnabled: false,
+        topics: p.topics.map((t) => ({ ...t, lessons: t.lessons.map((l) => ({ ...l, quizRole: undefined })) })),
+      }))
+      return
+    }
+    setForm((p) => ({ ...p, quizEnabled: true }))
+    setTab('quiz')
   }
 
   function validate() {
@@ -3602,6 +3669,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
         allowRetake: form.allowRetake,
         topics: form.topics,
         isPublished: publishOverride ?? form.isPublished,
+        quizEnabled: form.quizEnabled,
         hasKeyTakeAway: form.hasKeyTakeAway,
         keyTakeAwayPrompt: form.hasKeyTakeAway && form.keyTakeAwayPrompt.trim() ? form.keyTakeAwayPrompt.trim() : undefined,
         isChallenge: form.isChallenge || undefined,
@@ -3691,18 +3759,31 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
               const isActive = tab === t.id
               return (
                 <div key={t.id}
-                  className={`flex items-center gap-1 rounded-xl transition-colors ${isActive ? 'bg-freshket-500' : ''}`}>
+                  className={`flex items-center gap-1 rounded-xl transition-colors ${isActive ? 'bg-freshket-50' : ''}`}>
                   <button type="button" onClick={() => setTab(t.id)}
-                    className={`flex-1 min-w-0 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-bold transition-all text-left ${isActive ? 'text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
-                    <BuilderTabIcon id={t.id} className="size-4 shrink-0" />
+                    className={`flex-1 min-w-0 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-bold transition-all text-left ${isActive ? 'text-freshket-700' : 'text-gray-600 hover:bg-gray-50'}`}>
+                    <span className={`shrink-0 size-7 rounded-lg flex items-center justify-center transition-colors ${
+                      isActive ? 'bg-freshket-500 text-white' : 'bg-gray-100 text-gray-400'
+                    }`}>
+                      <BuilderTabIcon id={t.id} className="size-4" />
+                    </span>
                     <span className="flex-1 truncate">{t.label}</span>
                     {t.id === 'lessons' && lessonCount > 0 && (
-                      <span className={`shrink-0 text-xs font-bold px-1.5 rounded-full ${isActive ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>{lessonCount}</span>
+                      <span className={`shrink-0 text-xs font-bold px-1.5 rounded-full ${isActive ? 'bg-freshket-100 text-freshket-700' : 'bg-gray-100 text-gray-500'}`}>{lessonCount}</span>
                     )}
                     {t.id === 'summary' && summaryStats.total > 0 && (
-                      <span className={`shrink-0 text-xs font-bold px-1.5 rounded-full ${isActive ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>{summaryStats.total}</span>
+                      <span className={`shrink-0 text-xs font-bold px-1.5 rounded-full ${isActive ? 'bg-freshket-100 text-freshket-700' : 'bg-gray-100 text-gray-500'}`}>{summaryStats.total}</span>
                     )}
                   </button>
+                  {/* Master switch for the whole course's quizzes, sitting in
+                      the nav row itself so its state is visible from any tab. */}
+                  {t.id === 'quiz' && (
+                    <button type="button" onClick={toggleQuizEnabled}
+                      title={form.quizEnabled ? 'ปิดใช้งานแบบทดสอบทั้งคอร์ส' : 'เปิดใช้งานแบบทดสอบ'}
+                      className={`shrink-0 mr-2.5 relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.quizEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                      <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.quizEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                    </button>
+                  )}
                 </div>
               )
             })}
@@ -3786,8 +3867,8 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
 
                 <div className="flex items-center gap-2">
                   <button type="button" onClick={() => set('hasCertificate', !form.hasCertificate)}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${form.hasCertificate ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                    <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${form.hasCertificate ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.hasCertificate ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                    <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.hasCertificate ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                   </button>
                   <span className="text-xs text-gray-600 font-normal">มอบใบประกาศเมื่อผ่านคอร์ส</span>
                 </div>
@@ -3845,29 +3926,29 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                   <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
                     <div className="flex items-center gap-2">
                       <button type="button" onClick={() => set('isRequired', !form.isRequired)}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${form.isRequired ? 'bg-rose-400' : 'bg-gray-200'}`}>
-                        <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${form.isRequired ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.isRequired ? 'bg-rose-400' : 'bg-gray-200'}`}>
+                        <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.isRequired ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                       </button>
                       <span className="text-xs text-gray-600 font-normal">บังคับเรียน</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button type="button" onClick={() => set('isPublished', !form.isPublished)}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${form.isPublished ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                        <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${form.isPublished ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.isPublished ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                        <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.isPublished ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                       </button>
                       <span className="text-xs text-gray-600 font-normal">เผยแพร่ทันที</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button type="button" onClick={() => set('isChallenge', !form.isChallenge)}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${form.isChallenge ? 'bg-amber-400' : 'bg-gray-200'}`}>
-                        <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${form.isChallenge ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.isChallenge ? 'bg-amber-400' : 'bg-gray-200'}`}>
+                        <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.isChallenge ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                       </button>
                       <span className="text-xs text-gray-600 font-normal">🏆 Challenge</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button type="button" onClick={() => set('allowRetake', !form.allowRetake)}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${form.allowRetake ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                        <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${form.allowRetake ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.allowRetake ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                        <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.allowRetake ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                       </button>
                       <span className="text-xs text-gray-600 font-normal">เรียนอีกครั้งเมื่อถึงกำหนด</span>
                     </div>
@@ -3915,8 +3996,8 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                       </div>
                     </div>
                     <button type="button" onClick={() => setForm((p) => ({ ...p, hasKeyTakeAway: !p.hasKeyTakeAway }))}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${form.hasKeyTakeAway ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                      <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform ${form.hasKeyTakeAway ? 'translate-x-6' : 'translate-x-1'}`} />
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 shrink-0 ${form.hasKeyTakeAway ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                      <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.hasKeyTakeAway ? 'translate-x-6' : 'translate-x-1'}`} />
                     </button>
                   </div>
                   {form.hasKeyTakeAway && (
@@ -3942,6 +4023,8 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
               {/* ── Quiz tab ── */}
               {tab === 'quiz' && (
                 <QuizSettingsTab
+                  enabled={form.quizEnabled}
+                  onEnable={toggleQuizEnabled}
                   topics={form.topics}
                   onChangeTopics={(topics) => set('topics', topics)}
                   assessments={assessments}
@@ -4001,8 +4084,8 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                       </div>
                     </div>
                     <button type="button" onClick={() => setCondMasterOn((v) => !v)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${condMasterOn ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                      <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform ${condMasterOn ? 'translate-x-6' : 'translate-x-1'}`} />
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 shrink-0 ${condMasterOn ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                      <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${condMasterOn ? 'translate-x-6' : 'translate-x-1'}`} />
                     </button>
                   </div>
 
@@ -4018,8 +4101,8 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-gray-700 font-normal">{row.label}</span>
                             <button type="button" onClick={() => setCondToggles((p) => ({ ...p, [row.key]: !p[row.key] }))}
-                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${condToggles[row.key] ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform ${condToggles[row.key] ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${condToggles[row.key] ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${condToggles[row.key] ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                             </button>
                           </div>
                           {condToggles[row.key] && (

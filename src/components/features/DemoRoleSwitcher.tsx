@@ -141,8 +141,8 @@ export function DemoRoleSwitcher() {
             <span className={`relative inline-flex size-2 rounded-full ${isDemoMode ? 'bg-amber-500' : 'bg-gray-300'}`} />
           </span>
           Demo
-          <span className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${isDemoMode ? 'bg-amber-400' : 'bg-gray-200'}`}>
-            <span className={`inline-block size-3 transform rounded-full bg-white shadow transition-transform ${isDemoMode ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+          <span className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors duration-200 ${isDemoMode ? 'bg-amber-400' : 'bg-gray-200'}`}>
+            <span className={`inline-block size-3 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${isDemoMode ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
           </span>
         </button>
 

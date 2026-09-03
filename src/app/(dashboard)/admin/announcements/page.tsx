@@ -333,9 +333,9 @@ function AnnouncementForm({ announcement, allDepartments, onSave, onClose }: {
             <button
               type="button"
               onClick={() => setIsPublished((v) => !v)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isPublished ? 'bg-freshket-500' : 'bg-gray-200'}`}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${isPublished ? 'bg-freshket-500' : 'bg-gray-200'}`}
             >
-              <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform ${isPublished ? 'translate-x-6' : 'translate-x-1'}`} />
+              <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${isPublished ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
         </div>

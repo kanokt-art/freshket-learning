@@ -96,6 +96,12 @@ export interface Course {
   topics?: CourseTopic[]
   hasKeyTakeAway?: boolean
   keyTakeAwayPrompt?: string
+  // Master switch for the course's quiz lessons, toggled from the builder's
+  // "แบบทดสอบ" tab. When false the quiz lessons still exist but no lesson
+  // carries a pre/post role, so nothing is graded into the Pre-Test /
+  // Post-Test columns. Absent on older documents, which are treated as
+  // enabled when any lesson already holds a role (see formFromCourse).
+  quizEnabled?: boolean
   // Challenge course settings
   isChallenge?: boolean
   challengeWindowStart?: Date

@@ -8,6 +8,14 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // Tailwind's default spacing scale stops offering half-steps after 3.5,
+      // so `translate-x-4.5` / `translate-x-5.5` / `size-4.5` silently emitted
+      // nothing. Toggle knobs written against them had no end transform to
+      // animate toward and jumped between states instead of sliding.
+      spacing: {
+        '4.5': '1.125rem',
+        '5.5': '1.375rem',
+      },
       colors: {
         brand: {
           green:         '#27AE60',
