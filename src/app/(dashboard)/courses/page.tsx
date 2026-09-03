@@ -3103,14 +3103,19 @@ function QuizLessonSettingsCard({
 
   // Assessment-level settings, written straight to Firestore on save.
   const [saving, setSaving] = useState(false)
+  const [title, setTitle] = useState('')
   const [timeLimitMinutes, setTimeLimitMinutes] = useState('0')
   const [antiCheatEnabled, setAntiCheatEnabled] = useState(false)
   const [description, setDescription] = useState('')
+  const [passingScore, setPassingScore] = useState('70')
   useEffect(() => {
+    setTitle(currentAssessment?.title ?? '')
     setTimeLimitMinutes(String(currentAssessment?.timeLimitMinutes ?? 0))
     setAntiCheatEnabled(currentAssessment?.antiCheatEnabled ?? false)
     setDescription(currentAssessment?.description ?? '')
-  }, [currentAssessment?.id, currentAssessment?.timeLimitMinutes, currentAssessment?.antiCheatEnabled, currentAssessment?.description])
+    setPassingScore(String(currentAssessment?.passingScore ?? 70))
+  }, [currentAssessment?.id, currentAssessment?.title, currentAssessment?.timeLimitMinutes,
+    currentAssessment?.antiCheatEnabled, currentAssessment?.description, currentAssessment?.passingScore])
 
   // Turning the row on defaults to post-test, the commoner case; turning it off
   // clears the role AND the pre/post column this lesson fed.
@@ -3156,13 +3161,26 @@ function QuizLessonSettingsCard({
 
   async function handleSaveSettings() {
     if (!currentAssessment) return
+    if (!title.trim()) {
+      void alertError('กรอกชื่อแบบทดสอบก่อน', 'ชื่อแบบทดสอบเป็นสิ่งที่ผู้เรียนเห็นก่อนเริ่มทำ')
+      return
+    }
+    // The grader compares against this exact value (api/assessment/submit),
+    // so an out-of-range one would silently make every attempt pass or fail.
+    const pass = Number(passingScore)
+    if (!Number.isFinite(pass) || pass < 0 || pass > 100) {
+      void alertError('เกณฑ์ผ่านไม่ถูกต้อง', 'กรอกเป็นตัวเลข 0–100')
+      return
+    }
     setSaving(true)
     try {
       if (!DEMO_MODE) {
         await updateDoc(doc(getClientFirestore(), 'assessments', currentAssessment.id), {
+          title: title.trim(),
           timeLimitMinutes: Number(timeLimitMinutes) || 0,
           antiCheatEnabled,
           description: description.trim(),
+          passingScore: pass,
         })
       }
     } catch (e) {
@@ -3203,34 +3221,17 @@ function QuizLessonSettingsCard({
 
       {enabled && (
         <div className="px-4 pb-4 space-y-4 border-t border-gray-100 pt-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <label className="text-xs font-bold text-gray-600">ใช้เป็นแบบทดสอบก่อนเรียน</label>
-              <InfoTooltip text="ผู้เรียนจะต้องทำแบบทดสอบนี้ทั้งก่อนเริ่มเรียนและหลังเรียนจบครบทุกบทเรียนแล้ว หากไม่เปิดใช้งานส่วนนี้ แบบทดสอบนี้จะถูกใช้เพื่อทดสอบหลังเรียนเพียงอย่างเดียว" />
-            </div>
-            <button type="button" onClick={() => handleSetRole(!isPreTest)}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 shrink-0 ${isPreTest ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${isPreTest ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-            </button>
-          </div>
-          <p className="-mt-2.5 text-xs text-gray-400">
-            {isPreTest
-              ? 'ผู้เรียนจะทำแบบทดสอบนี้ทั้งก่อนเรียนและหลังเรียน (มีคะแนน Pre-Test และ Post-Test)'
-              : 'ผู้เรียนจะทำแบบทดสอบนี้หลังเรียนจบเท่านั้น (มีเฉพาะคะแนน Post-Test)'}
-          </p>
 
-          <div>
-            <label className="text-xs font-bold text-gray-600 block mb-1.5">ใช้แบบทดสอบจาก</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => setSource('self')}
-                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${source === 'self' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
-                สร้างเอง (Internal)
-              </button>
-              <button type="button" onClick={() => setSource('google_form')}
-                className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${source === 'google_form' ? 'bg-freshket-500 text-white border-freshket-500' : 'bg-white text-gray-500 border-gray-200 hover:border-freshket-300'}`}>
-                Google Form
-              </button>
-            </div>
+          {/* Source tab — which kind of assessment this lesson uses. */}
+          <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
+            <button type="button" onClick={() => setSource('self')}
+              className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${source === 'self' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              สร้างเอง (Internal)
+            </button>
+            <button type="button" onClick={() => setSource('google_form')}
+              className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${source === 'google_form' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              Google Form
+            </button>
           </div>
 
           <div>
@@ -3268,15 +3269,40 @@ function QuizLessonSettingsCard({
 
           {currentAssessment ? (
             <>
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1.5">เวลาในการทำแบบทดสอบ</label>
-                <div className="relative">
-                  <input type="number" min={0} value={timeLimitMinutes} onChange={(e) => setTimeLimitMinutes(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:border-freshket-500 pr-12" />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">นาที</span>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-gray-600 block mb-1.5">ชื่อแบบทดสอบ <span className="text-rose-500">*</span></label>
+                  <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
+                    placeholder="เช่น แบบทดสอบเริ่มต้นใช้งานสำหรับพนักงาน"
+                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300"
+                  />
                 </div>
-                <p className="text-xs text-gray-400 mt-1">ใส่ 0 = ไม่จำกัดเวลา</p>
+                <div>
+                  <label className="text-xs font-bold text-gray-600 block mb-1.5">เวลาในการทำแบบทดสอบ</label>
+                  <div className="relative">
+                    <input type="number" min={0} value={timeLimitMinutes} onChange={(e) => setTimeLimitMinutes(e.target.value)}
+                      className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:border-freshket-500 pr-12" />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">นาที</span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">ใส่ 0 = ไม่จำกัดเวลา</p>
+                </div>
               </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <label className="text-xs font-bold text-gray-600">ใช้เป็นแบบทดสอบก่อนเรียน</label>
+                  <InfoTooltip text="ผู้เรียนจะต้องทำแบบทดสอบนี้ทั้งก่อนเริ่มเรียนและหลังเรียนจบครบทุกบทเรียนแล้ว หากไม่เปิดใช้งานส่วนนี้ แบบทดสอบนี้จะถูกใช้เพื่อทดสอบหลังเรียนเพียงอย่างเดียว" />
+                </div>
+                <button type="button" onClick={() => handleSetRole(!isPreTest)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 shrink-0 ${isPreTest ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                  <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${isPreTest ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              <p className="-mt-2.5 text-xs text-gray-400">
+                {isPreTest
+                  ? 'ผู้เรียนจะทำแบบทดสอบนี้ทั้งก่อนเรียนและหลังเรียน (มีคะแนน Pre-Test และ Post-Test)'
+                  : 'ผู้เรียนจะทำแบบทดสอบนี้หลังเรียนจบเท่านั้น (มีเฉพาะคะแนน Post-Test)'}
+              </p>
 
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-1.5 min-w-0">
@@ -3298,6 +3324,22 @@ function QuizLessonSettingsCard({
                 <p className="text-xs text-gray-400 mt-1">แสดงให้ผู้เรียนเห็นก่อนเริ่มทำแบบทดสอบ</p>
               </div>
 
+              {/* Google Form assessments are graded by Google, not by this app,
+                  so a pass threshold here would never be applied. */}
+              {!currentAssessment.googleFormUrl && (
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <label className="text-xs font-bold text-gray-600">ผ่านเมื่อทำแบบทดสอบได้คะแนนมากกว่าหรือเท่ากับ</label>
+                    <InfoTooltip text="เกณฑ์ที่ใช้ตัดสินผ่าน/ไม่ผ่านตอนตรวจคำตอบ มีผลกับแบบทดสอบที่สร้างเองเท่านั้น" />
+                  </div>
+                  <div className="relative shrink-0 w-24">
+                    <input type="number" min={0} max={100} value={passingScore} onChange={(e) => setPassingScore(e.target.value)}
+                      className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-freshket-500 text-right pr-7" />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">%</span>
+                  </div>
+                </div>
+              )}
+
               {/* These fields belong to the assessment document, not the
                   course draft, so they need their own save — the course's
                   "บันทึกการแก้ไข" button never touches them. */}
@@ -3310,7 +3352,7 @@ function QuizLessonSettingsCard({
               </button>
             </>
           ) : (
-            <p className="text-xs text-gray-400">เลือกแบบทดสอบก่อน จึงจะตั้งเวลาและ Anti-Cheat ได้</p>
+            <p className="text-xs text-gray-400">เลือกแบบทดสอบก่อน จึงจะตั้งค่ารายละเอียดได้</p>
           )}
         </div>
       )}
