@@ -69,6 +69,15 @@ export interface BucketQuestion {
   /** Which dimension this question scores into. */
   dimensionId: string
   options: BucketOption[]
+  /**
+   * Present on a Likert-style question: `text` is one statement (not two
+   * opposing ones) and `options` holds the 7 scale positions built by
+   * makeLikertOptions — position 1 agrees with the statement toward
+   * `agreePole`, position 7 toward the other pole of the dimension, position 4
+   * (the midpoint) is neutral and scores nothing. The take page uses this flag
+   * to render a 7-point scale instead of a list of option cards.
+   */
+  likert?: true
 }
 
 /**

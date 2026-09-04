@@ -284,7 +284,7 @@ export default function ActivityLogPage() {
   const currentList = tab === 'user' ? userActivities : adminActivities
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header title="Activity Log" subtitle="ติดตามกิจกรรมของผู้ใช้และ Admin แบบ real-time" />
       <AdministrationTabs />
 

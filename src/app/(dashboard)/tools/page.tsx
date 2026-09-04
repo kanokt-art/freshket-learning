@@ -488,7 +488,7 @@ export default function ToolsPage() {
 
   if (moduleLoading) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <div className="flex-1 flex items-center justify-center">
           <div className="size-8 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
         </div>
@@ -498,7 +498,7 @@ export default function ToolsPage() {
 
   if (!allowedModules.has('sale_tools')) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center max-w-xs">
             <div className="size-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
@@ -517,7 +517,7 @@ export default function ToolsPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header title="Tools" subtitle={`${tools.length} เครื่องมือ`} />
       <AdministrationTabs />
       <FreshketToolTabs />

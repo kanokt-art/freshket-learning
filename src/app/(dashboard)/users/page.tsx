@@ -481,7 +481,7 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header title="Members" subtitle={`${users.length} members`} />
       <AdministrationTabs />
 

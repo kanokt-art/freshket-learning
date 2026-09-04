@@ -2,7 +2,7 @@
 // No imports needed — keep this file dependency-free so it renders immediately.
 export default function DashboardLoading() {
   return (
-    <div className="flex flex-col h-full bg-slate-50 animate-pulse">
+    <div className="flex flex-col h-full bg-white animate-pulse">
 
       {/* ── Header skeleton ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-100 shrink-0">

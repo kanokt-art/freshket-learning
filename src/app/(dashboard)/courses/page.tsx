@@ -321,7 +321,7 @@ export default function CoursesPage() {
 
   if (moduleLoading) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <div className="flex-1 flex items-center justify-center">
           <div className="size-8 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
         </div>
@@ -331,7 +331,7 @@ export default function CoursesPage() {
 
   if (!allowedModules.has('lms')) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center max-w-xs">
             <div className="size-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
@@ -350,7 +350,7 @@ export default function CoursesPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 relative">
+    <div className="flex flex-col h-full bg-white relative">
       <div className="bg-freshket-500 lg:bg-white border-b border-freshket-600 lg:border-gray-100 px-6 py-4 shrink-0">
         <h1 className="text-lg font-bold text-white lg:text-gray-900">{isSuperAdmin ? 'หลักสูตรทั้งหมด' : 'My Course'}</h1>
         <p className="text-xs text-freshket-200 lg:text-gray-400 mt-0.5">{visible.length} หลักสูตร</p>
@@ -546,6 +546,12 @@ export default function CoursesPage() {
 
       {(showCreate || editingCourse) && (
         <CourseFormModal
+          // Keyed so switching between "create new" and editing a course (or
+          // between two courses) REMOUNTS the modal. Without this, React reuses
+          // the instance and its useState initialiser never re-runs, so the new
+          // form opened with the previously edited course's topics still in it
+          // — a brand-new course would arrive carrying that course's lessons.
+          key={editingCourse?.id ?? '__new__'}
           assessments={allAssessments}
           allUsers={allUsers}
           allTrainingRecords={allTrainingRecords}
@@ -2942,14 +2948,29 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
                     )}
                   </div>
                   {q.text && <p className="text-sm font-bold text-gray-800 mb-2">{q.text}</p>}
-                  <div className="space-y-1.5">
-                    {q.options.map((o) => (
-                      <div key={o.id} className="flex items-start gap-2 px-2.5 py-1.5 rounded-lg text-xs text-gray-600">
-                        <span className="shrink-0 size-3.5 rounded-full border-2 border-gray-300 mt-0.5" />
-                        <span className="flex-1 leading-relaxed">{o.text}</span>
+                  {q.likert ? (
+                    <div className="flex items-center gap-2 px-1">
+                      <span className="text-xs text-gray-400 shrink-0">เห็นด้วย</span>
+                      <div className="flex-1 flex items-center justify-between gap-1">
+                        {q.options.map((_, oi) => (
+                          <span key={oi}
+                            className="shrink-0 rounded-full border-2 border-gray-300"
+                            style={{ width: 12 + Math.abs(oi - (q.options.length - 1) / 2) * 3, height: 12 + Math.abs(oi - (q.options.length - 1) / 2) * 3 }}
+                          />
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                      <span className="text-xs text-gray-400 shrink-0">ไม่เห็นด้วย</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {q.options.map((o) => (
+                        <div key={o.id} className="flex items-start gap-2 px-2.5 py-1.5 rounded-lg text-xs text-gray-600">
+                          <span className="shrink-0 size-3.5 rounded-full border-2 border-gray-300 mt-0.5" />
+                          <span className="flex-1 leading-relaxed">{o.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -3904,19 +3925,37 @@ function tenureYears(startDate?: Date | string): number | null {
   return (Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000)
 }
 
-// Display form for the summary tab's tenure column — years/startDate is often
-// well under a year for new joiners, so fall back to whole months rather than
-// showing "0 ปี" for everyone in their first year.
+// Display form for the summary tab's tenure column — calendar-correct
+// (years/months/days via date-field subtraction, not a 365.25-day-average
+// division) so a joiner from a week ago reads "X วัน" instead of the old
+// version's Math.max(1, …) flooring anything under a month up to "1 เดือน".
 function fmtTenure(startDate?: Date | string): string {
-  const years = tenureYears(startDate)
-  if (years === null) return '—'
-  if (years < 1) {
-    const months = Math.max(1, Math.round(years * 12))
-    return `${months} เดือน`
+  const d = startDate instanceof Date ? startDate : startDate ? new Date(startDate) : null
+  if (!d || isNaN(d.getTime())) return '—'
+
+  const now = new Date()
+  let years = now.getFullYear() - d.getFullYear()
+  let months = now.getMonth() - d.getMonth()
+  let days = now.getDate() - d.getDate()
+
+  if (days < 0) {
+    months -= 1
+    // Days in the month before `now` — the correct denominator for a
+    // negative day difference regardless of month length (28-31 days).
+    days += new Date(now.getFullYear(), now.getMonth(), 0).getDate()
   }
-  const wholeYears = Math.floor(years)
-  const months = Math.round((years - wholeYears) * 12)
-  return months > 0 ? `${wholeYears} ปี ${months} เดือน` : `${wholeYears} ปี`
+  if (months < 0) {
+    years -= 1
+    months += 12
+  }
+
+  if (years <= 0 && months <= 0 && days <= 0) return 'วันนี้'
+
+  const parts: string[] = []
+  if (years > 0) parts.push(`${years} ปี`)
+  if (months > 0) parts.push(`${months} เดือน`)
+  if (days > 0) parts.push(`${days} วัน`)
+  return parts.join(' ')
 }
 
 function CourseFormModal({ assessments, allUsers, allTrainingRecords, departments, teams, onDone, userId, editCourse, isSuperAdmin }: {

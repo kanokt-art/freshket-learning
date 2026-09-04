@@ -37,7 +37,7 @@ export default function MyMandatoryPage() {
   if (!user) return null
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header title="Mandatory Reading" subtitle={`คู่มือ Product Knowledge รายสัปดาห์ · ${items.length} ฉบับ`} />
       {isSuperAdmin && <CourseManagementTabs />}
       <MyCourseTabs />

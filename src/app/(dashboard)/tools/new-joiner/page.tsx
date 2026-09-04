@@ -508,7 +508,7 @@ export default function NewJoinerPage() {
 
   if (!isNewJoiner && !isAdmin) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <Header title="New Joiner Hub" subtitle="สำหรับพนักงานใหม่" />
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
@@ -525,7 +525,7 @@ export default function NewJoinerPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header
         title="New Joiner Hub"
         subtitle="คู่มือสำหรับพนักงานใหม่ Freshket"

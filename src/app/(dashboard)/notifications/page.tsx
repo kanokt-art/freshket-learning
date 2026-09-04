@@ -20,7 +20,7 @@ export default function NotificationsPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header
         title="การแจ้งเตือน"
         subtitle={unreadCount > 0 ? `${unreadCount} รายการยังไม่ได้อ่าน` : 'ทั้งหมดอ่านแล้ว'}

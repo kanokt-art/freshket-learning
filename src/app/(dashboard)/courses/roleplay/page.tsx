@@ -1424,7 +1424,7 @@ export default function RoleplayPage() {
   // ── Module access gate ──────────────────────────────────────────────────────
   if (moduleLoading) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <div className="flex-1 flex items-center justify-center">
           <div className="size-8 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
         </div>
@@ -1434,7 +1434,7 @@ export default function RoleplayPage() {
 
   if (!allowedModules.has('roleplay')) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center max-w-xs">
             <div className="size-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
@@ -1455,7 +1455,7 @@ export default function RoleplayPage() {
   // ── Sale user view ──────────────────────────────────────────────────────────
   if (!isManager) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <Header title="Role Play" subtitle="ผลการประเมิน Roleplay ของฉัน" />
         <MyCourseTabs />
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
@@ -1756,7 +1756,7 @@ export default function RoleplayPage() {
   const memberAssessments = (m: UserProfile) => assessments.filter(a => a.subjectUid === m.uid)
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header
         title="Role Play Assessment"
         subtitle="ประเมิน Roleplay ของทีม"

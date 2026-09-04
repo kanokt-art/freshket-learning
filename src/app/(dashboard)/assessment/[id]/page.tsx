@@ -402,7 +402,7 @@ export default function TakeAssessmentPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full bg-slate-50">
+      <div className="flex items-center justify-center h-full bg-white">
         <span className="size-8 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
@@ -410,7 +410,7 @@ export default function TakeAssessmentPage() {
 
   if (!assessment) {
     return (
-      <div className="flex flex-col items-center justify-center h-full bg-slate-50 text-gray-400 gap-3">
+      <div className="flex flex-col items-center justify-center h-full bg-white text-gray-400 gap-3">
         <p className="text-sm">{loadError ?? 'ไม่พบแบบทดสอบนี้'}</p>
         <button onClick={() => router.back()} className="text-sm text-freshket-600 hover:underline">← กลับ</button>
       </div>
@@ -439,7 +439,7 @@ export default function TakeAssessmentPage() {
   const progress = ((currentIndex) / total) * 100
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       {/* Top bar */}
       <div className="bg-white border-b border-gray-100 px-6 py-4 flex items-center gap-4">
         <button onClick={() => router.back()} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors shrink-0">
@@ -576,7 +576,7 @@ export default function TakeAssessmentPage() {
 // ── Anti-Cheat gate & warning ─────────────────────────────────────────────────
 function AntiCheatGate({ onStart }: { onStart: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6">
+    <div className="flex flex-col items-center justify-center h-full bg-white p-6">
       <div className="animate-pop-in max-w-md w-full bg-white rounded-2xl border border-gray-100 shadow-sm p-8 text-center">
         <div className="size-14 rounded-2xl bg-freshket-100 flex items-center justify-center mx-auto mb-4">
           <svg className="size-7 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
@@ -856,7 +856,7 @@ function ResultScreen({
   const openEndedCount = questions.filter((q) => q.type === 'open_ended').length
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 overflow-auto">
+    <div className="flex flex-col h-full bg-white overflow-auto">
       <div className="max-w-lg mx-auto w-full p-6 space-y-5">
 
         {/* Score card */}

@@ -19,6 +19,7 @@ export default function BucketAssessmentPage() {
   const { user } = useAuth()
   const searchParams = useSearchParams()
   const courseId = searchParams.get('courseId') ?? undefined
+  const lessonId = searchParams.get('lessonId') ?? undefined
   const def = getBucketAssessment(searchParams.get('assessment') ?? undefined) ?? MBTI_DEFINITION
 
   const [answers, setAnswers] = useState<Record<string, string>>({})
@@ -63,6 +64,14 @@ export default function BucketAssessmentPage() {
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'ส่งคำตอบไม่สำเร็จ')
       setResult(json as BucketResult)
+      // Tick the course lesson complete on the way back. Same handshake the
+      // graded quizzes use — the questionnaire counts as done only once it has
+      // actually been submitted, never merely opened.
+      if (courseId && lessonId) {
+        try {
+          sessionStorage.setItem('assessment_graded_lesson', JSON.stringify({ courseId, lessonId }))
+        } catch { /* private mode — the learner can retake to tick it */ }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'ส่งคำตอบไม่สำเร็จ')
     } finally {
@@ -75,7 +84,7 @@ export default function BucketAssessmentPage() {
   // ── Result screen ───────────────────────────────────────────────────────────
   if (result) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <Header title="ผลแบบประเมิน" subtitle={def.title} />
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 space-y-4">
@@ -128,9 +137,9 @@ export default function BucketAssessmentPage() {
             </div>
 
             <div className="flex gap-2 pb-6">
-              <Link href="/profile"
+              <Link href={courseId ? `/courses/${courseId}` : '/profile'}
                 className="flex-1 py-3 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold text-center transition-colors">
-                ดูในโปรไฟล์
+                {courseId ? 'กลับไปที่หลักสูตร' : 'ดูในโปรไฟล์'}
               </Link>
               <button type="button"
                 onClick={() => { setResult(null); setAnswers({}); setIndex(0) }}
@@ -149,7 +158,7 @@ export default function BucketAssessmentPage() {
   const currentDimension = dimensionOf(current.dimensionId)
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header title={def.title} subtitle={`${questions.length} ข้อ · ประมาณ ${def.estimatedMinutes} นาที`} />
 
       <div className="flex-1 overflow-y-auto">
@@ -174,33 +183,67 @@ export default function BucketAssessmentPage() {
               {current.text ?? 'เลือกข้อที่ตรงกับคุณมากกว่า'}
             </p>
 
-            <div className="space-y-2.5">
-              {current.options.map((o) => {
-                const selected = answers[current.id] === o.id
-                return (
-                  <button key={o.id} type="button" onClick={() => choose(current.id, o.id)}
-                    className={`w-full text-left px-4 py-3.5 rounded-xl border text-sm transition-all duration-150 ${
-                      selected
-                        ? 'bg-freshket-50 border-freshket-300 text-freshket-800 font-bold'
-                        : 'bg-white border-gray-200 text-gray-700 hover:border-freshket-200 hover:bg-freshket-50/40'
-                    }`}
-                  >
-                    <span className="flex items-start gap-2.5">
-                      <span className={`shrink-0 size-5 rounded-full border-2 flex items-center justify-center mt-0.5 ${
-                        selected ? 'border-freshket-500 bg-freshket-500' : 'border-gray-300'
-                      }`}>
-                        {selected && (
-                          <svg className="size-3 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" />
-                          </svg>
-                        )}
+            {current.likert ? (
+              // 7-point Likert scale: circles grow from the center outward so
+              // "เห็นด้วยอย่างยิ่ง" reads as a visibly stronger pick than
+              // "ค่อนข้างเห็นด้วย" — matching the strength weighting the scorer
+              // actually applies (see lib/bucketAssessments/likert.ts).
+              <div className="flex items-center gap-2 sm:gap-3 pt-2">
+                <span className="text-xs font-bold text-gray-500 shrink-0 w-16 sm:w-20 text-right leading-tight">
+                  ฉันเห็นด้วย
+                </span>
+                <div className="flex-1 flex items-center justify-between gap-1.5 sm:gap-2">
+                  {current.options.map((o, i) => {
+                    const selected = answers[current.id] === o.id
+                    const distanceFromCenter = Math.abs(i - (current.options.length - 1) / 2)
+                    const size = 24 + distanceFromCenter * 6 // 24px center → 42px ends
+                    const isLeftHalf = i < (current.options.length - 1) / 2
+                    const ringColor = distanceFromCenter < 0.5 ? 'border-gray-300'
+                      : isLeftHalf ? 'border-freshket-500' : 'border-violet-400'
+                    const fillColor = distanceFromCenter < 0.5 ? 'bg-gray-300'
+                      : isLeftHalf ? 'bg-freshket-500' : 'bg-violet-400'
+                    return (
+                      <button key={o.id} type="button" onClick={() => choose(current.id, o.id)}
+                        title={`ตำแหน่ง ${i + 1} จาก ${current.options.length}`}
+                        className={`shrink-0 rounded-full border-2 transition-all duration-150 hover:opacity-80 ${ringColor} ${selected ? fillColor : 'bg-transparent'}`}
+                        style={{ width: size, height: size }}
+                      />
+                    )
+                  })}
+                </div>
+                <span className="text-xs font-bold text-gray-500 shrink-0 w-16 sm:w-20 leading-tight">
+                  ฉันไม่เห็นด้วย
+                </span>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {current.options.map((o) => {
+                  const selected = answers[current.id] === o.id
+                  return (
+                    <button key={o.id} type="button" onClick={() => choose(current.id, o.id)}
+                      className={`w-full text-left px-4 py-3.5 rounded-xl border text-sm transition-all duration-150 ${
+                        selected
+                          ? 'bg-freshket-50 border-freshket-300 text-freshket-800 font-bold'
+                          : 'bg-white border-gray-200 text-gray-700 hover:border-freshket-200 hover:bg-freshket-50/40'
+                      }`}
+                    >
+                      <span className="flex items-start gap-2.5">
+                        <span className={`shrink-0 size-5 rounded-full border-2 flex items-center justify-center mt-0.5 ${
+                          selected ? 'border-freshket-500 bg-freshket-500' : 'border-gray-300'
+                        }`}>
+                          {selected && (
+                            <svg className="size-3 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" />
+                            </svg>
+                          )}
+                        </span>
+                        <span className="flex-1 leading-relaxed">{o.text}</span>
                       </span>
-                      <span className="flex-1 leading-relaxed">{o.text}</span>
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           {error && (

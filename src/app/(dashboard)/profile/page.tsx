@@ -98,7 +98,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header title="โปรไฟล์" subtitle="ข้อมูลของฉัน" />
 
       <div className="flex-1 overflow-y-auto">

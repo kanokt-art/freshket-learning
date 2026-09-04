@@ -124,14 +124,14 @@ export default function ModuleSettingsPage() {
   // (the same shape the sibling /admin/announcements page uses).
   if (user && !isSuperAdmin) {
     return (
-      <div className="flex items-center justify-center h-full bg-slate-50">
+      <div className="flex items-center justify-center h-full bg-white">
         <p className="text-sm text-gray-400">ไม่มีสิทธิ์เข้าถึงหน้านี้</p>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       {/* Header */}
       <header className="sticky top-0 z-10 bg-white border-b border-gray-100 h-16 flex items-center px-6 gap-4">
         <div className="flex-1 min-w-0">

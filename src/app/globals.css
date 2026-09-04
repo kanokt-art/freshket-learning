@@ -28,7 +28,11 @@
 
   body {
     font-family: 'Noto Sans Thai', 'Inter', sans-serif;
-    @apply bg-slate-50 antialiased;
+    /* Page background is pure white (bg-canvas, DS-#029). Cards carry their own
+       border (--card-border), so they stay defined without a grey page behind
+       them. Grey tints are still used INSIDE cards — stat tiles, table stripes,
+       hover states — just not as the canvas. */
+    @apply bg-white antialiased;
     color: #393d42;
   }
 

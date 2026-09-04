@@ -118,7 +118,7 @@ export default function UserReportPage() {
 
   if (loading) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <Header title="รายงานพนักงาน" />
         <div className="flex-1 flex items-center justify-center">
           <span className="size-8 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
@@ -129,7 +129,7 @@ export default function UserReportPage() {
 
   if (!profile) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <Header title="รายงานพนักงาน" />
         <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-3">
           <svg className="size-12 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
@@ -152,7 +152,7 @@ export default function UserReportPage() {
   ]
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header title="รายงานพนักงาน" subtitle={profile.displayName} />
 
       <div className="flex-1 overflow-auto">

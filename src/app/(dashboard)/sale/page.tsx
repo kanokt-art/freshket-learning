@@ -304,7 +304,7 @@ export default function SaleDashboardPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 overflow-auto">
+    <div className="flex flex-col h-full bg-white overflow-auto">
       <div className="flex-1 flex flex-col lg:flex-row min-h-0">
 
         {/* ── LEFT / MAIN ────────────────────────────────────────────────────── */}
@@ -392,7 +392,7 @@ export default function SaleDashboardPage() {
           {/* Empty state — ไม่มีหลักสูตรคงค้าง (left, when nothing's outstanding) + Calendar (right).
               Sale-role only — super_admin's overview has no personal course schedule to show. */}
           {!isAdmin && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
               {/* Left column always has a card now. It used to render only when
                   the learner had NOTHING assigned at all, so the normal case —
                   courses assigned, none outstanding — left a blank half-width gap
@@ -403,7 +403,7 @@ export default function SaleDashboardPage() {
                 onOpenCourse={(id) => router.push(`/courses/${id}`)}
                 onSeeAll={() => router.push('/courses')}
               />
-              <div className="lg:col-start-2">
+              <div className="lg:col-start-2 h-full">
                 <CalendarCard demoMode={DEMO_MODE} />
               </div>
             </div>
@@ -624,7 +624,7 @@ function PendingCoursesCard({
 
   if (courses.length === 0) {
     return (
-      <div className="card-ds p-10 flex flex-col items-center text-center">
+      <div className="card-ds p-10 h-full flex flex-col items-center justify-center text-center">
         <div className="size-20 rounded-full bg-freshket-100 flex items-center justify-center mb-4">
           <svg className="size-10 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -645,7 +645,7 @@ function PendingCoursesCard({
   }
 
   return (
-    <div className="card-ds p-5">
+    <div className="card-ds p-5 h-full">
       <div className="flex items-center justify-between gap-2 mb-4">
         <div className="flex items-center gap-2 min-w-0">
           <h2 className="text-base font-bold text-gray-900">หลักสูตรคงค้าง</h2>

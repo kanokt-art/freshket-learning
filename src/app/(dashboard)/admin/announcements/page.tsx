@@ -52,7 +52,7 @@ export default function AnnouncementsAdminPage() {
 
   if (user && user.role !== 'super_admin') {
     return (
-      <div className="flex items-center justify-center h-full bg-slate-50">
+      <div className="flex items-center justify-center h-full bg-white">
         <p className="text-sm text-gray-400">ไม่มีสิทธิ์เข้าถึงหน้านี้</p>
       </div>
     )
@@ -111,7 +111,7 @@ export default function AnnouncementsAdminPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header title="ข่าวสาร (News Feed)" subtitle={`${announcements.length} รายการ`} />
       <AdministrationTabs />
 

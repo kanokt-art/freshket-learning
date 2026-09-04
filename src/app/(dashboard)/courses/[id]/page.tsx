@@ -257,7 +257,7 @@ export default function CourseDetailPage() {
 
   if (loading || moduleLoading) {
     return (
-      <div className="flex items-center justify-center h-full bg-slate-50">
+      <div className="flex items-center justify-center h-full bg-white">
         <span className="size-8 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
@@ -268,7 +268,7 @@ export default function CourseDetailPage() {
   // the list but could still open any course by direct URL.
   if (!allowedModules.has('lms')) {
     return (
-      <div className="flex flex-col h-full bg-slate-50">
+      <div className="flex flex-col h-full bg-white">
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center max-w-xs">
             <div className="size-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
@@ -288,7 +288,7 @@ export default function CourseDetailPage() {
 
   if (!course) {
     return (
-      <div className="flex flex-col items-center justify-center h-full bg-slate-50 gap-3">
+      <div className="flex flex-col items-center justify-center h-full bg-white gap-3">
         <p className="text-sm text-gray-400">ไม่พบหลักสูตรนี้</p>
         <button onClick={() => router.back()} className="text-sm text-freshket-600 hover:underline">← กลับ</button>
       </div>
@@ -342,7 +342,7 @@ export default function CourseDetailPage() {
   const currentStep = steps.find((s) => s.id === activeStep) ?? steps[0]
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
 
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
       {/* select-none: this bar is app chrome, not content. Without it, clicking
@@ -841,10 +841,14 @@ function LessonBrowserStep({
   const selectedLessonId = selectedLesson?.id
   const selectedLessonType = selectedLesson?.type
   const selectedIsGradedQuiz = selectedLesson?.type === 'quiz' && !!selectedLesson.quizRole
+  // A personality questionnaire is completed by SUBMITTING it, not by opening
+  // it — same rule as a graded quiz. Without this a course whose only lesson is
+  // the questionnaire could be finished having answered nothing.
+  const selectedIsPersonality = selectedLessonType === 'personality'
   useEffect(() => {
-    if (!selectedLessonId || selectedLessonType === 'video' || selectedIsGradedQuiz) return
+    if (!selectedLessonId || selectedLessonType === 'video' || selectedIsGradedQuiz || selectedIsPersonality) return
     onLessonCompleteRef.current(selectedLessonId)
-  }, [selectedLessonId, selectedLessonType, selectedIsGradedQuiz])
+  }, [selectedLessonId, selectedLessonType, selectedIsGradedQuiz, selectedIsPersonality])
 
   // Every YouTube-video lesson must be watched before the media step can be
   // marked done — this is the anti-skip gate (non-YouTube media isn't enforceable).
@@ -861,7 +865,7 @@ function LessonBrowserStep({
   // ≥95% watched), which is the intended bar here.
   const contentLessonIds = topics
     .flatMap((t) => t.lessons)
-    .filter((l) => l.type !== 'quiz')
+    .filter((l) => l.type !== 'quiz' && l.type !== 'personality')
     .map((l) => l.id)
   const courseworkDone = contentLessonIds.every((id) => completedLessonIds.includes(id))
 
@@ -879,7 +883,17 @@ function LessonBrowserStep({
     l.quizRole === 'pre_test' ? [l.id, `${l.id}:post`] : [l.id],
   )
   const gradedQuizzesDone = gradedQuizKeys.every((k) => completedLessonIds.includes(k))
-  const canFinish = allVideosWatched && courseworkDone && gradedQuizzesDone
+
+  // Personality lessons gate the finish too, for the same reason the graded
+  // quizzes do: they tick only on submit, so this is what stops an
+  // assessment-only course being completed without answering it.
+  const personalityLessonIds = topics
+    .flatMap((t) => t.lessons)
+    .filter((l) => l.type === 'personality')
+    .map((l) => l.id)
+  const personalityDone = personalityLessonIds.every((id) => completedLessonIds.includes(id))
+
+  const canFinish = allVideosWatched && courseworkDone && gradedQuizzesDone && personalityDone
 
   // A lesson tagged 'pre_test' is sat TWICE — once before the material and
   // again once the rest of the course is finished — so the pair yields a
@@ -1068,9 +1082,10 @@ function LessonBrowserStep({
                       เลือกข้อที่ตรงกับตัวคุณมากกว่า ผลจะถูกบันทึกไว้ในโปรไฟล์ของคุณ
                     </p>
                     <div>
-                      <Link href={`/personality?assessment=${def.id}&courseId=${course.id}`}
+                      <Link
+                        href={`/personality?assessment=${def.id}&courseId=${course.id}&lessonId=${selectedLesson.id}`}
                         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
-                        เริ่มทำแบบประเมิน
+                        {completedLessonIds.includes(selectedLesson.id) ? 'ทำแบบประเมินอีกครั้ง' : 'เริ่มทำแบบประเมิน'}
                       </Link>
                     </div>
                   </div>

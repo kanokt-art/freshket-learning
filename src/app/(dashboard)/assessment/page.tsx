@@ -18,6 +18,7 @@ import {
 } from '@/types/assessment'
 import { getClientFirestore } from '@/lib/firebase/client'
 import { alertError } from '@/lib/ui/alert'
+import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
 
@@ -98,7 +99,7 @@ export default function AssessmentPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="flex flex-col h-full bg-white">
       <Header title="แบบทดสอบ" subtitle={`${all.length} ชุด`} />
       <CourseManagementTabs />
 
@@ -159,6 +160,63 @@ export default function AssessmentPage() {
             </table>
           </div>
         )}
+
+        {/* Bucket assessments — listed separately because they are a different
+            kind of thing: no answer key, no score and no pass mark, so the
+            columns above (คะแนนเต็ม / เกณฑ์ผ่าน) do not apply. They are defined
+            in code (lib/bucketAssessments) rather than authored here, so the
+            rows are read-only — there is nothing to edit, publish or delete. */}
+        <div className="mt-8">
+          <div className="flex items-center gap-2 mb-1">
+            <h2 className="text-base font-bold text-gray-900">แบบประเมินผลลัพธ์</h2>
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">
+              {BUCKET_ASSESSMENT_LIST.length}
+            </span>
+          </div>
+          <p className="text-sm text-gray-500 mb-4">
+            แบบประเมินที่ไม่มีคำตอบถูกผิดและไม่มีคะแนน — ผลลัพธ์มาจากตัวเลือกที่ผู้เรียนเลือกมากที่สุด
+            ชุดคำถามเป็นชุดมาตรฐานของระบบ จึงแก้ไขหรือลบไม่ได้
+          </p>
+
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="text-left text-xs font-bold text-gray-500 px-4 py-3">ชื่อแบบประเมิน</th>
+                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">จำนวนข้อ</th>
+                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">ผลลัพธ์</th>
+                  <th className="text-left text-xs font-bold text-gray-500 px-3 py-3">ผลลัพธ์ที่เป็นไปได้</th>
+                  <th className="w-24" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {BUCKET_ASSESSMENT_LIST.map((def) => (
+                  <tr key={def.id} className="hover:bg-gray-50/60 transition-colors">
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-bold text-gray-800">{def.title}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{def.description}</p>
+                    </td>
+                    <td className="px-3 py-3 text-center text-sm text-gray-600 tabular-nums">{def.questions.length}</td>
+                    <td className="px-3 py-3 text-center text-sm text-gray-600 tabular-nums">{def.outcomes.length}</td>
+                    <td className="px-3 py-3">
+                      <p className="text-xs text-gray-500 line-clamp-2">
+                        {def.outcomes.map((o) => o.title).join(' · ')}
+                      </p>
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <button
+                        onClick={() => router.push(`/personality?assessment=${def.id}`)}
+                        className="text-xs font-bold text-freshket-600 hover:text-freshket-700 transition-colors whitespace-nowrap"
+                      >
+                        ดูตัวอย่าง →
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       {/* Delete confirm modal */}

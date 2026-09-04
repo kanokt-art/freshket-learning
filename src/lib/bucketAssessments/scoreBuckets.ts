@@ -36,15 +36,17 @@ export function scoreBuckets(def: BucketAssessmentDefinition, answers: BucketAns
     const dimensionTotals = totals[q.dimensionId]
     if (!dimensionTotals) continue
 
-    let counted = false
+    // Choosing a REAL option counts as answered even when it carries zero
+    // weight — the Likert midpoint ("neutral") has empty weights by design
+    // (see lib/bucketAssessments/likert.ts), and a learner who genuinely feels
+    // neutral on every question must not be told they didn't answer enough.
+    answered++
     for (const w of option.weights) {
       // Ignore a weight aimed at a bucket outside this question's dimension —
       // a definition typo should not silently create a phantom bucket.
       if (!(w.bucketId in dimensionTotals)) continue
       dimensionTotals[w.bucketId] += w.weight ?? 1
-      counted = true
     }
-    if (counted) answered++
   }
 
   const dimensions: DimensionResult[] = def.dimensions.map((d) => {
