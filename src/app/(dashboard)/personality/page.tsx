@@ -224,7 +224,7 @@ export default function BucketAssessmentPage() {
               </button>
             ) : (
               <button type="button" onClick={() => setIndex((i) => Math.min(i + 1, questions.length - 1))}
-                className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors">
+                className="flex-1 py-3 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors">
                 ถัดไป
               </button>
             )}
