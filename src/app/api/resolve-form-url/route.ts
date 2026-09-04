@@ -33,7 +33,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const res = await fetch(parsed.toString(), { method: 'GET', redirect: 'follow' })
+    // Bounded so a slow/unresponsive forms.gle can't hang this function for
+    // its full max duration — callers would rather get a fast 502 and fall
+    // back to the raw link than wait tens of seconds for a timeout.
+    const res = await fetch(parsed.toString(), { method: 'GET', redirect: 'follow', signal: AbortSignal.timeout(8_000) })
     // fetch() follows redirects transparently — res.url is the final landing page.
     if (!res.url.includes('docs.google.com/forms')) {
       return NextResponse.json({ error: 'Link did not resolve to a Google Form' }, { status: 422 })

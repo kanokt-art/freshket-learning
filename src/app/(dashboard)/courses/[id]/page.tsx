@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import Link from 'next/link'
+import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { useParams, useRouter } from 'next/navigation'
 import { useCourse, useCourseTrainingRecords, useAllUsers, useTeams, useDepartments } from '@/hooks/useFirestore'
 import { useAuth } from '@/hooks/useAuth'
@@ -785,6 +787,11 @@ function LessonTypeIcon({ type, className }: { type: LessonType; className?: str
       <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
     </svg>
   )
+  if (type === 'personality') return (
+    <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+    </svg>
+  )
   return (
     <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
@@ -1007,10 +1014,22 @@ function LessonBrowserStep({
               )}
 
               {selectedLesson.type === 'link' && selectedLesson.linkUrl && (
-                <a href={selectedLesson.linkUrl} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
-                  เปิดลิงก์ภายนอก
-                </a>
+                // A lesson can point at a page inside this app (the MBTI
+                // questionnaire does) — those navigate in place, since opening
+                // an in-app route in a new tab loses the session context and
+                // reads as leaving the course. Only a real external URL gets
+                // target="_blank".
+                selectedLesson.linkUrl.startsWith('/') ? (
+                  <Link href={selectedLesson.linkUrl}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
+                    เริ่มบทเรียน
+                  </Link>
+                ) : (
+                  <a href={selectedLesson.linkUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
+                    เปิดลิงก์ภายนอก
+                  </a>
+                )
               )}
 
               {selectedLesson.type === 'quiz' && selectedLesson.assessmentId && (
@@ -1039,6 +1058,24 @@ function LessonBrowserStep({
                   </div>
                 </div>
               )}
+
+              {selectedLesson.type === 'personality' && (() => {
+                const def = getBucketAssessment(selectedLesson.bucketAssessmentId) ?? MBTI_DEFINITION
+                return (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-400">
+                      แบบประเมิน {def.questions.length} ข้อ ไม่มีคำตอบถูกผิดและไม่มีคะแนนผ่าน/ไม่ผ่าน
+                      เลือกข้อที่ตรงกับตัวคุณมากกว่า ผลจะถูกบันทึกไว้ในโปรไฟล์ของคุณ
+                    </p>
+                    <div>
+                      <Link href={`/personality?assessment=${def.id}&courseId=${course.id}`}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
+                        เริ่มทำแบบประเมิน
+                      </Link>
+                    </div>
+                  </div>
+                )
+              })()}
 
               {selectedLesson.type === 'assignment' && (
                 <div className="space-y-2">

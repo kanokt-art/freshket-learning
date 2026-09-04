@@ -18,7 +18,13 @@ export const LEVEL_COLORS: Record<CourseLevel, string> = {
 
 export type ResourceType = 'pdf' | 'video' | 'link' | 'document' | 'playbook' | 'sop'
 
-export type LessonType = 'video' | 'article' | 'file' | 'link' | 'quiz' | 'assignment'
+// 'personality' is the MBTI questionnaire. It is a separate type from 'quiz'
+// because it is not graded: the quiz path runs answers through gradeSubmission
+// against Choice.isCorrect and produces a 0-100 score against passingScore,
+// and a personality questionnaire has neither a key nor a passing mark. Its
+// questions live in code (lib/personality/mbtiQuestions.ts) rather than in an
+// Assessment document, so the lesson needs no assessmentId either.
+export type LessonType = 'video' | 'article' | 'file' | 'link' | 'quiz' | 'assignment' | 'personality'
 
 export interface CourseLesson {
   id: string
@@ -44,6 +50,10 @@ export interface CourseLesson {
   // roster (AssignedLearnersTable). At most one lesson per course should
   // carry each value, but that's enforced by the picker UI, not this type.
   quizRole?: 'pre_test' | 'post_test'
+  // personality — which bucket assessment this lesson runs, by definition id
+  // (see lib/bucketAssessments). Absent on lessons saved before the selling
+  // style questionnaire existed, which are all MBTI.
+  bucketAssessmentId?: string
   // assignment / homework
   assignmentPrompt?: string
 }
@@ -56,12 +66,13 @@ export interface CourseTopic {
 }
 
 export const LESSON_TYPE_LABELS: Record<LessonType, string> = {
-  video:      'วิดีโอ',
-  article:    'บทความ',
-  file:       'Google Slide',
-  link:       'ลิงก์ภายนอก',
-  quiz:       'แบบฝึกหัด',
-  assignment: 'การบ้าน',
+  video:       'วิดีโอ',
+  article:     'บทความ',
+  file:        'Google Slide',
+  link:        'ลิงก์ภายนอก',
+  quiz:        'แบบฝึกหัด',
+  assignment:  'การบ้าน',
+  personality: 'แบบประเมินบุคลิกภาพ',
 }
 
 export interface GradeBand {

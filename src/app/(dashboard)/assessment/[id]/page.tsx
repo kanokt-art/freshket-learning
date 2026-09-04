@@ -107,10 +107,15 @@ export default function TakeAssessmentPage() {
     if (!formUrl || !formUrl.includes('forms.gle')) return
     let cancelled = false
     setResolvingForm(true)
+    // Bounded so a slow/unreachable forms.gle can't leave the spinner stuck
+    // forever — always falls through to the "open new tab" fallback within 10s.
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10_000)
     authedFetch('/api/resolve-form-url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: formUrl }),
+      signal: controller.signal,
     })
       .then(async (res) => {
         if (!res.ok || cancelled) return
@@ -118,8 +123,8 @@ export default function TakeAssessmentPage() {
         if (!cancelled) setResolvedFormUrl(json.resolvedUrl)
       })
       .catch(() => { /* falls back to the "open new tab" branch below */ })
-      .finally(() => { if (!cancelled) setResolvingForm(false) })
-    return () => { cancelled = true }
+      .finally(() => { clearTimeout(timeout); if (!cancelled) setResolvingForm(false) })
+    return () => { cancelled = true; clearTimeout(timeout); controller.abort() }
   }, [assessment?.googleFormUrl])
 
   // No server-side grading exists for a Google Form (Google owns the response

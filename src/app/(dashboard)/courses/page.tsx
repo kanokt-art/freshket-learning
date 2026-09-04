@@ -49,6 +49,7 @@ import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { alertError, confirmAction } from '@/lib/ui/alert'
 import { authedFetch } from '@/lib/api/authedFetch'
+import { BUCKET_ASSESSMENT_LIST, getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 const DEMO_MODE = getDemoMode()
 const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS) as CourseCategory[]
 
@@ -1469,10 +1470,15 @@ function QuizPreviewInline({ assessment }: { assessment?: Assessment }) {
     if (!isGoogleForm || !assessment?.googleFormUrl?.includes('forms.gle')) return
     let cancelled = false
     setResolvingForm(true)
+    // Bounded so a slow/unreachable forms.gle can't leave the spinner stuck
+    // forever — always falls through to the "open new tab" fallback within 10s.
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10_000)
     authedFetch('/api/resolve-form-url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: assessment.googleFormUrl }),
+      signal: controller.signal,
     })
       .then(async (res) => {
         if (!res.ok || cancelled) return
@@ -1480,8 +1486,8 @@ function QuizPreviewInline({ assessment }: { assessment?: Assessment }) {
         if (!cancelled) setResolvedFormUrl(json.resolvedUrl)
       })
       .catch(() => { /* falls back to the "open new tab" branch below */ })
-      .finally(() => { if (!cancelled) setResolvingForm(false) })
-    return () => { cancelled = true }
+      .finally(() => { clearTimeout(timeout); if (!cancelled) setResolvingForm(false) })
+    return () => { cancelled = true; clearTimeout(timeout); controller.abort() }
   }, [isGoogleForm, assessment?.googleFormUrl])
   const formEmbedUrl = isGoogleForm ? toFormEmbedUrl(resolvedFormUrl ?? assessment?.googleFormUrl ?? '') : null
 
@@ -2246,6 +2252,11 @@ function LessonTypeIcon({ type, className }: { type: LessonType; className?: str
       <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
     </svg>
   )
+  if (type === 'personality') return (
+    <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+    </svg>
+  )
   return (
     <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
@@ -2689,10 +2700,16 @@ function AssessmentPreviewContent({ assessment }: { assessment: Assessment }) {
     if (!isGoogleForm || !assessment.googleFormUrl?.includes('forms.gle')) return
     let cancelled = false
     setResolving(true)
+    // Bounded so a slow/unreachable forms.gle (or a hung server-side fetch in
+    // the API route) can't leave the spinner stuck forever — the effect always
+    // falls through to the raw-link fallback within 10s.
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10_000)
     authedFetch('/api/resolve-form-url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: assessment.googleFormUrl }),
+      signal: controller.signal,
     })
       .then(async (res) => {
         if (!res.ok || cancelled) return
@@ -2700,8 +2717,8 @@ function AssessmentPreviewContent({ assessment }: { assessment: Assessment }) {
         if (!cancelled) setResolvedFormUrl(json.resolvedUrl)
       })
       .catch(() => { /* falls back to showing the raw link below */ })
-      .finally(() => { if (!cancelled) setResolving(false) })
-    return () => { cancelled = true }
+      .finally(() => { clearTimeout(timeout); if (!cancelled) setResolving(false) })
+    return () => { cancelled = true; clearTimeout(timeout); controller.abort() }
   }, [isGoogleForm, assessment.googleFormUrl])
 
   const embedUrl = isGoogleForm ? toFormEmbedUrl(resolvedFormUrl ?? assessment.googleFormUrl ?? '') : null
@@ -2721,7 +2738,7 @@ function AssessmentPreviewContent({ assessment }: { assessment: Assessment }) {
             กำลังตรวจสอบลิงก์แบบฟอร์ม...
           </div>
         ) : embedUrl ? (
-          <div className="w-full max-w-md rounded-xl overflow-hidden border border-gray-200 shadow-sm" style={{ height: '420px' }}>
+          <div className="w-full rounded-xl overflow-hidden border border-gray-200 shadow-sm" style={{ height: '640px' }}>
             <iframe src={embedUrl} className="w-full h-full" title={assessment.title} style={{ border: 'none' }} />
           </div>
         ) : (
@@ -2802,13 +2819,149 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
   // from the Lessons tab entirely (see LessonsBuilder / QuizStripPreview), so
   // this only ever edits video / file / link / assignment. The right column
   // shows a live preview of whatever is currently filled in on the left.
+
+  // URL fields are drafted locally and only committed to lesson state (and
+  // thus the preview) when the user clicks "บันทึกลิงก์" — typing a partial
+  // URL must not thrash the iframe on every keystroke.
+  const [videoUrlDraft, setVideoUrlDraft] = useState(lesson.videoUrl ?? '')
+  const [fileUrlDraft, setFileUrlDraft] = useState(lesson.fileUrl ?? '')
+  useEffect(() => { setVideoUrlDraft(lesson.videoUrl ?? '') }, [lesson.id, lesson.videoUrl])
+  useEffect(() => { setFileUrlDraft(lesson.fileUrl ?? '') }, [lesson.id, lesson.fileUrl])
+
+  // A saved Google Slide URL is locked (read-only, grayed) until the user
+  // explicitly clicks the edit-pencil icon — guards against accidentally
+  // retyping over a working link. Unlocks automatically when there's nothing
+  // saved yet, and re-locks whenever the lesson selection changes.
+  const [fileUrlUnlocked, setFileUrlUnlocked] = useState(false)
+  useEffect(() => { setFileUrlUnlocked(false) }, [lesson.id])
+  const fileUrlLocked = !!(lesson.fileUrl && !fileUrlUnlocked)
+
   const embedUrl = lesson.type === 'video' ? toPreviewEmbedUrl(lesson.videoUrl ?? '')
     : lesson.type === 'file' ? toPreviewEmbedUrl(lesson.fileUrl ?? '')
     : null
 
+  // The MBTI questionnaire is system-managed like the quiz lessons: its
+  // questions live in code, not in this form, so there is nothing here to edit.
+  // Showing the ordinary editor would offer a format picker and a URL field
+  // that would only break it.
+  if (lesson.type === 'personality') {
+    const def = getBucketAssessment(lesson.bucketAssessmentId) ?? MBTI_DEFINITION
+    const questions = def.questions.slice().sort((a, b) => a.order - b.order)
+    return (
+      <div className="h-full flex gap-6">
+        <div className="w-[31.25rem] shrink-0 space-y-5 overflow-y-auto pr-1">
+          <div>
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700">
+              แบบประเมินผลลัพธ์
+            </span>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 flex items-start gap-2">
+            <svg className="size-4 shrink-0 mt-0.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+            </svg>
+            <p className="text-xs text-gray-500">
+              แบบประเมินประเภทนี้ไม่มีคำตอบถูกผิดและไม่มีคะแนน — ผลลัพธ์มาจากตัวเลือกที่ผู้เรียนเลือกมากที่สุด
+              ชุดคำถามเป็นชุดมาตรฐานของระบบ จึงแก้ไขคำถามที่นี่ไม่ได้
+            </p>
+          </div>
+
+          {/* Which questionnaire this lesson runs. */}
+          <div>
+            <label className="text-xs font-bold text-gray-600 block mb-2">เลือกแบบประเมิน</label>
+            <div className="space-y-2">
+              {BUCKET_ASSESSMENT_LIST.map((d) => {
+                const active = d.id === def.id
+                return (
+                  <button key={d.id} type="button"
+                    onClick={() => onChange({ bucketAssessmentId: d.id, title: d.title })}
+                    className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${
+                      active
+                        ? 'border-freshket-300 bg-freshket-50'
+                        : 'border-gray-200 bg-white hover:border-freshket-200 hover:bg-gray-50'
+                    }`}>
+                    <span className="flex items-start gap-2.5">
+                      <span className={`shrink-0 size-4 rounded-full border-2 flex items-center justify-center mt-0.5 ${
+                        active ? 'border-freshket-500 bg-freshket-500' : 'border-gray-300'
+                      }`}>
+                        {active && (
+                          <svg className="size-2.5 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" />
+                          </svg>
+                        )}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className={`block text-sm font-bold ${active ? 'text-freshket-700' : 'text-gray-700'}`}>{d.title}</span>
+                        <span className="block text-xs text-gray-400 mt-0.5">
+                          {d.questions.length} ข้อ · ผลลัพธ์ {d.outcomes.length} แบบ
+                        </span>
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+              <p className="text-xs text-gray-400 mb-1">จำนวนคำถาม</p>
+              <p className="text-sm font-bold text-gray-800">{questions.length} ข้อ</p>
+            </div>
+            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+              <p className="text-xs text-gray-400 mb-1">ผลลัพธ์ที่เป็นไปได้</p>
+              <p className="text-sm font-bold text-gray-800">{def.outcomes.length} แบบ</p>
+              <p className="text-xs text-gray-400 mt-1">
+                {def.outcomes.map((o) => o.title).join(' · ')}
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+              <p className="text-xs text-gray-400 mb-1">การให้คะแนน</p>
+              <p className="text-sm font-bold text-gray-800">ไม่มีคะแนนผ่าน/ไม่ผ่าน</p>
+              <p className="text-xs text-gray-400 mt-1">
+                ผลจะถูกบันทึกในโปรไฟล์ของผู้เรียน ไม่นำไปคิดรวมกับคะแนนแบบทดสอบ
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Right: the questions themselves, read-only, so an admin can see
+            exactly what the learner will be asked. */}
+        <div className="flex-1 min-w-0 overflow-y-auto border-l border-gray-100 pl-6">
+          <p className="text-sm font-bold text-gray-800 mb-1">ตัวอย่างคำถาม</p>
+          <p className="text-xs text-gray-400 mb-4">ผู้เรียนจะเห็นทีละข้อ</p>
+          <div className="space-y-3">
+            {questions.map((q, i) => {
+              const dim = def.dimensions.find((d) => d.id === q.dimensionId)
+              return (
+                <div key={q.id} className="rounded-xl border border-gray-200 bg-white p-4">
+                  <div className="flex items-center gap-2 mb-2.5">
+                    <span className="size-6 rounded-full bg-gray-100 text-gray-600 text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                    {dim && (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">{dim.label}</span>
+                    )}
+                  </div>
+                  {q.text && <p className="text-sm font-bold text-gray-800 mb-2">{q.text}</p>}
+                  <div className="space-y-1.5">
+                    {q.options.map((o) => (
+                      <div key={o.id} className="flex items-start gap-2 px-2.5 py-1.5 rounded-lg text-xs text-gray-600">
+                        <span className="shrink-0 size-3.5 rounded-full border-2 border-gray-300 mt-0.5" />
+                        <span className="flex-1 leading-relaxed">{o.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="h-full flex gap-6">
-      <div className="w-80 shrink-0 space-y-5 overflow-y-auto pr-1">
+      <div className="w-[31.25rem] shrink-0 space-y-5 overflow-y-auto pr-1">
       {/* Format cards — large tile selector */}
       <div>
         <label className="text-xs font-bold text-gray-600 block mb-2">รูปแบบบทเรียน</label>
@@ -2856,10 +3009,17 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
           </div>
           <div>
             <label className="text-xs font-bold text-gray-600 block mb-1.5">{lesson.videoProvider === 'google_drive' ? 'Google Drive URL' : 'YouTube URL'}<span className="text-rose-500">*</span></label>
-            <input type="url" value={lesson.videoUrl ?? ''} onChange={(e) => onChange({ videoUrl: e.target.value })}
-              placeholder="https://..."
-              className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 font-mono"
-            />
+            <div className="flex items-center gap-2">
+              <input type="url" value={videoUrlDraft} onChange={(e) => setVideoUrlDraft(e.target.value)}
+                placeholder="https://..."
+                className="flex-1 min-w-0 px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 font-mono"
+              />
+              <button type="button" onClick={() => onChange({ videoUrl: videoUrlDraft })}
+                disabled={videoUrlDraft === (lesson.videoUrl ?? '')}
+                className="shrink-0 px-3 py-2.5 text-xs font-bold rounded-xl bg-freshket-100 text-freshket-700 border border-freshket-200 hover:bg-freshket-200 transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-freshket-100">
+                บันทึกลิงก์
+              </button>
+            </div>
           </div>
         </>
       )}
@@ -2877,11 +3037,39 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
       {lesson.type === 'file' && (
         <div className="space-y-2">
           <label className="text-xs font-bold text-gray-600 block">Google Slide URL</label>
-          <input type="url" value={lesson.fileUrl ?? ''} onChange={(e) => onChange({ fileUrl: e.target.value })}
-            placeholder="https://docs.google.com/presentation/d/..."
-            className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 font-mono"
-          />
-          <p className="text-xs text-gray-400">วางลิงก์ Google Slides (ตั้งค่าแชร์เป็น "ทุกคนที่มีลิงก์" ก่อน) ระบบจะฝังสไลด์แสดงในหน้าเรียนโดยตรง — ไฟล์ประเภทอื่นที่แชร์ลิงก์แบบสาธารณะยังเปิดได้ แต่จะเปิดเป็นแท็บใหม่แทน</p>
+          <div className="flex items-center gap-2">
+            <input type="url" value={fileUrlDraft} onChange={(e) => setFileUrlDraft(e.target.value)}
+              readOnly={fileUrlLocked}
+              disabled={fileUrlLocked}
+              placeholder="https://docs.google.com/presentation/d/..."
+              className={`flex-1 min-w-0 px-3 py-2.5 text-sm rounded-xl border font-mono ${
+                fileUrlLocked
+                  ? 'border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed select-none'
+                  : 'border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300'
+              }`}
+            />
+            {fileUrlLocked ? (
+              <button type="button" onClick={() => setFileUrlUnlocked(true)} title="แก้ไขลิงก์"
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2.5 text-xs font-bold rounded-xl bg-freshket-100 text-freshket-700 border border-freshket-200 hover:bg-freshket-200 transition-all">
+                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 4.5l3.75 3.75" />
+                </svg>
+                แก้ไขลิงก์
+              </button>
+            ) : (
+              <button type="button" onClick={() => { onChange({ fileUrl: fileUrlDraft }); setFileUrlUnlocked(false) }}
+                disabled={!fileUrlDraft.trim()}
+                className="shrink-0 px-3 py-2.5 text-xs font-bold rounded-xl bg-freshket-100 text-freshket-700 border border-freshket-200 hover:bg-freshket-200 transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-freshket-100">
+                บันทึกลิงก์
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-gray-400">
+            {fileUrlLocked
+              ? 'ลิงก์นี้ถูกบันทึกแล้วและล็อกไว้กันแก้ไขพลาด — กด "แก้ไขลิงก์" ด้านขวาเพื่อเปลี่ยนลิงก์'
+              : 'วางลิงก์ Google Slides (ตั้งค่าแชร์เป็น "ทุกคนที่มีลิงก์" ก่อน) กดบันทึกลิงก์เพื่ออัปเดตตัวอย่าง — ไฟล์ประเภทอื่นที่แชร์ลิงก์แบบสาธารณะยังเปิดได้ แต่จะเปิดเป็นแท็บใหม่แทน'}
+          </p>
         </div>
       )}
 
@@ -2930,11 +3118,11 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
       <div className="flex-1 min-w-0 overflow-y-auto border-l border-gray-100 pl-6">
         {lesson.type === 'video' || lesson.type === 'file' ? (
           embedUrl ? (
-            <div className="w-full max-w-sm rounded-xl overflow-hidden border border-gray-200 shadow-sm" style={{ aspectRatio: '16/9' }}>
+            <div className="w-full rounded-xl overflow-hidden border border-gray-200 shadow-sm" style={{ aspectRatio: '16/9' }}>
               <iframe src={embedUrl} className="w-full h-full" allowFullScreen title={lesson.title || 'preview'} style={{ border: 'none' }} />
             </div>
           ) : (
-            <div className="w-full max-w-sm rounded-xl border border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 text-sm text-gray-300 text-center px-6 py-10" style={{ aspectRatio: '16/9' }}>
+            <div className="w-full rounded-xl border border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 text-sm text-gray-300 text-center px-6 py-10" style={{ aspectRatio: '16/9' }}>
               <svg className="size-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -2981,13 +3169,20 @@ function withQuizLessons(topics: CourseTopic[], withPreTest: boolean): CourseTop
   // linked rather than starting empty.
   const linkedAssessmentId = (keptPost ?? keptPre)?.assessmentId
 
+  // keptPost may be a lesson recycled from the OTHER role (see keptPost's
+  // fallback above) — if its title is still the untouched default for that
+  // other role, relabel it so it doesn't keep reading "Pre-Test" once it's
+  // serving as the post-test (or vice versa). A title the user actually
+  // edited is left alone.
   const preLesson: CourseLesson = {
     ...(keptPre ?? { id: makeId(), title: 'Pre-Test', type: 'quiz' as const, order: 0 }),
     type: 'quiz', quizRole: 'pre_test', assessmentId: linkedAssessmentId,
+    title: keptPre?.title && keptPre.title !== 'Post-Test' ? keptPre.title : 'Pre-Test',
   }
   const postLesson: CourseLesson = {
     ...(keptPost ?? { id: makeId(), title: 'Post-Test', type: 'quiz' as const, order: 0 }),
     type: 'quiz', quizRole: 'post_test', assessmentId: linkedAssessmentId,
+    title: keptPost?.title && keptPost.title !== 'Pre-Test' ? keptPost.title : 'Post-Test',
   }
 
   // Strip every existing quiz lesson, then re-insert at the two ends.
@@ -3007,6 +3202,36 @@ function withQuizLessons(topics: CourseTopic[], withPreTest: boolean): CourseTop
     out[0].lessons = [preLesson, ...out[0].lessons]
   }
   out[out.length - 1].lessons = [...out[out.length - 1].lessons, postLesson]
+  return out.map((t) => ({ ...t, lessons: t.lessons.map((l, i) => ({ ...l, order: i })) }))
+}
+
+// A bucket-assessment lesson is system-managed the same way quiz lessons are:
+// one per course, pinned to the end, created and removed by its toggle rather
+// than hand-authored. It carries no assessmentId — the questions live in
+// lib/bucketAssessments and are scored by /api/personality/submit, not by the
+// Assessment grader (see types/bucketAssessment.ts for why).
+
+function withPersonalityLesson(topics: CourseTopic[], enabled: boolean): CourseTopic[] {
+  const stripped = topics.map((t) => ({
+    ...t,
+    lessons: t.lessons.filter((l) => l.type !== 'personality').map((l, i) => ({ ...l, order: i })),
+  }))
+  if (!enabled) return stripped
+
+  // Defaults to MBTI; the lesson editor lets an admin switch which
+  // questionnaire it runs.
+  const lesson: CourseLesson = {
+    id: `personality_${MBTI_DEFINITION.id}`,
+    title: MBTI_DEFINITION.title,
+    type: 'personality',
+    bucketAssessmentId: MBTI_DEFINITION.id,
+    order: 0,
+  }
+  if (stripped.length === 0) {
+    return [{ id: makeId(), title: 'แบบประเมินบุคลิกภาพ', order: 0, lessons: [{ ...lesson, order: 0 }] }]
+  }
+  const out = stripped.map((t) => ({ ...t, lessons: [...t.lessons] }))
+  out[out.length - 1].lessons.push(lesson)
   return out.map((t) => ({ ...t, lessons: t.lessons.map((l, i) => ({ ...l, order: i })) }))
 }
 
@@ -3199,7 +3424,6 @@ function QuizLessonSettingsCard({
       <div className="flex items-center justify-between gap-3 p-4">
         <div className="min-w-0">
           <p className="text-xs text-gray-400 truncate">{topicTitle}</p>
-          <p className="text-sm font-bold text-gray-900 truncate">{lesson.title || 'บทเรียนแบบฝึกหัด'}</p>
         </div>
         <span className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700">
           {isPreTest ? 'Pre-Test + Post-Test' : 'Post-Test'}
@@ -3363,13 +3587,14 @@ function QuizStripPreview({ lesson, role, assessments }: {
   return (
     <div className="h-full flex gap-6">
       {/* Left: read-only settings summary — fixed width so the question
-          preview on the right gets the room it needs to lay out its own grid. */}
-      <div className="w-80 shrink-0 space-y-5 overflow-y-auto">
+          preview on the right gets the room it needs to lay out its own grid.
+          Matches the lesson-format editor's left column width (w-[31.25rem]) so
+          the two preview panes read as the same layout. */}
+      <div className="w-[31.25rem] shrink-0 space-y-5 overflow-y-auto">
         <div>
-          <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700 mb-1.5">
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-freshket-100 text-freshket-700">
             {roleLabel}
           </span>
-          <h3 className="text-base font-bold text-gray-900 truncate">{lesson?.title || roleLabel}</h3>
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 flex items-start gap-2">
@@ -3399,7 +3624,10 @@ function QuizStripPreview({ lesson, role, assessments }: {
                 <p className="text-sm font-bold text-gray-800">{Number(assessment.timeLimitMinutes) > 0 ? `${assessment.timeLimitMinutes} นาที` : 'ไม่จำกัดเวลา'}</p>
               </div>
               <div className="rounded-xl border border-gray-100 bg-white p-3.5">
-                <p className="text-xs text-gray-400 mb-1">ระบบป้องกันการทุจริต</p>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <p className="text-xs text-gray-400">ระบบป้องกันการทุจริต</p>
+                  <InfoTooltip text="บังคับเข้าโหมดเต็มจอ ห้ามสลับแท็บ/หน้าต่างระหว่างทำแบบทดสอบ ระบบแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และส่งคำตอบอัตโนมัติเมื่อแจ้งเตือนครบ 3 ครั้ง" />
+                </div>
                 <p className="text-sm font-bold text-gray-800">{assessment.antiCheatEnabled ? 'เปิด' : 'ปิด'}</p>
               </div>
               {!assessment.googleFormUrl && (
@@ -3547,8 +3775,8 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
                 selectedQuiz === 'pre' ? 'bg-freshket-500 border-freshket-500 text-white' : 'border-freshket-200 bg-freshket-50 text-freshket-700 hover:bg-freshket-100'
               }`}>
               <LessonTypeIcon type="quiz" className="size-4 shrink-0" />
-              <span className="flex-1 min-w-0 text-sm font-bold truncate text-left">{preTestLesson.title || 'Pre-Test'}</span>
               <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${selectedQuiz === 'pre' ? 'bg-white/20' : 'bg-freshket-100'}`}>Pre-Test</span>
+              <span className="flex-1 min-w-0" />
             </button>
           )}
           {topics.length === 0 ? (
@@ -3627,8 +3855,8 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
                 selectedQuiz === 'post' ? 'bg-freshket-500 border-freshket-500 text-white' : 'border-freshket-200 bg-freshket-50 text-freshket-700 hover:bg-freshket-100'
               }`}>
               <LessonTypeIcon type="quiz" className="size-4 shrink-0" />
-              <span className="flex-1 min-w-0 text-sm font-bold truncate text-left">{postTestLesson.title || 'Post-Test'}</span>
               <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${selectedQuiz === 'post' ? 'bg-white/20' : 'bg-freshket-100'}`}>Post-Test</span>
+              <span className="flex-1 min-w-0" />
             </button>
           )}
         </div>
@@ -3807,6 +4035,29 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     setTab('quiz')
   }
 
+  // Same contract as toggleQuizEnabled, for the MBTI questionnaire: the lesson
+  // is created and pinned to the end of the course by this switch, never hand
+  // authored, and turning the switch off removes it again. Derived from the
+  // topics rather than a stored flag, since one lesson is the whole state.
+  const personalityEnabled = form.topics.some((t) => t.lessons.some((l) => l.type === 'personality'))
+
+  async function togglePersonalityEnabled() {
+    if (personalityEnabled) {
+      const ok = await confirmAction({
+        title: 'ปิดใช้งานแบบประเมินบุคลิกภาพ?',
+        text: 'บทเรียนแบบประเมินบุคลิกภาพจะถูกลบออกจากหลักสูตรนี้ ผลที่ผู้เรียนเคยทำไว้จะยังคงอยู่ในโปรไฟล์ของแต่ละคน',
+        confirmText: 'ปิดใช้งาน',
+        cancelText: 'ยกเลิก',
+        danger: true,
+      })
+      if (!ok) return
+      setForm((p) => ({ ...p, topics: withPersonalityLesson(p.topics, false) }))
+      return
+    }
+    setForm((p) => ({ ...p, topics: withPersonalityLesson(p.topics, true) }))
+    setTab('lessons')
+  }
+
   function validate() {
     const e: Record<string, string> = {}
     if (!form.title.trim()) e.title = 'กรุณากรอกชื่อหลักสูตร'
@@ -3973,6 +4224,16 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                       title={form.quizEnabled ? 'ปิดใช้งานแบบทดสอบทั้งคอร์ส' : 'เปิดใช้งานแบบทดสอบ'}
                       className={`shrink-0 mr-2.5 relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.quizEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
                       <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.quizEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                    </button>
+                  )}
+                  {/* The MBTI questionnaire has no settings of its own, so its
+                      switch rides on the Lessons row — the lesson it creates is
+                      the only thing to see. */}
+                  {t.id === 'lessons' && (
+                    <button type="button" onClick={togglePersonalityEnabled}
+                      title={personalityEnabled ? 'ปิดใช้งานแบบประเมินบุคลิกภาพ' : 'เพิ่มแบบประเมินบุคลิกภาพ (MBTI)'}
+                      className={`shrink-0 mr-2.5 relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${personalityEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                      <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${personalityEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                     </button>
                   )}
                 </div>
@@ -4367,12 +4628,14 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                           <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">แผนก</th>
                           <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">อายุงาน</th>
                           <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ความคืบหน้า</th>
-                          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">คะแนน</th>
+                          {hasPreTest && <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Pre-Test</th>}
+                          {hasPostTest && <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Post-Test</th>}
+                          {!hasPreTest && !hasPostTest && <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">คะแนน</th>}
                         </tr>
                       </thead>
                       <tbody>
                         {summaryRows.length === 0 ? (
-                          <tr><td colSpan={6} className="text-center text-gray-400 text-sm py-10">ยังไม่มีผู้เรียนที่กำหนด</td></tr>
+                          <tr><td colSpan={5 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0) + (!hasPreTest && !hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">ยังไม่มีผู้เรียนที่กำหนด</td></tr>
                         ) : summaryRows.map(({ user: u, record, status }) => {
                           const pct = approxProgressPct(status, record)
                           return (
@@ -4398,9 +4661,17 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                                   <span className="text-xs text-gray-400 shrink-0">{pct}%</span>
                                 </div>
                               </td>
-                              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
-                                {record?.score != null ? `${record.score}${record.passScore != null ? `/${record.passScore}` : ''}` : '—'}
-                              </td>
+                              {hasPreTest && (
+                                <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{record?.preTestScore ?? '—'}</td>
+                              )}
+                              {hasPostTest && (
+                                <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{record?.postTestScore ?? '—'}</td>
+                              )}
+                              {!hasPreTest && !hasPostTest && (
+                                <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
+                                  {record?.score != null ? `${record.score}${record.passScore != null ? `/${record.passScore}` : ''}` : '—'}
+                                </td>
+                              )}
                             </tr>
                           )
                         })}

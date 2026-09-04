@@ -18,6 +18,7 @@ import type { RoleplayAssessment } from '@/types/roleplay'
 import type { Announcement } from '@/types/announcement'
 import { SEED_TOOLS, type SaleTool } from '@/lib/tools'
 import type { AssessmentScore } from '@/types/assessmentScore'
+import type { UserBucketResult } from '@/types/bucketAssessment'
 import { computeUserStats, type UserStats } from '@/types/stats'
 
 // ── Local imported-user overlay (persists CSV-imported users in localStorage) ──
@@ -1121,6 +1122,21 @@ export async function saveShadowAcknowledgment(recordId: string, ack: ShadowAckn
     ...ack,
     reviewedAt: Timestamp.fromDate(ack.reviewedAt),
   })
+}
+
+// ── Bucket assessment results (one doc per uid per questionnaire) ─────────────
+// Written only by POST /api/personality/submit; read here to render the result
+// cards on the learner's profile.
+export function useMyBucketResult(
+  uid: string | undefined,
+  definitionId: string,
+): UseDocResult<UserBucketResult> {
+  const result = useFirestoreDoc<UserBucketResult>(
+    uid ? `userBucketResults/${uid}_${definitionId}` : undefined,
+    !DEMO_MODE && !!uid,
+  )
+  if (DEMO_MODE) return { data: null, loading: false, error: null }
+  return result
 }
 
 // ── Assessment (Pre/Post) scores by user ──────────────────────────────────────

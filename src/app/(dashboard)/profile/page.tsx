@@ -1,9 +1,12 @@
 'use client'
 
 import { useState, useRef, type ReactNode, type ChangeEvent } from 'react'
+import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { Header } from '@/components/layout/Header'
 import { ROLE_LABELS } from '@/types/user'
+import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
+import { BucketResultCard } from '@/components/features/BucketResultCard'
 import { getDaysSince } from '@/lib/utils/newJoiner'
 
 // ── Tenure formatter ──────────────────────────────────────────────────────────
@@ -229,6 +232,11 @@ export default function ProfilePage() {
             </div>{/* end px-5 py-1 */}
             </div>{/* end bg-white card */}
           </div>{/* end section wrapper */}
+
+          {/* ── Bucket assessments (MBTI, selling style, …) ── */}
+          {BUCKET_ASSESSMENT_LIST.map((def) => (
+            <BucketResultCard key={def.id} uid={user?.uid} definition={def} />
+          ))}
 
           {/* ── Demo mode notice ── */}
           {isDemoMode && (

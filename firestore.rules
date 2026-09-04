@@ -181,6 +181,18 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // ── /userBucketResults ─────────────────────────────────────────────────────
+    // Results of bucket assessments (MBTI, selling style, …), one doc per user
+    // per questionnaire at {uid}_{definitionId}, written ONLY by the Admin SDK
+    // in POST /api/personality/submit. Client writes are denied for the same
+    // reason trainingRecords.score is: a result the person being described can
+    // rewrite is not a result. Reads are open to signed-in staff so a manager
+    // can see their team's results alongside the learner's own profile card.
+    match /userBucketResults/{docId} {
+      allow read:  if isStaff();
+      allow write: if false;
+    }
+
     // ── /userStats ─────────────────────────────────────────────────────────────
     // Per-user training aggregate (one doc per uid). Everyone signed in reads it
     // (leaderboard / team scores); a user maintains only their own summary, and
