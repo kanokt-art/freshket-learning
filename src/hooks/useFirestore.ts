@@ -17,6 +17,7 @@ import type { ShadowRecord, ShadowAcknowledgment } from '@/types/shadow'
 import type { RoleplayAssessment } from '@/types/roleplay'
 import type { Announcement } from '@/types/announcement'
 import { SEED_TOOLS, type SaleTool } from '@/lib/tools'
+import { DEMO_MANDATORY_ITEMS, type MandatoryItem } from '@/lib/mandatory'
 import type { AssessmentScore } from '@/types/assessmentScore'
 import type { UserBucketResult } from '@/types/bucketAssessment'
 import { computeUserStats, type UserStats } from '@/types/stats'
@@ -898,6 +899,20 @@ export function useTools(): UseResult<SaleTool> {
     !DEMO_MODE,
   )
   if (DEMO_MODE) return { data: SEED_TOOLS, loading: false, error: null }
+  return fbResult
+}
+
+// Mandatory Reading slides (tools/mandatory admin page, courses/mandatory
+// learner page). Firestore-backed so a publish reaches every user; DEMO_MANDATORY_ITEMS
+// is only the demo-mode dataset, not a client-visible fallback (unlike SEED_TOOLS)
+// since there's no meaningful "import defaults" action for weekly content.
+export function useMandatoryItems(): UseResult<MandatoryItem> {
+  const fbResult = useFirestoreList<MandatoryItem>(
+    'mandatoryItems',
+    [{ type: 'orderBy', field: 'publishedAt', direction: 'desc' }],
+    !DEMO_MODE,
+  )
+  if (DEMO_MODE) return { data: DEMO_MANDATORY_ITEMS, loading: false, error: null }
   return fbResult
 }
 

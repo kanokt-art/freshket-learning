@@ -1,16 +1,26 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { Header } from '@/components/layout/Header'
 import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 import { FreshketToolTabs } from '@/components/layout/FreshketToolTabs'
 import { useAuth } from '@/hooks/useAuth'
 import { canAccess } from '@/types/user'
+import { useMandatoryItems, useAllUsers, useDepartments } from '@/hooks/useFirestore'
+import { pushNotification } from '@/lib/notifications/push'
+import { getDemoMode } from '@/lib/demo/demoMode'
 import { MandatorySlideViewer } from '@/components/features/MandatorySlideViewer'
 import { SlidePreviewArea } from '@/components/features/MandatoryPreview'
 import { MandatoryArchiveRail, MandatoryMonthHeader } from '@/components/features/MandatoryArchive'
-import { DEMO_MANDATORY_ITEMS, formatDate, currentWeekLabel, groupByMonth, groupByYear, type MandatoryItem } from '@/lib/mandatory'
+import {
+  formatDate, weekLabelForDate, mandatoryTitleFor, toDateInputValue, fromDateInputValue,
+  groupByMonth, groupByYear, mandatoryDepartments,
+  type MandatoryItem, type MandatoryDeptAccess,
+} from '@/lib/mandatory'
 import { confirmAction } from '@/lib/ui/alert'
+import { InfoTooltip } from '@/components/common/InfoTooltip'
+
+const DEMO_MODE = getDemoMode()
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -20,16 +30,21 @@ interface FormState {
   title: string
   description: string
   slidesUrl: string
-  weekLabel: string
+  publishDate: Date
   isPublished: boolean
+  departmentAccess: MandatoryDeptAccess[]
 }
 
-const EMPTY_FORM: FormState = {
-  title: '',
-  description: '',
-  slidesUrl: '',
-  weekLabel: '',
-  isPublished: false,
+function emptyForm(): FormState {
+  const now = new Date()
+  return {
+    title: mandatoryTitleFor(now),
+    description: '',
+    slidesUrl: '',
+    publishDate: now,
+    isPublished: false,
+    departmentAccess: [],
+  }
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
@@ -38,8 +53,12 @@ export default function MandatoryPage() {
   const { user } = useAuth()
   const isAdmin = canAccess(user?.role ?? 'sale', 'super_admin')
 
-  const [items, setItems]             = useState<MandatoryItem[]>(DEMO_MANDATORY_ITEMS)
-  const [viewMode, setViewMode]       = useState<ViewMode>('card')
+  const { data: items } = useMandatoryItems()
+  const { data: allUsers } = useAllUsers(isAdmin)
+  const { data: departmentDocs } = useDepartments(isAdmin)
+  const allDepartments = useMemo(() => departmentDocs.map(d => d.name).sort(), [departmentDocs])
+
+  const [viewMode, setViewMode]       = useState<ViewMode>('list')
   const [viewing, setViewing]         = useState<MandatoryItem | null>(null)
   const [showAdd, setShowAdd]         = useState(false)
   const [editItem, setEditItem]       = useState<MandatoryItem | null>(null)
@@ -59,24 +78,78 @@ export default function MandatoryPage() {
     document.getElementById(`mandatory-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  function handleAdd(form: FormState) {
+  // Notifies whoever can see the item once it goes from draft to published —
+  // same "first publish only" rule notifyCoursePublishChanges (courses/page.tsx)
+  // uses for courses, so re-saving an already-published item never re-notifies.
+  // Targets by department the same way SaleTool visibility works (empty
+  // departments = everyone), not by role — Mandatory Reading has no role
+  // targeting concept, only a department one.
+  const notifyPublish = useCallback((item: MandatoryItem) => {
+    if (DEMO_MODE) return
+    const depts = mandatoryDepartments(item)
+    const targets = allUsers.filter(u =>
+      u.uid !== user?.uid
+      && (depts.length === 0 || (u.department && depts.includes(u.department))),
+    )
+    targets.forEach(u => {
+      pushNotification(u.uid, {
+        type: 'new_mandatory',
+        title: `Mandatory Reading ใหม่: ${item.title}`,
+        body: `${item.weekLabel} — คลิกเพื่อเปิดอ่าน`,
+        refId: item.id,
+        refPath: '/courses/mandatory',
+      })
+    })
+  }, [allUsers, user?.uid])
+
+  // Remembers the admin's department selection on their own profile so the
+  // NEXT new item starts pre-filled instead of empty every time — a plain
+  // per-viewer localStorage convenience would not follow the admin between
+  // devices, and this preference is meant to persist like any other setting.
+  const rememberDepartments = useCallback(async (depts: string[]) => {
+    if (DEMO_MODE || !user?.uid) return
+    const { getClientFirestore, doc, setDoc } = await import('@/lib/firebase/client')
+    await setDoc(doc(getClientFirestore(), 'users', user.uid), { mandatoryLastDepartments: depts }, { merge: true })
+  }, [user?.uid])
+
+  const saveItem = useCallback(async (form: FormState, existing?: MandatoryItem) => {
+    if (DEMO_MODE) return
+    const { getClientFirestore, doc, setDoc, collection } = await import('@/lib/firebase/client')
+    const { Timestamp } = await import('firebase/firestore')
+    const db = getClientFirestore()
+    const isNew = !existing
+    const id = isNew ? doc(collection(db, 'mandatoryItems')).id : existing.id
     const now = new Date()
-    setItems(prev => [{
-      id: `mand-${Date.now()}`,
+    const wasPublished = existing?.isPublished ?? false
+    const item: MandatoryItem = {
+      id,
       title: form.title,
       description: form.description,
       slidesUrl: form.slidesUrl,
-      weekLabel: form.weekLabel,
+      weekLabel: weekLabelForDate(form.publishDate),
       isPublished: form.isPublished,
-      publishedAt: now,
-      createdAt: now,
-    }, ...prev])
+      departmentAccess: form.departmentAccess,
+      publishedAt: form.publishDate,
+      createdAt: existing?.createdAt ?? now,
+      createdBy: existing?.createdBy ?? user?.uid,
+    }
+    rememberDepartments(mandatoryDepartments(item))
+    await setDoc(doc(db, 'mandatoryItems', id), {
+      ...item,
+      publishedAt: Timestamp.fromDate(item.publishedAt),
+      createdAt: Timestamp.fromDate(item.createdAt),
+    })
+    if (item.isPublished && !wasPublished) notifyPublish(item)
+  }, [user?.uid, notifyPublish, rememberDepartments])
+
+  function handleAdd(form: FormState) {
+    saveItem(form)
     setShowAdd(false)
   }
 
   function handleEdit(form: FormState) {
     if (!editItem) return
-    setItems(prev => prev.map(i => i.id === editItem.id ? { ...i, ...form } : i))
+    saveItem(form, editItem)
     setEditItem(null)
   }
 
@@ -88,11 +161,17 @@ export default function MandatoryPage() {
       danger: true,
     })
     if (!ok) return
-    setItems(prev => prev.filter(i => i.id !== id))
+    if (DEMO_MODE) return
+    const { getClientFirestore, doc, deleteDoc } = await import('@/lib/firebase/client')
+    await deleteDoc(doc(getClientFirestore(), 'mandatoryItems', id))
   }
 
-  function handleTogglePublish(id: string) {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, isPublished: !i.isPublished } : i))
+  async function handleTogglePublish(item: MandatoryItem) {
+    if (DEMO_MODE) return
+    const wasPublished = item.isPublished
+    const { getClientFirestore, doc, setDoc } = await import('@/lib/firebase/client')
+    await setDoc(doc(getClientFirestore(), 'mandatoryItems', item.id), { isPublished: !wasPublished }, { merge: true })
+    if (!wasPublished) notifyPublish({ ...item, isPublished: true })
   }
 
   return (
@@ -210,7 +289,7 @@ export default function MandatoryPage() {
                           onView={() => setViewing(item)}
                           onEdit={() => setEditItem(item)}
                           onDelete={() => handleDelete(item.id)}
-                          onTogglePublish={() => handleTogglePublish(item.id)}
+                          onTogglePublish={() => handleTogglePublish(item)}
                         />
                       ))}
                     </div>
@@ -224,7 +303,7 @@ export default function MandatoryPage() {
                           onView={() => setViewing(item)}
                           onEdit={() => setEditItem(item)}
                           onDelete={() => handleDelete(item.id)}
-                          onTogglePublish={() => handleTogglePublish(item.id)}
+                          onTogglePublish={() => handleTogglePublish(item)}
                         />
                       ))}
                     </div>
@@ -237,8 +316,25 @@ export default function MandatoryPage() {
       </div>
 
       {viewing && <MandatorySlideViewer item={viewing} onClose={() => setViewing(null)} />}
-      {showAdd && <MandatoryFormModal onClose={() => setShowAdd(false)} onSave={handleAdd} formTitle="เพิ่ม Mandatory Slide ใหม่" />}
-      {editItem && <MandatoryFormModal initial={editItem} onClose={() => setEditItem(null)} onSave={handleEdit} formTitle="แก้ไข Mandatory Slide" />}
+      {showAdd && (
+        <MandatoryFormModal
+          allDepartments={allDepartments}
+          lastDepartments={user?.mandatoryLastDepartments ?? []}
+          onClose={() => setShowAdd(false)}
+          onSave={handleAdd}
+          formTitle="เพิ่ม Mandatory Slide ใหม่"
+        />
+      )}
+      {editItem && (
+        <MandatoryFormModal
+          initial={editItem}
+          allDepartments={allDepartments}
+          lastDepartments={user?.mandatoryLastDepartments ?? []}
+          onClose={() => setEditItem(null)}
+          onSave={handleEdit}
+          formTitle="แก้ไข Mandatory Slide"
+        />
+      )}
     </>
   )
 }
@@ -262,7 +358,7 @@ function MandatoryCard({
       !item.isPublished ? 'border-amber-100' : 'border-gray-100'
     }`}>
       <div className="p-4 pb-0">
-        <SlidePreviewArea isPublished={item.isPublished} weekLabel={item.weekLabel} />
+        <SlidePreviewArea isPublished={item.isPublished} weekLabel={item.weekLabel} slidesUrl={item.slidesUrl} />
       </div>
       <div className="p-4 flex-1 flex flex-col">
         <h3 className="text-sm font-bold text-gray-900 leading-snug mb-1.5 line-clamp-2">{item.title}</h3>
@@ -332,15 +428,16 @@ function MandatoryRow({
   onTogglePublish: () => void
 }) {
   return (
-    <div className={`flex items-center gap-4 bg-white rounded-xl border px-4 py-3.5 hover:shadow-sm transition-all duration-150 ${
+    <div className={`flex items-center gap-4 bg-white rounded-xl border px-4 py-4 hover:shadow-sm transition-all duration-150 ${
       !item.isPublished ? 'border-amber-100' : 'border-gray-100'
     }`}>
-      <div className={`size-10 rounded-xl flex items-center justify-center shrink-0 ${
-        !item.isPublished ? 'bg-amber-50' : 'bg-freshket-100'
-      }`}>
-        <svg className={`size-5 ${!item.isPublished ? 'text-amber-400' : 'text-freshket-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6" />
-        </svg>
+      {/* A real preview of the deck instead of a generic document icon — same
+          embed SlidePreviewArea uses in the card grid, just fixed-width so the
+          row keeps a predictable height regardless of how many rows are on
+          screen. hideBadges: this row already shows the week/Draft badges next
+          to the title, so the overlay would just repeat them on the thumbnail. */}
+      <div className="w-40 shrink-0">
+        <SlidePreviewArea isPublished={item.isPublished} weekLabel={item.weekLabel} slidesUrl={item.slidesUrl} hideBadges />
       </div>
 
       <div className="flex-1 min-w-0">
@@ -414,20 +511,37 @@ function MandatoryRow({
 
 function MandatoryFormModal({
   initial,
+  allDepartments,
+  lastDepartments,
   onClose,
   onSave,
   formTitle,
 }: {
   initial?: MandatoryItem
+  allDepartments: string[]
+  /** The admin's remembered department picks from the last item they saved —
+   * used only for a brand-new item; editing an existing one shows ITS own
+   * departments instead. */
+  lastDepartments: string[]
   onClose: () => void
   onSave: (form: FormState) => void
   formTitle: string
 }) {
-  const [form, setForm] = useState<FormState>(
-    initial
-      ? { title: initial.title, description: initial.description, slidesUrl: initial.slidesUrl, weekLabel: initial.weekLabel, isPublished: initial.isPublished }
-      : EMPTY_FORM
-  )
+  // Editing an item never touches its title or date — those are fixed at
+  // creation (the title states the week it was created for; changing the date
+  // afterward would also silently move it to a different month in the
+  // archive). Only description, URL, departments and publish state stay editable.
+  const [form, setForm] = useState<FormState>(() => {
+    if (initial) {
+      return {
+        title: initial.title, description: initial.description, slidesUrl: initial.slidesUrl,
+        publishDate: initial.publishedAt, isPublished: initial.isPublished,
+        departmentAccess: initial.departmentAccess,
+      }
+    }
+    const base = emptyForm()
+    return { ...base, departmentAccess: lastDepartments.map(department => ({ department, showHistory: false })) }
+  })
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({})
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -435,10 +549,31 @@ function MandatoryFormModal({
     if (errors[key]) setErrors(prev => ({ ...prev, [key]: undefined }))
   }
 
+  function setPublishDate(date: Date) {
+    setForm(prev => ({ ...prev, publishDate: date, title: initial ? prev.title : mandatoryTitleFor(date) }))
+  }
+
+  function toggleDepartment(dept: string) {
+    setForm(prev => ({
+      ...prev,
+      departmentAccess: prev.departmentAccess.some(a => a.department === dept)
+        ? prev.departmentAccess.filter(a => a.department !== dept)
+        : [...prev.departmentAccess, { department: dept, showHistory: false }],
+    }))
+  }
+
+  function toggleShowHistory(dept: string) {
+    setForm(prev => ({
+      ...prev,
+      departmentAccess: prev.departmentAccess.map(a =>
+        a.department === dept ? { ...a, showHistory: !a.showHistory } : a,
+      ),
+    }))
+  }
+
   function validate(): boolean {
     const e: Partial<Record<keyof FormState, string>> = {}
     if (!form.title.trim()) e.title = 'กรุณากรอกหัวข้อ'
-    if (!form.weekLabel.trim()) e.weekLabel = 'กรุณากรอก Week Label'
     if (!form.slidesUrl.trim()) e.slidesUrl = 'กรุณากรอก Google Slides URL'
     else if (!form.slidesUrl.includes('/presentation/d/')) e.slidesUrl = 'URL ไม่ถูกต้อง — ต้องเป็น Google Slides URL'
     setErrors(e)
@@ -455,7 +590,7 @@ function MandatoryFormModal({
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div
-        className="bg-white rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh] animate-pop-in"
+        className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] animate-pop-in"
       >
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between gap-3 px-6 py-5 border-b border-gray-100">
@@ -473,7 +608,29 @@ function MandatoryFormModal({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-          {/* Title */}
+          {/* Date — drives both the title and the Week Label, so the two can
+              never say different weeks. Locked once created (see the comment
+              on the form's init above). */}
+          <div>
+            <label className="block text-xs font-normal text-gray-700 mb-1.5">
+              วันที่ <span className="text-rose-400">*</span>
+            </label>
+            <input
+              type="date"
+              value={toDateInputValue(form.publishDate)}
+              onChange={e => e.target.value && setPublishDate(fromDateInputValue(e.target.value))}
+              disabled={!!initial}
+              className={`${inputCls()} ${initial ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : ''}`}
+            />
+            <p className="text-xs text-gray-400 mt-1.5">
+              {initial
+                ? 'แก้ไขวันที่ไม่ได้ — ใช้จัดหมวดเดือน/สัปดาห์ในหน้าคลังแล้ว'
+                : `ใช้จัดหมวดในหน้าคลัง — ${weekLabelForDate(form.publishDate)}`}
+            </p>
+          </div>
+
+          {/* Title — auto-filled from the date above ("Mandatory-Week37 Sep
+              2026"); the admin can still override the wording if needed. */}
           <div>
             <label className="block text-xs font-normal text-gray-700 mb-1.5">
               หัวข้อ <span className="text-rose-400">*</span>
@@ -486,30 +643,6 @@ function MandatoryFormModal({
               className={inputCls(errors.title)}
             />
             {errors.title && <p className="text-xs text-rose-500 mt-1">{errors.title}</p>}
-          </div>
-
-          {/* Week Label */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-normal text-gray-700">
-                Week Label <span className="text-rose-400">*</span>
-              </label>
-              <button
-                type="button"
-                onClick={() => set('weekLabel', currentWeekLabel())}
-                className="text-xs text-freshket-600 font-bold hover:underline"
-              >
-                Auto-fill สัปดาห์ปัจจุบัน
-              </button>
-            </div>
-            <input
-              type="text"
-              value={form.weekLabel}
-              onChange={e => set('weekLabel', e.target.value)}
-              placeholder="เช่น Week 26 / Jun 2026"
-              className={inputCls(errors.weekLabel)}
-            />
-            {errors.weekLabel && <p className="text-xs text-rose-500 mt-1">{errors.weekLabel}</p>}
           </div>
 
           {/* Description */}
@@ -541,11 +674,64 @@ function MandatoryFormModal({
             </p>
           </div>
 
+          {/* Departments — who gets notified + can see this. Empty = everyone.
+              Ticking a department into the list is remembered for next time
+              (see rememberDepartments); the "แสดงผลทั้งหมด" checkbox under it is
+              NOT remembered — it's a one-time grant scoped to this item only
+              (see the comment on MandatoryDeptAccess in lib/mandatory.ts). */}
+          <div>
+            <label className="text-xs font-bold text-gray-600 mb-1.5 block">แผนกที่เกี่ยวข้อง</label>
+            <p className="text-xs text-gray-500 mb-2">
+              ไม่เลือกแผนกใดเลย = ทุกแผนกเห็นและได้รับแจ้งเตือน
+            </p>
+            {allDepartments.length === 0 ? (
+              <p className="text-xs text-gray-400">ยังไม่มีข้อมูลแผนกในระบบ</p>
+            ) : (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {allDepartments.map(dept => {
+                  const on = form.departmentAccess.some(a => a.department === dept)
+                  return (
+                    <button
+                      key={dept}
+                      type="button"
+                      onClick={() => toggleDepartment(dept)}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-full transition-all duration-150 ${
+                        on
+                          ? 'bg-freshket-100 text-freshket-700'
+                          : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                      }`}
+                    >
+                      {dept}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {form.departmentAccess.length > 0 && (
+              <div className="rounded-xl border border-gray-100 bg-gray-50/60 divide-y divide-gray-100">
+                {form.departmentAccess.map(a => (
+                  <label key={a.department} className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={a.showHistory}
+                      onChange={() => toggleShowHistory(a.department)}
+                      className="size-4 rounded border-gray-300 text-freshket-500 focus:ring-freshket-300 shrink-0"
+                    />
+                    <span className="flex-1 text-xs font-bold text-gray-700">{a.department}</span>
+                    <span className="text-xs text-gray-500">แสดงผลทั้งหมด</span>
+                    <InfoTooltip text={`ถ้าติ๊ก แผนก ${a.department} จะเห็น Mandatory Reading ทุกฉบับที่เผยแพร่ก่อนหน้านี้ด้วย (ย้อนไปทั้งคลัง) ถ้าไม่ติ๊ก จะเห็นเฉพาะฉบับนี้เป็นต้นไป — ไม่ดึงของเก่ามาโชว์`} />
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Publish toggle */}
           <div className="flex items-center justify-between pt-1 pb-1">
             <div>
               <p className="text-sm font-bold text-gray-900">Publish ทันที</p>
-              <p className="text-xs text-gray-500 mt-0.5">User จะเห็น Slide นี้ทันทีหลัง Save</p>
+              <p className="text-xs text-gray-500 mt-0.5">User ในแผนกที่เลือกจะเห็น Slide นี้ทันที และได้รับแจ้งเตือน</p>
             </div>
             <button
               type="button"

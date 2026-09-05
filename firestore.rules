@@ -127,6 +127,16 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    // ── /mandatoryItems ────────────────────────────────────────────────────────
+    // Weekly Mandatory Reading (Google Slides). Same shape as /tools: everyone
+    // signed in can read; isPublished + department targeting is filtered
+    // client-side (see isMandatoryVisibleTo in lib/mandatory.ts). Only
+    // super_admin authors.
+    match /mandatoryItems/{itemId} {
+      allow read: if isStaff();
+      allow write: if isSuperAdmin();
+    }
+
     // ── /resources ─────────────────────────────────────────────────────────────
     match /resources/{resourceId} {
       allow read: if isStaff();

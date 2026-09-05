@@ -24,6 +24,7 @@ const VALID_TYPES: NotifType[] = [
   'shadow_ack_received',
   'new_course',
   'heart_received',
+  'new_mandatory',
 ]
 
 const MAX_TITLE = 200

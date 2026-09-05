@@ -59,6 +59,10 @@ export interface UserProfile extends AppUser {
   lineManager?: string    // Line Manager name from CSV
   visibleTeamIds?: string[]  // undefined = see all; string[] = only these teams
   employmentStatus?: EmploymentStatus  // HR CSV col 1 — drives the Employees list filter
+  // UI state, not HR data: which departments this admin last picked in the
+  // Mandatory Reading form (tools/mandatory), so the next new item starts
+  // from the same selection instead of empty every time.
+  mandatoryLastDepartments?: string[]
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {

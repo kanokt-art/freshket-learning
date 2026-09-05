@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
-import { useUnseenTools } from '@/hooks/useUnseenTools'
 import { canAccess, ROLE_HIERARCHY, type UserRole } from '@/types/user'
 import { FRESHKET_LOGO_URL } from '@/lib/demo/demoMode'
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
@@ -213,9 +212,6 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
   const expanded = !collapsed || hovered
 
   const { allowedModules } = useModuleAccess(user?.role, user?.department)
-  // Sidebar notification: unseen tools an admin has published (cleared per-tool
-  // once the user opens it). Only meaningful for the main "Tools" item.
-  const { unseenCount: unseenToolCount } = useUnseenTools()
 
   const isNewJoiner = useMemo(() => getDaysSince(user?.startDate) < NEW_JOINER_DAYS, [user?.startDate])
   const isSuperAdmin = user?.role === 'super_admin'
@@ -311,7 +307,6 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
             item={item}
             pathname={pathname}
             collapsed={!expanded}
-            unseenCount={item.href === '/tools' ? unseenToolCount : 0}
           />
         ))}
       </nav>
@@ -354,12 +349,10 @@ function NavLink({
   item,
   pathname,
   collapsed,
-  unseenCount = 0,
 }: {
   item: NavItem
   pathname: string
   collapsed: boolean
-  unseenCount?: number
 }) {
   const active =
     !item.noActive && (
@@ -405,22 +398,10 @@ function NavLink({
         }
       `}
     >
-      {/* Icon + collapsed-rail notification dot */}
-      <span className="relative shrink-0 flex">
+      <span className="shrink-0 flex">
         {item.icon}
-        {unseenCount > 0 && collapsed && (
-          <span className="absolute -top-1.5 -right-1.5 size-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
-        )}
       </span>
       <SidebarLabel expanded={expanded} className="flex-1">{item.label}</SidebarLabel>
-      {/* Expanded: count pill */}
-      {unseenCount > 0 && expanded && (
-        <SidebarLabel expanded={expanded}>
-          <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-rose-500 text-white text-xs font-bold leading-none">
-            {unseenCount > 9 ? '9+' : unseenCount}
-          </span>
-        </SidebarLabel>
-      )}
     </Link>
   )
 }

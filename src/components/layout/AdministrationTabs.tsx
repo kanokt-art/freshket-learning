@@ -56,6 +56,7 @@ export function AdministrationTabs() {
         <Link href="/tools" className={dropItemCls} onClick={(e) => switchHash(e, '')}>Tools</Link>
         <Link href="/tools#merch" className={dropItemCls} onClick={(e) => switchHash(e, 'merch')}>Merchandise Contact</Link>
         <Link href="/tools#qa" className={dropItemCls} onClick={(e) => switchHash(e, 'qa')}>Q&amp;A</Link>
+        <Link href="/tools/mandatory" className={dropItemCls}>Merchandise Mandatory</Link>
         <Link href="/tools/new-joiner" className={dropItemCls}>New Joiner Hub</Link>
       </Dropdown>
 

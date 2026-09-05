@@ -16,9 +16,6 @@ import type { ShadowRecord } from '@/types/shadow'
 import { CalendarCard } from '@/components/features/CalendarCard'
 import { LearnerCourseGridCard } from '@/components/features/LearnerCourseDashboard'
 import { TeamLeadHome } from '@/components/features/TeamLeadHome'
-import { getDemoMode } from '@/lib/demo/demoMode'
-
-const DEMO_MODE = getDemoMode()
 
 const CAT_TEXT: Record<CourseCategory, string> = {
   product:     'text-blue-500',
@@ -279,6 +276,19 @@ export default function SaleDashboardPage() {
 
   const pendingCourseCount = pendingCourses.length
 
+  // Calendar deadlines — same source as pendingCourses, just reshaped into the
+  // {date, title, courseId} triple CalendarCard renders. Courses with no
+  // endDate (or an unparseable one) carry no deadline to show on a calendar.
+  const calendarTasks = useMemo(() => {
+    return pendingCourses
+      .map((c) => {
+        if (!c.endDate) return null
+        const d = c.endDate instanceof Date ? c.endDate : new Date(c.endDate as unknown as string)
+        return isNaN(d.getTime()) ? null : { date: d, title: c.title, courseId: c.id }
+      })
+      .filter((t): t is { date: Date; title: string; courseId: string } => t !== null)
+  }, [pendingCourses])
+
   // Training Status donut — real backend state. Each assigned+published course
   // falls into exactly one bucket (priority: completed → failed → overdue →
   // in_progress → not started), so the segments always sum to the course total.
@@ -404,7 +414,7 @@ export default function SaleDashboardPage() {
                 onSeeAll={() => router.push('/courses')}
               />
               <div className="lg:col-start-2 h-full">
-                <CalendarCard demoMode={DEMO_MODE} />
+                <CalendarCard tasks={calendarTasks} onOpenTask={(id) => router.push(`/courses/${id}`)} />
               </div>
             </div>
           )}

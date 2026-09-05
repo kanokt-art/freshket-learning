@@ -16,6 +16,18 @@ const DEMO_MODE = getDemoMode()
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+// A Shadow Visit mentor comes from the front-line commercial org, not the whole
+// company — the picker used to list every department (CEO Office, Tech&Product,
+// People Experience, …) because it had no department filter at all. "Sale"
+// specifically means Sales Management here (not the broader "Sales" department),
+// per how the department is actually used elsewhere in HR data.
+const MENTOR_DEPARTMENTS = new Set(['Sales Management', 'Key Account Management', 'Portfolio Management'])
+const MENTOR_DEPARTMENT_LABELS: Record<string, string> = {
+  'Sales Management': 'Sale',
+  'Key Account Management': 'Key Account',
+  'Portfolio Management': 'Portfolio Management',
+}
+
 const SEGMENTS: ShadowSegment[] = ['Mini Chain', 'Stand alone', 'Chain']
 const PERSONAS: ShadowPersona[] = ['Chef', 'Owner', 'Purchasing', 'Manager']
 
@@ -897,6 +909,7 @@ function ShadowFormPanel({
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({})
   const [stepIdx, setStepIdx] = useState(0)
   const [mentorSearch, setMentorSearch] = useState('')
+  const [mentorDeptFilter, setMentorDeptFilter] = useState<string>('all')
   const [mentorOpen, setMentorOpen] = useState(false)
   const [selectedMentorUid, setSelectedMentorUid] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -933,6 +946,13 @@ function ShadowFormPanel({
     const q = mentorSearch.toLowerCase()
     return allUsers
       .filter(u => u.uid !== currentUid)
+      // A mentor must be an active employee in one of the shadow-eligible
+      // departments — the picker previously showed everyone in the company
+      // (CEO Office, Tech&Product, …), which made finding an actual mentor a
+      // search-and-scroll exercise through unrelated departments.
+      .filter(u => (!u.employmentStatus || u.employmentStatus === 'Active'))
+      .filter(u => u.department && MENTOR_DEPARTMENTS.has(u.department))
+      .filter(u => mentorDeptFilter === 'all' || u.department === mentorDeptFilter)
       .filter(u =>
         !q ||
         u.displayName.toLowerCase().includes(q) ||
@@ -941,7 +961,7 @@ function ShadowFormPanel({
         (u.position ?? '').toLowerCase().includes(q)
       )
       .slice(0, 8)
-  }, [allUsers, currentUid, mentorSearch])
+  }, [allUsers, currentUid, mentorSearch, mentorDeptFilter])
 
   const selectedMentorUser = selectedMentorUid ? allUsers.find(u => u.uid === selectedMentorUid) : null
 
@@ -1095,18 +1115,30 @@ function ShadowFormPanel({
                 </div>
               ) : (
                 <div className="relative">
-                  <div className="relative">
-                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                    </svg>
-                    <input
-                      type="text"
-                      value={mentorSearch}
-                      onChange={e => { setMentorSearch(e.target.value); setMentorOpen(true) }}
-                      onFocus={() => setMentorOpen(true)}
-                      placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัสพนักงาน..."
-                      className={`pl-9 pr-3 py-2.5 ${inputCls(errors.mentorName)}`}
-                    />
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <svg className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                      </svg>
+                      <input
+                        type="text"
+                        value={mentorSearch}
+                        onChange={e => { setMentorSearch(e.target.value); setMentorOpen(true) }}
+                        onFocus={() => setMentorOpen(true)}
+                        placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัสพนักงาน..."
+                        className={`pl-9 pr-3 py-2.5 w-full ${inputCls(errors.mentorName)}`}
+                      />
+                    </div>
+                    <select
+                      value={mentorDeptFilter}
+                      onChange={e => { setMentorDeptFilter(e.target.value); setMentorOpen(true) }}
+                      className="shrink-0 text-xs font-bold rounded-xl border border-gray-200 pl-2.5 pr-7 py-2.5 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300"
+                    >
+                      <option value="all">ทุกแผนก</option>
+                      {Array.from(MENTOR_DEPARTMENTS).map(d => (
+                        <option key={d} value={d}>{MENTOR_DEPARTMENT_LABELS[d] ?? d}</option>
+                      ))}
+                    </select>
                   </div>
                   {mentorOpen && (
                     <>

@@ -7,9 +7,10 @@ import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
 import { MandatorySlideViewer } from '@/components/features/MandatorySlideViewer'
 import { SlidePreviewArea } from '@/components/features/MandatoryPreview'
 import { MandatoryArchiveRail, MandatoryMonthHeader } from '@/components/features/MandatoryArchive'
-import { DEMO_MANDATORY_ITEMS, formatDate, groupByMonth, groupByYear, type MandatoryItem } from '@/lib/mandatory'
+import { formatDate, groupByMonth, groupByYear, isMandatoryVisibleTo, type MandatoryItem } from '@/lib/mandatory'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
+import { useMandatoryItems } from '@/hooks/useFirestore'
 
 // Learner-facing Mandatory Reading — a read-only list of published weekly
 // Product Knowledge slides, reached from the My Course tab bar. Admins author
@@ -17,14 +18,16 @@ import { useModuleAccess } from '@/hooks/useModuleAccess'
 export default function MyMandatoryPage() {
   const { user } = useAuth()
   const { allowedModules, loading: moduleLoading } = useModuleAccess(user?.role, user?.department)
+  const { data: allItems } = useMandatoryItems()
   const [viewing, setViewing] = useState<MandatoryItem | null>(null)
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const isSuperAdmin = user?.role === 'super_admin'
 
-  // Only published items are visible to learners.
+  // Published AND (no department restriction, or the learner's department is
+  // in it) — same rule the admin form's "แผนกที่เกี่ยวข้อง" picker sets.
   const items = useMemo(
-    () => DEMO_MANDATORY_ITEMS.filter((i) => i.isPublished),
-    [],
+    () => allItems.filter((i) => isMandatoryVisibleTo(i, user?.department, allItems)),
+    [allItems, user?.department],
   )
   const monthGroups = useMemo(() => groupByMonth(items), [items])
   const yearGroups = useMemo(() => groupByYear(monthGroups), [monthGroups])
@@ -96,7 +99,7 @@ function MandatoryCard({ item, onView }: { item: MandatoryItem; onView: () => vo
       className="flex flex-col text-left rounded-2xl bg-white border border-gray-100 hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 overflow-hidden group"
     >
       <div className="p-4 pb-0">
-        <SlidePreviewArea isPublished={item.isPublished} weekLabel={item.weekLabel} />
+        <SlidePreviewArea isPublished={item.isPublished} weekLabel={item.weekLabel} slidesUrl={item.slidesUrl} />
       </div>
       <div className="flex flex-col flex-1 p-4 gap-2">
         <h3 className="font-bold text-gray-900 text-sm leading-snug line-clamp-2 group-hover:text-freshket-600 transition-colors">{item.title}</h3>

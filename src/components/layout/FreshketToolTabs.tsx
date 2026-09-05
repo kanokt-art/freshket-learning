@@ -55,6 +55,7 @@ export function FreshketToolTabs() {
     { href: '/tools', label: 'Tools', active: onTools && !isMerch && !isQA, show: true, onClick: (e) => switchHash(e, '') },
     { href: '/tools#merch', label: 'Merchandise Contact', active: isMerch, show: true, onClick: (e) => switchHash(e, 'merch') },
     { href: '/tools#qa', label: 'Q&A', active: isQA, show: true, onClick: (e) => switchHash(e, 'qa') },
+    { href: '/tools/mandatory', label: 'Merchandise Mandatory', active: pathname === '/tools/mandatory', show: true },
     { href: '/tools/new-joiner', label: 'New Joiner Hub', badge: 'NEW', active: pathname.startsWith('/tools/new-joiner'), show: isNewJoiner },
   ]
 
