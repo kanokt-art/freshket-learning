@@ -145,6 +145,15 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    // ── /products ──────────────────────────────────────────────────────────────
+    // Freshket product/price catalog, synced nightly from the "Public-price"
+    // Google Sheet via docs/apps-script/ProductsSync.gs (service-account writes
+    // bypass these rules entirely — this only governs writes from signed-in users).
+    match /products/{productId} {
+      allow read: if isStaff();
+      allow write: if isSuperAdmin();
+    }
+
     // ── /resources ─────────────────────────────────────────────────────────────
     match /resources/{resourceId} {
       allow read: if isStaff();
