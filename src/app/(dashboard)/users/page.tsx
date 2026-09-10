@@ -117,7 +117,7 @@ export default function UsersPage() {
   const [dedupResult, setDedupResult] = useState<{ mergedGroups: number; deletedDocs: number; uidMap?: Record<string, string> } | null>(null)
   const [savingAssignments, setSavingAssignments] = useState(false)
   const [savedAssignments, setSavedAssignments] = useState(false)
-  const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number; hidden: number } | null>(null)
+  const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number; hidden: number; missing: number } | null>(null)
   const [undoDelete, setUndoDelete] = useState<{ team: Team; memberIds: string[] } | null>(null)
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -787,6 +787,8 @@ export default function UsersPage() {
                 {importResult.skipped > 0 && <>ข้ามซ้ำในไฟล์ <span className="font-bold">{importResult.skipped}</span> คน</>}
                 {(importResult.added > 0 || importResult.updated > 0 || importResult.skipped > 0) && importResult.hidden > 0 && ' · '}
                 {importResult.hidden > 0 && <>ซ่อนจากรายชื่อ (สถานะไม่ใช่ Active) <span className="font-bold">{importResult.hidden}</span> คน</>}
+                {(importResult.added > 0 || importResult.updated > 0 || importResult.skipped > 0 || importResult.hidden > 0) && importResult.missing > 0 && ' · '}
+                {importResult.missing > 0 && <>ปิดใช้งาน (ไม่พบในไฟล์นี้) <span className="font-bold">{importResult.missing}</span> คน</>}
               </p>
             </div>
             <button
@@ -1000,13 +1002,13 @@ export default function UsersPage() {
         <AddEmployeeModal
           users={users}
           onClose={() => setShowAddEmployee(false)}
-          onImport={(newUsers, updatedCount, skipped, hiddenCount) => {
+          onImport={(newUsers, updatedCount, skipped, hiddenCount, missingCount) => {
             if (DEMO_MODE) {
               newUsers.forEach(u => demoStore.addUser(u))
             } else {
               saveLocalImportedUsers(newUsers)
             }
-            setImportResult({ added: newUsers.length - updatedCount, updated: updatedCount, skipped, hidden: hiddenCount })
+            setImportResult({ added: newUsers.length - updatedCount - missingCount, updated: updatedCount, skipped, hidden: hiddenCount, missing: missingCount })
             setShowAddEmployee(false)
           }}
         />
@@ -1607,13 +1609,23 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
   updated: string[]
   duplicates: string[]
   hidden: number
+  missing: UserProfile[]
 } {
   const lines = text.replace(/^﻿/, '').replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean)
-  if (lines.length < 2) return { valid: [], updated: [], duplicates: [], hidden: 0 }
+  if (lines.length < 2) return { valid: [], updated: [], duplicates: [], hidden: 0, missing: [] }
 
   // Look up existing records to carry over uid (upsert uses existing uid)
   const existingByEmpId = new Map(existingUsers.filter(u => u.employeeId).map(u => [u.employeeId!, u]))
   const existingByEmail = new Map(existingUsers.map(u => [u.email?.toLowerCase() ?? '', u]))
+  // Anyone already on file, still Active, who this new export should account for —
+  // whoever is left in here after the loop below wasn't in the new file at all,
+  // meaning HR's export dropped them (most commonly: they resigned and HR simply
+  // stopped listing them, rather than exporting them with Status = "Resigned").
+  const unaccountedFor = new Map(
+    existingUsers
+      .filter(u => u.employeeId && (!u.employmentStatus || u.employmentStatus === 'Active'))
+      .map(u => [u.employeeId!, u]),
+  )
 
   // Track within-CSV duplicates only
   const seenEmpIds = new Set<string>()
@@ -1692,9 +1704,20 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
     })
     if (empId) seenEmpIds.add(empId)
     if (email) seenEmails.add(email.toLowerCase())
+    if (empId) unaccountedFor.delete(empId)
   }
 
-  return { valid, updated, duplicates, hidden }
+  // Everyone still left in unaccountedFor was Active on file but absent from this
+  // export entirely — flag them as Resigned so the roster count stops including
+  // people who no longer work here. Their training history is untouched; this
+  // only changes employmentStatus.
+  const missing = Array.from(unaccountedFor.values()).map(u => ({
+    ...u,
+    employmentStatus: 'Resigned' as EmploymentStatus,
+    updatedAt: new Date(),
+  }))
+
+  return { valid, updated, duplicates, hidden, missing }
 }
 
 
@@ -1735,7 +1758,7 @@ function AddEmployeeModal({
 }: {
   users: UserProfile[]
   onClose: () => void
-  onImport: (newUsers: UserProfile[], updatedCount: number, skipped: number, hiddenCount: number) => void
+  onImport: (newUsers: UserProfile[], updatedCount: number, skipped: number, hiddenCount: number, missingCount: number) => void
 }) {
   const [tab, setTab] = useState<'manual' | 'csv'>('manual')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -1744,7 +1767,8 @@ function AddEmployeeModal({
     department: '', position: '', role: 'sale' as UserRole, startDate: '',
   })
   const [manualError, setManualError] = useState('')
-  const [csvResult, setCsvResult] = useState<{ valid: UserProfile[]; updated: string[]; duplicates: string[]; hidden: number } | null>(null)
+  const [csvResult, setCsvResult] = useState<{ valid: UserProfile[]; updated: string[]; duplicates: string[]; hidden: number; missing: UserProfile[] } | null>(null)
+  const [confirmMissing, setConfirmMissing] = useState(false)
   const [csvFileName, setCsvFileName] = useState('')
 
   function handleManualSubmit() {
@@ -1771,13 +1795,14 @@ function AddEmployeeModal({
       startDate,
       createdAt: new Date(),
       updatedAt: new Date(),
-    }], 0, 0, 0)
+    }], 0, 0, 0, 0)
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     setCsvFileName(file.name)
+    setConfirmMissing(false)
     const reader = new FileReader()
     reader.onload = (ev) => {
       const text = ev.target?.result as string
@@ -1896,6 +1921,28 @@ function AddEmployeeModal({
                     </ul>
                   </div>
                 )}
+                {csvResult.missing.length > 0 && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl">
+                    <p className="text-xs font-bold text-rose-700 mb-1.5">
+                      พบพนักงานหายไป {csvResult.missing.length} คน (มีในระบบ แต่ไม่มีในไฟล์นี้)
+                    </p>
+                    <p className="text-xs text-rose-600 mb-2">จะถูกตั้งสถานะเป็น &quot;Resigned&quot; และซ่อนจากรายชื่อ — ประวัติการอบรมยังอยู่ครบ ไม่ถูกลบถาวร</p>
+                    <ul className="space-y-0.5 max-h-32 overflow-y-auto mb-2">
+                      {csvResult.missing.map((u, i) => (
+                        <li key={i} className="text-xs text-rose-600">• {u.displayName}{u.employeeId ? ` (รหัส ${u.employeeId})` : ''}</li>
+                      ))}
+                    </ul>
+                    <label className="flex items-center gap-2 text-xs font-bold text-rose-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={confirmMissing}
+                        onChange={e => setConfirmMissing(e.target.checked)}
+                        className="rounded border-rose-300 text-rose-600 focus:ring-rose-300"
+                      />
+                      ยืนยันว่าพนักงานเหล่านี้ลาออก/พ้นสภาพแล้ว
+                    </label>
+                  </div>
+                )}
                 {csvResult.valid.length > 0 && (
                   <div className="overflow-x-auto border border-gray-100 rounded-xl">
                     <table className="w-full text-xs">
@@ -1950,8 +1997,18 @@ function AddEmployeeModal({
               เพิ่มพนักงาน
             </button>
           ) : (
-            <button onClick={() => csvResult?.valid.length ? onImport(csvResult.valid, csvResult.updated.length, csvResult.duplicates.length, csvResult.hidden) : undefined} disabled={!csvResult || csvResult.valid.length === 0} className="flex-1 px-4 py-2 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
-              นำเข้า {csvResult?.valid.length ?? 0} คน
+            <button
+              onClick={() => {
+                if (!csvResult?.valid.length) return
+                const toImport = csvResult.missing.length > 0 && confirmMissing
+                  ? [...csvResult.valid, ...csvResult.missing]
+                  : csvResult.valid
+                onImport(toImport, csvResult.updated.length, csvResult.duplicates.length, csvResult.hidden, csvResult.missing.length)
+              }}
+              disabled={!csvResult || csvResult.valid.length === 0 || (csvResult.missing.length > 0 && !confirmMissing)}
+              className="flex-1 px-4 py-2 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              นำเข้า {csvResult?.valid.length ?? 0} คน{csvResult && csvResult.missing.length > 0 ? ` + ปิดใช้งาน ${csvResult.missing.length} คน` : ''}
             </button>
           )}
         </div>

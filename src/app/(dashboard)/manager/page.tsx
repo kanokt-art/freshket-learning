@@ -144,7 +144,9 @@ export default function ManagerPage() {
   // Stat cards. "พนักงานทั้งหมด" = the managed roster (same set the table shows),
   // NOT the count of users who happen to have a training record — the old
   // records-based count read "2 คน" while the roster below listed 11.
-  const totalUsers    = users.length
+  // Excludes anyone whose employmentStatus isn't Active (e.g. Resigned) so a
+  // CSV re-import that retires a departed employee is reflected here too.
+  const totalUsers    = users.filter(u => !u.employmentStatus || u.employmentStatus === 'Active').length
   const overallCompletion = useMemo(() => {
     if (!records.length) return 0
     return Math.round((records.filter(r => r.status === 'completed').length / records.length) * 100)
