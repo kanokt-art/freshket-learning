@@ -53,10 +53,12 @@ export function FreshketToolTabs() {
 
   const tabs: { href: string; label: string; badge?: string; active: boolean; show: boolean; onClick?: (e: React.MouseEvent) => void }[] = [
     { href: '/tools', label: 'Tools', active: onTools && !isMerch && !isQA, show: true, onClick: (e) => switchHash(e, '') },
-    { href: '/tools#merch', label: 'Merchandise Contact', active: isMerch, show: true, onClick: (e) => switchHash(e, 'merch') },
+    { href: '/tools/cuisine-guide', label: 'Cuisine Guide', active: pathname === '/tools/cuisine-guide', show: true },
     { href: '/tools#qa', label: 'Q&A', active: isQA, show: true, onClick: (e) => switchHash(e, 'qa') },
     { href: '/tools/mandatory', label: 'Merchandise Mandatory', active: pathname === '/tools/mandatory', show: true },
     { href: '/tools/new-joiner', label: 'New Joiner Hub', badge: 'NEW', active: pathname.startsWith('/tools/new-joiner'), show: isNewJoiner },
+    // Moved to the end per request — was the second tab.
+    { href: '/tools#merch', label: 'Merchandise Contact', active: isMerch, show: true, onClick: (e) => switchHash(e, 'merch') },
   ]
 
   const visible = tabs.filter((t) => t.show)

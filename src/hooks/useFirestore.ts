@@ -18,6 +18,7 @@ import type { RoleplayAssessment } from '@/types/roleplay'
 import type { Announcement } from '@/types/announcement'
 import { SEED_TOOLS, type SaleTool } from '@/lib/tools'
 import { DEMO_MANDATORY_ITEMS, type MandatoryItem } from '@/lib/mandatory'
+import { MOCK_CUISINE_GUIDES, type CuisineGuideItem } from '@/lib/cuisineGuide'
 import type { AssessmentScore } from '@/types/assessmentScore'
 import type { UserBucketResult } from '@/types/bucketAssessment'
 import { computeUserStats, type UserStats } from '@/types/stats'
@@ -913,6 +914,21 @@ export function useMandatoryItems(): UseResult<MandatoryItem> {
     !DEMO_MODE,
   )
   if (DEMO_MODE) return { data: DEMO_MANDATORY_ITEMS, loading: false, error: null }
+  return fbResult
+}
+
+// Cuisine Guide (tools/cuisine-guide) — which SKUs to pitch per restaurant
+// cuisine. Firestore-backed so a super_admin's edit reaches every user;
+// MOCK_CUISINE_GUIDES is a read-only fallback the admin can import while the
+// collection is still empty (same "import defaults" pattern as SEED_TOOLS),
+// since this ships with placeholder SKU data rather than starting blank.
+export function useCuisineGuides(): UseResult<CuisineGuideItem> {
+  const fbResult = useFirestoreList<CuisineGuideItem>(
+    'cuisineGuides',
+    [{ type: 'orderBy', field: 'createdAt', direction: 'asc' }],
+    !DEMO_MODE,
+  )
+  if (DEMO_MODE) return { data: MOCK_CUISINE_GUIDES, loading: false, error: null }
   return fbResult
 }
 

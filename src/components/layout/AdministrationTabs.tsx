@@ -54,10 +54,12 @@ export function AdministrationTabs() {
       {/* Tools group — clicking the tab goes to /tools; hover reveals the rest */}
       <Dropdown label="Tools" href="/tools" active={isTools}>
         <Link href="/tools" className={dropItemCls} onClick={(e) => switchHash(e, '')}>Tools</Link>
-        <Link href="/tools#merch" className={dropItemCls} onClick={(e) => switchHash(e, 'merch')}>Merchandise Contact</Link>
+        <Link href="/tools/cuisine-guide" className={dropItemCls}>Cuisine Guide</Link>
         <Link href="/tools#qa" className={dropItemCls} onClick={(e) => switchHash(e, 'qa')}>Q&amp;A</Link>
         <Link href="/tools/mandatory" className={dropItemCls}>Merchandise Mandatory</Link>
         <Link href="/tools/new-joiner" className={dropItemCls}>New Joiner Hub</Link>
+        {/* Moved to the end per request — was the second item. */}
+        <Link href="/tools#merch" className={dropItemCls} onClick={(e) => switchHash(e, 'merch')}>Merchandise Contact</Link>
       </Dropdown>
 
       {/* System group — clicking the tab goes to Module Settings */}

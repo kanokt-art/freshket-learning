@@ -137,6 +137,14 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    // ── /cuisineGuides ─────────────────────────────────────────────────────────
+    // Which SKUs to pitch per restaurant cuisine (tools/cuisine-guide). Same
+    // shape as /tools: everyone signed in reads; only super_admin authors.
+    match /cuisineGuides/{guideId} {
+      allow read: if isStaff();
+      allow write: if isSuperAdmin();
+    }
+
     // ── /resources ─────────────────────────────────────────────────────────────
     match /resources/{resourceId} {
       allow read: if isStaff();
