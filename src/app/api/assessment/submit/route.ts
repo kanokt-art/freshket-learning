@@ -4,6 +4,7 @@ import { getAdminFirestore } from '@/lib/firebase/admin'
 import { requireStaff } from '@/lib/firebase/requireStaff'
 import { gradeSubmission, type GivenAnswers } from '@/lib/assessment/grade'
 import { computeUserStats } from '@/types/stats'
+import { postCompletionToSlack, isSalesDepartment } from '@/lib/notifications/slack'
 import type { Assessment, Question } from '@/types/assessment'
 import type { Course } from '@/types/course'
 import type { UserProfile } from '@/types/user'
@@ -57,6 +58,11 @@ async function notifyManagerOfCompletion(
   awaitingReview = false,
 ) {
   try {
+    // Slack needs an absolute link; NEXT_PUBLIC_APP_URL is the deployed origin
+    // (e.g. https://freshket-learning.vercel.app). Absent it, the card renders
+    // without the button rather than with a broken relative link.
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, '')
+
     const learnerSnap = await db.collection('users').doc(uid).get()
     if (!learnerSnap.exists) return
     const learner = learnerSnap.data() as Partial<UserProfile>
@@ -95,6 +101,21 @@ async function notifyManagerOfCompletion(
           createdByUid: uid,
         }),
     ))
+    // Slack is an additional channel, not a replacement: the in-app record
+    // above is already written, so a Slack failure loses nothing. Gated to the
+    // sales org because that's the team living in the channel.
+    if (isSalesDepartment(learner.department)) {
+      await postCompletionToSlack({
+        learnerName: name,
+        position: learner.position,
+        department: learner.department,
+        courseTitle,
+        score,
+        passed,
+        awaitingReview,
+        courseUrl: appUrl ? `${appUrl}/courses/${courseId}` : undefined,
+      })
+    }
   } catch (err) {
     // Same fire-and-forget contract as the client-side pushNotification.
     console.error('notifyManagerOfCompletion failed', err)
