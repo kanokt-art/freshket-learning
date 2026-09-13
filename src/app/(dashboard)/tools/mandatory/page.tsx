@@ -17,7 +17,7 @@ import {
   groupByMonth, groupByYear, mandatoryDepartments,
   type MandatoryItem, type MandatoryDeptAccess,
 } from '@/lib/mandatory'
-import { confirmAction } from '@/lib/ui/alert'
+import { confirmAction, alertError } from '@/lib/ui/alert'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 
 const DEMO_MODE = getDemoMode()
@@ -142,14 +142,30 @@ export default function MandatoryPage() {
     if (item.isPublished && !wasPublished) notifyPublish(item)
   }, [user?.uid, notifyPublish, rememberDepartments])
 
-  function handleAdd(form: FormState) {
-    saveItem(form)
+  // Both await the write before closing. Previously saveItem() was called
+  // without await and the modal closed immediately, so a rejected write left
+  // the admin looking at a closed modal — reading as success — while the slide
+  // never appeared, and the rejection surfaced only as an unhandled promise.
+  async function handleAdd(form: FormState) {
+    try {
+      await saveItem(form)
+    } catch (err) {
+      console.error('saveItem (add) failed', err)
+      await alertError('เพิ่ม Slide ไม่สำเร็จ', 'ข้อมูลยังอยู่ในฟอร์ม กรุณาลองใหม่อีกครั้ง')
+      return
+    }
     setShowAdd(false)
   }
 
-  function handleEdit(form: FormState) {
+  async function handleEdit(form: FormState) {
     if (!editItem) return
-    saveItem(form, editItem)
+    try {
+      await saveItem(form, editItem)
+    } catch (err) {
+      console.error('saveItem (edit) failed', err)
+      await alertError('บันทึกการแก้ไขไม่สำเร็จ', 'ข้อมูลยังอยู่ในฟอร์ม กรุณาลองใหม่อีกครั้ง')
+      return
+    }
     setEditItem(null)
   }
 
@@ -524,7 +540,8 @@ function MandatoryFormModal({
    * departments instead. */
   lastDepartments: string[]
   onClose: () => void
-  onSave: (form: FormState) => void
+  /** Resolves once the item is stored — the form stays disabled until then. */
+  onSave: (form: FormState) => Promise<void>
   formTitle: string
 }) {
   // Editing an item never touches its title or date — those are fixed at
@@ -543,6 +560,9 @@ function MandatoryFormModal({
     return { ...base, departmentAccess: lastDepartments.map(department => ({ department, showHistory: false })) }
   })
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({})
+  // Blocks a second click while the first write is still in flight — without
+  // it, an impatient double-click wrote the item twice.
+  const [saving, setSaving] = useState(false)
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm(prev => ({ ...prev, [key]: value }))
@@ -578,6 +598,18 @@ function MandatoryFormModal({
     else if (!form.slidesUrl.includes('/presentation/d/')) e.slidesUrl = 'URL ไม่ถูกต้อง — ต้องเป็น Google Slides URL'
     setErrors(e)
     return Object.keys(e).length === 0
+  }
+
+  async function handleSubmit() {
+    if (saving || !validate()) return
+    setSaving(true)
+    try {
+      await onSave(form)
+    } finally {
+      // Re-enable on failure so the admin can retry; on success the modal is
+      // already unmounted, which React tolerates.
+      setSaving(false)
+    }
   }
 
   const inputCls = (err?: string) =>
@@ -758,10 +790,11 @@ function MandatoryFormModal({
           </button>
           <button
             type="button"
-            onClick={() => { if (validate()) onSave(form) }}
-            className="px-5 py-2 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors shadow-sm"
+            onClick={() => { void handleSubmit() }}
+            disabled={saving}
+            className="px-5 py-2 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {initial ? 'บันทึกการแก้ไข' : 'เพิ่ม Slide'}
+            {saving ? 'กำลังบันทึก...' : initial ? 'บันทึกการแก้ไข' : 'เพิ่ม Slide'}
           </button>
         </div>
       </div>

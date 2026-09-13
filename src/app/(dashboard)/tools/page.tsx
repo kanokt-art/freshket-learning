@@ -12,7 +12,7 @@ import { SEED_TOOLS, isToolVisibleTo, type SaleTool } from '@/lib/tools'
 import { markToolSeen } from '@/hooks/useUnseenTools'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
-import { confirmAction } from '@/lib/ui/alert'
+import { confirmAction, alertError } from '@/lib/ui/alert'
 
 const DEMO_MODE = getDemoMode()
 
@@ -308,17 +308,24 @@ export default function ToolsPage() {
   const [deckEditTarget, setDeckEditTarget] = useState<{ deck: KnowledgeDeck; isNew: boolean } | null>(null)
   const [deckSeeding, setDeckSeeding] = useState(false)
 
+  // Same close-before-write bug as saveTool above — see that comment.
   const saveDeck = useCallback(async (deck: KnowledgeDeck, isNew: boolean) => {
+    if (DEMO_MODE) { setDeckEditTarget(null); return }
+    try {
+      const { getClientFirestore, doc, setDoc, collection } = await import('@/lib/firebase/client')
+      const db = getClientFirestore()
+      const id = isNew ? doc(collection(db, 'knowledgeDecks')).id : deck.id
+      const { id: _omit, ...fields } = deck
+      await setDoc(doc(db, 'knowledgeDecks', id), {
+        ...fields,
+        createdAt: deck.createdAt ?? new Date(),
+      }, { merge: true })
+    } catch (err) {
+      console.error('saveDeck failed', err)
+      await alertError('บันทึก Deck ไม่สำเร็จ', 'ข้อมูลยังอยู่ในฟอร์ม กรุณาลองใหม่อีกครั้ง')
+      return
+    }
     setDeckEditTarget(null)
-    if (DEMO_MODE) return
-    const { getClientFirestore, doc, setDoc, collection } = await import('@/lib/firebase/client')
-    const db = getClientFirestore()
-    const id = isNew ? doc(collection(db, 'knowledgeDecks')).id : deck.id
-    const { id: _omit, ...fields } = deck
-    await setDoc(doc(db, 'knowledgeDecks', id), {
-      ...fields,
-      createdAt: deck.createdAt ?? new Date(),
-    }, { merge: true })
   }, [])
 
   const deleteDeck = useCallback(async (id: string) => {
@@ -360,17 +367,27 @@ export default function ToolsPage() {
   const [editTarget, setEditTarget] = useState<{ tool: SaleTool; isNew: boolean } | null>(null)
   const [seeding, setSeeding] = useState(false)
 
+  // The modal used to close on the FIRST line, before the write was even
+  // attempted, so a rejected save looked exactly like a successful one and the
+  // tool simply never appeared. Close only once the write has landed; on
+  // failure keep the modal open with the draft intact so it can be retried.
   const saveTool = useCallback(async (tool: SaleTool, isNew: boolean) => {
+    if (DEMO_MODE) { setEditTarget(null); return }
+    try {
+      const { getClientFirestore, doc, setDoc, collection } = await import('@/lib/firebase/client')
+      const db = getClientFirestore()
+      const id = isNew ? doc(collection(db, 'tools')).id : tool.id
+      const { id: _omit, ...fields } = tool
+      await setDoc(doc(db, 'tools', id), {
+        ...fields,
+        createdAt: tool.createdAt ?? new Date(),
+      }, { merge: true })
+    } catch (err) {
+      console.error('saveTool failed', err)
+      await alertError('บันทึก Tool ไม่สำเร็จ', 'ข้อมูลยังอยู่ในฟอร์ม กรุณาลองใหม่อีกครั้ง')
+      return
+    }
     setEditTarget(null)
-    if (DEMO_MODE) return
-    const { getClientFirestore, doc, setDoc, collection } = await import('@/lib/firebase/client')
-    const db = getClientFirestore()
-    const id = isNew ? doc(collection(db, 'tools')).id : tool.id
-    const { id: _omit, ...fields } = tool
-    await setDoc(doc(db, 'tools', id), {
-      ...fields,
-      createdAt: tool.createdAt ?? new Date(),
-    }, { merge: true })
   }, [])
 
   const deleteTool = useCallback(async (id: string) => {
@@ -1330,13 +1347,26 @@ function ToolEditModal({
   tool: SaleTool
   isNew: boolean
   allDepartments: string[]
-  onSave: (tool: SaleTool, isNew: boolean) => void
+  /** Resolves once the tool is stored — the form stays disabled until then. */
+  onSave: (tool: SaleTool, isNew: boolean) => Promise<void>
   onClose: () => void
 }) {
   const [draft, setDraft] = useState<SaleTool>(tool)
 
   const set = (k: keyof SaleTool, v: string) => setDraft(prev => ({ ...prev, [k]: v }))
   const canSave = draft.title.trim() && draft.url.trim() && draft.category
+  // Blocks a second click while the first write is in flight.
+  const [saving, setSaving] = useState(false)
+
+  async function handleSubmit() {
+    if (!canSave || saving) return
+    setSaving(true)
+    try {
+      await onSave(draft, isNew)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const toggleDepartment = (dept: string) =>
     setDraft(prev => ({
@@ -1491,11 +1521,11 @@ function ToolEditModal({
             ยกเลิก
           </button>
           <button
-            onClick={() => { if (canSave) onSave(draft, isNew) }}
-            disabled={!canSave}
+            onClick={() => { void handleSubmit() }}
+            disabled={!canSave || saving}
             className="flex-1 py-2.5 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {isNew ? 'สร้าง Tool' : 'บันทึก'}
+            {saving ? 'กำลังบันทึก...' : isNew ? 'สร้าง Tool' : 'บันทึก'}
           </button>
         </div>
       </div>
@@ -1512,12 +1542,25 @@ function DeckEditModal({
 }: {
   deck: KnowledgeDeck
   isNew: boolean
-  onSave: (deck: KnowledgeDeck, isNew: boolean) => void
+  /** Resolves once the deck is stored — the form stays disabled until then. */
+  onSave: (deck: KnowledgeDeck, isNew: boolean) => Promise<void>
   onClose: () => void
 }) {
   const [draft, setDraft] = useState<KnowledgeDeck>(deck)
   const set = (k: keyof KnowledgeDeck, v: string) => setDraft(prev => ({ ...prev, [k]: v }))
   const canSave = draft.title.trim() && draft.url.trim()
+  // Blocks a second click while the first write is in flight.
+  const [saving, setSaving] = useState(false)
+
+  async function handleSubmit() {
+    if (!canSave || saving) return
+    setSaving(true)
+    try {
+      await onSave(draft, isNew)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -1587,11 +1630,11 @@ function DeckEditModal({
             ยกเลิก
           </button>
           <button
-            onClick={() => { if (canSave) onSave(draft, isNew) }}
-            disabled={!canSave}
+            onClick={() => { void handleSubmit() }}
+            disabled={!canSave || saving}
             className="flex-1 py-2.5 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {isNew ? 'เพิ่ม' : 'บันทึก'}
+            {saving ? 'กำลังบันทึก...' : isNew ? 'เพิ่ม' : 'บันทึก'}
           </button>
         </div>
       </div>

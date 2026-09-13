@@ -5,6 +5,7 @@ import { Header } from '@/components/layout/Header'
 import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers, useTeams, useAllShadowRecords, useAllShadowAcknowledgments, saveShadowRecord, saveShadowAcknowledgment } from '@/hooks/useFirestore'
+import { alertError } from '@/lib/ui/alert'
 import { canAccess, getTeamManagerIds } from '@/types/user'
 import type { UserProfile } from '@/types/user'
 import type { ShadowRecord, ShadowSegment, ShadowPersona, ShadowAcknowledgment } from '@/types/shadow'
@@ -901,7 +902,8 @@ function ShadowFormPanel({
   currentUid,
 }: {
   onClose: () => void
-  onSubmit: (data: FormState) => void
+  /** Resolves once the visit is stored — the form stays disabled until then. */
+  onSubmit: (data: FormState) => Promise<void>
   allUsers: UserProfile[]
   currentUid: string
 }) {
@@ -912,6 +914,10 @@ function ShadowFormPanel({
   const [mentorDeptFilter, setMentorDeptFilter] = useState<string>('all')
   const [mentorOpen, setMentorOpen] = useState(false)
   const [selectedMentorUid, setSelectedMentorUid] = useState<string | null>(null)
+  // Guards against a double submit: the save button had no disabled state and
+  // onSubmit was fire-and-forget, so two quick clicks wrote two Firestore
+  // documents for the same visit — and the lead then had two rows to assess.
+  const [submitting, setSubmitting] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const step = STEPS[stepIdx]
@@ -980,10 +986,18 @@ function ShadowFormPanel({
     return Object.keys(e).length === 0
   }
 
-  function handleNext() {
+  async function handleNext() {
     if (!validateStep()) return
-    if (isLast) onSubmit(form)
-    else setStepIdx(i => i + 1)
+    if (!isLast) { setStepIdx(i => i + 1); return }
+    if (submitting) return
+    setSubmitting(true)
+    try {
+      await onSubmit(form)
+    } finally {
+      // Re-enable on failure so the user can retry. On success the panel is
+      // already unmounted by then, which React tolerates.
+      setSubmitting(false)
+    }
   }
 
   const inputCls = (err?: string) =>
@@ -1291,10 +1305,11 @@ function ShadowFormPanel({
         )}
         <button
           type="button"
-          onClick={handleNext}
-          className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-freshket-500 hover:bg-freshket-600 text-white transition-colors"
+          onClick={() => { void handleNext() }}
+          disabled={submitting}
+          className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-freshket-500 hover:bg-freshket-600 text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {isLast ? 'บันทึก Shadow Visit' : 'ต่อไป'}
+          {isLast ? (submitting ? 'กำลังบันทึก...' : 'บันทึก Shadow Visit') : 'ต่อไป'}
           {!isLast && (
             <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -1454,9 +1469,23 @@ export default function ShadowPage() {
     // was already there. In live mode, addDoc's real id is what
     // shadowAcknowledgments will key off of, so it must come from Firestore,
     // not be invented client-side before the write happens.
-    const rec: ShadowRecord = DEMO_MODE
-      ? { id: `sh-${Date.now()}`, ...base }
-      : { id: await saveShadowRecord(base), ...base }
+    let rec: ShadowRecord
+    try {
+      rec = DEMO_MODE
+        ? { id: `sh-${Date.now()}`, ...base }
+        : { id: await saveShadowRecord(base), ...base }
+    } catch (err) {
+      // A rejected write used to throw out of this handler as an unhandled
+      // rejection: the panel stayed open with no message, and the visit the
+      // user had just filled in over five steps was gone. Keep the form open
+      // (its state is intact) so they can submit again.
+      console.error('saveShadowRecord failed', err)
+      await alertError(
+        'บันทึก Shadow Visit ไม่สำเร็จ',
+        'ข้อมูลยังอยู่ในฟอร์ม กรุณากดบันทึกอีกครั้ง หากยังไม่ได้ กรุณาแจ้งผู้ดูแลระบบ',
+      )
+      return
+    }
     setLocalCreated(prev => [rec, ...prev])
     setShowForm(false)
 
