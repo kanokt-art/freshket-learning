@@ -24,6 +24,28 @@ import type { UserBucketResult } from '@/types/bucketAssessment'
 import { computeUserStats, type UserStats } from '@/types/stats'
 
 // ── Local imported-user overlay (persists CSV-imported users in localStorage) ──
+/**
+ * Surface a failed background write instead of swallowing it.
+ *
+ * Several mutations here write to localStorage first and fire the Firestore
+ * write without awaiting it, so the UI already shows the change as done. When
+ * that write was rejected (permissions, a stale id, offline) the only trace was
+ * a console line: the optimistic state stayed on screen until the next snapshot
+ * silently rolled it back, which users read as "it saved, then undid itself".
+ *
+ * SweetAlert2 is imported lazily — this module is pulled in by nearly every
+ * page, and a static import would put the dialog in the shared first-load
+ * bundle for something that only renders when a write fails.
+ */
+function reportWriteFailure(title: string, detail: string) {
+  return (err: unknown) => {
+    console.error(title, err)
+    const message = err instanceof Error ? err.message : String(err)
+    void import('@/lib/ui/alert').then(({ alertError }) =>
+      alertError(title, `${message} — ${detail}`))
+  }
+}
+
 const LOCAL_IMPORT_KEY = 'fk_imported_users_v1'
 const LOCAL_IMPORT_EVT = 'fk-imported-users-change'
 
@@ -102,7 +124,10 @@ export function saveLocalImportedUsers(users: UserProfile[]): void {
         }
         batch.set(fbDoc(db, 'users', u.uid), data, { merge: true })
       }
-      batch.commit().catch(console.error)
+      batch.commit().catch(reportWriteFailure(
+        'นำเข้าข้อมูลพนักงานไม่สำเร็จ',
+        'ข้อมูลที่นำเข้ายังไม่ถูกบันทึกขึ้นระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
+      ))
     })
   }
 }
@@ -153,7 +178,10 @@ export function saveLocalTeam(team: Team): void {
   if (!DEMO_MODE) {
     import('@/lib/firebase/client').then(({ getClientFirestore, setDoc, doc: fbDoc }) => {
       const data = Object.fromEntries(Object.entries(team).filter(([, v]) => v !== undefined))
-      setDoc(fbDoc(getClientFirestore(), 'teams', team.id), data).catch(console.error)
+      setDoc(fbDoc(getClientFirestore(), 'teams', team.id), data).catch(reportWriteFailure(
+        'บันทึกทีมไม่สำเร็จ',
+        'การเปลี่ยนแปลงยังไม่ถูกบันทึกขึ้นระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
+      ))
     })
   }
 }
@@ -168,7 +196,10 @@ export function deleteLocalTeam(id: string): void {
   window.dispatchEvent(new Event(LOCAL_TEAM_EVT))
   if (!DEMO_MODE) {
     import('@/lib/firebase/client').then(({ getClientFirestore, deleteDoc, doc: fbDoc }) => {
-      deleteDoc(fbDoc(getClientFirestore(), 'teams', id)).catch(console.error)
+      deleteDoc(fbDoc(getClientFirestore(), 'teams', id)).catch(reportWriteFailure(
+        'ลบทีมไม่สำเร็จ',
+        'ทีมนี้อาจยังอยู่ในระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
+      ))
     })
   }
 }
@@ -186,7 +217,10 @@ export function deleteLocalTeams(ids: string[]): void {
       const db = getClientFirestore()
       const batch = writeBatch(db)
       for (const id of ids) batch.delete(fbDoc(db, 'teams', id))
-      batch.commit().catch(console.error)
+      batch.commit().catch(reportWriteFailure(
+        'ลบทีมไม่สำเร็จ',
+        'บางทีมอาจยังอยู่ในระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
+      ))
     })
   }
 }

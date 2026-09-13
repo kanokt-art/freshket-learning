@@ -310,7 +310,12 @@ export default function UsersPage() {
       if (json.skipped?.length > 0) {
         void alertError('บันทึกไม่สำเร็จ', 'ไม่พบข้อมูลผู้ใช้นี้ใน Firestore แล้ว — กรุณารีเฟรชหน้าเว็บ')
       }
-    }).catch(console.error)
+    }).catch(err => {
+      // A network failure left the optimistic localStorage patch on screen with
+      // nothing written server-side, so the change looked saved until a reload.
+      console.error('save-assignments failed', err)
+      void alertError('บันทึกทีมที่ดูแลไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — การเปลี่ยนแปลงยังไม่ถูกบันทึก')
+    })
   }
   function handleChangeRole(userId: string, newRole: UserRole) {
     if (DEMO_MODE) demoStore.updateUser(userId, { role: newRole })
@@ -433,7 +438,16 @@ export default function UsersPage() {
           }).then(async r => {
             const j = await r.json()
             if (j.skipped?.length > 0) console.warn(`save-assignments after dedup: ${j.skipped.length} stale uid(s) skipped`, j.skipped)
-          }).catch(console.error)
+          }).catch(err => {
+            // Dedup itself succeeded; only re-applying the team assignments
+            // failed. Say so precisely — a silent failure here meant a manager
+            // quietly lost the teams they were assigned to.
+            console.error('save-assignments after dedup failed', err)
+            void alertError(
+              'รวมข้อมูลซ้ำสำเร็จ แต่บันทึกทีมที่ดูแลไม่สำเร็จ',
+              'กรุณาตรวจสอบและตั้งค่าทีมที่ดูแลของผู้ใช้อีกครั้ง',
+            )
+          })
         }
       }
       setDedupResult(json)
@@ -748,7 +762,12 @@ export default function UsersPage() {
               {rebuildingStats ? 'กำลังอัปเดต...' : 'อัปเดตสถิติ'}
             </button>
           )}
-          {user && canAccess(user.role, 'manager') && (
+          {/* super_admin, not manager: the import batch writes `role` on every
+              row, and firestore.rules only lets super_admin touch that field.
+              A manager's import was therefore rejected wholesale (batches are
+              atomic) while still looking like it worked, because the rows were
+              written to localStorage first and the rejection was swallowed. */}
+          {user && canAccess(user.role, 'super_admin') && (
             <button
               onClick={() => setShowAddEmployee(true)}
               className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 transition-all whitespace-nowrap"

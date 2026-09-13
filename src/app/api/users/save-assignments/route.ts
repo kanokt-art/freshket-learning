@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAdminFirestore } from '@/lib/firebase/admin'
 import { requireManager } from '@/lib/firebase/requireManager'
+import { cleanVisibleTeamIds } from '@/lib/users/visibleTeams'
 
 type Assignment = {
   uid: string
@@ -43,13 +44,18 @@ export async function POST(req: NextRequest) {
     const batch = db.batch()
     const skipped: string[] = []
     const roleChangesDenied: string[] = []
+    const invalid: string[] = []
     let saved = 0
 
     for (const a of targets) {
       if (!existsSet.has(a.uid)) { skipped.push(a.uid); continue }
       const update: Record<string, unknown> = {}
       if ('teamId' in a) update.teamId = a.teamId ?? null
-      if (a.visibleTeamIds !== undefined) update.visibleTeamIds = a.visibleTeamIds
+      if (a.visibleTeamIds !== undefined) {
+        const cleaned = cleanVisibleTeamIds(a.visibleTeamIds)
+        if (cleaned === undefined) { invalid.push(a.uid); continue }
+        update.visibleTeamIds = cleaned
+      }
 
       // Role changes stay super_admin-only. Without this the widened gate would
       // hand every manager a privilege-escalation primitive: this route uses the
@@ -67,7 +73,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (saved > 0) await batch.commit()
-    return NextResponse.json({ saved, skipped, roleChangesDenied })
+    return NextResponse.json({ saved, skipped, roleChangesDenied, invalid })
   } catch (e) {
     console.error('POST /api/users/save-assignments', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
