@@ -2,7 +2,11 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { useAuth } from '@/hooks/useAuth'
-import { useAllUsers, useTeams, useDepartments, useAllRoleplayAssessments, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
+import {
+  useAllUsers, useTeams, useDepartments, useAllRoleplayAssessments, useRoleplayAssessmentsByUser,
+  saveRoleplayAssessment, deleteRoleplayAssessment,
+} from '@/hooks/useFirestore'
+import { alertError } from '@/lib/ui/alert'
 import { useModuleAccess, useModuleConfig } from '@/hooks/useModuleAccess'
 import { canAccess, getTeamManagerIds } from '@/types/user'
 import type { UserProfile } from '@/types/user'
@@ -506,11 +510,23 @@ interface AuditLogEntry {
   timestamp: Date
   actorName: string
   actorRole: string
-  action: 'delete' | 'edit'
+  action: 'create' | 'delete' | 'edit'
   assessmentId: string
   subjectName: string
   round: number
   type: 'pre' | 'post'
+}
+
+const AUDIT_ACTION_LABEL: Record<AuditLogEntry['action'], string> = {
+  create: 'สร้าง',
+  edit: 'แก้ไข',
+  delete: 'ลบ',
+}
+
+const AUDIT_ACTION_STYLE: Record<AuditLogEntry['action'], string> = {
+  create: 'bg-freshket-100 text-freshket-700',
+  edit: 'bg-amber-100 text-amber-700',
+  delete: 'bg-rose-100 text-rose-700',
 }
 
 // ── Assessment Form Modal ─────────────────────────────────────────────────────
@@ -1216,30 +1232,70 @@ export default function RoleplayPage() {
   const [filterDept, setFilterDept] = useState('')
   const [filterTeam, setFilterTeam] = useState('')
 
-  function handleSaveAssessment(a: RoleplayAssessment) {
+  async function handleSaveAssessment(a: RoleplayAssessment) {
     const isEdit = assessments.some(x => x.id === a.id)
+
+    // The modal has no access to the signed-in user, so it stamps a placeholder
+    // assessor. Fill in the real identity here, where `user` is in scope:
+    // firestore.rules requires assessorUid == the caller's uid, so a placeholder
+    // would be rejected outright. On edit the original assessor is preserved.
+    const record: RoleplayAssessment = isEdit || !user ? a : {
+      ...a,
+      assessorUid: user.uid,
+      assessorName: user.displayName ?? '',
+      assessorRole: user.role,
+    }
+
+    // Optimistic: show the row immediately, then reconcile. In live mode the
+    // listener re-reads and replaces this with the server copy (including the
+    // real document id); in demo mode local state is the only store.
     if (isEdit) {
-      setAssessments(prev => prev.map(x => x.id === a.id ? a : x))
-      if (user) {
-        setAuditLogs(prev => [{
-          id: 'log-' + Date.now(),
-          timestamp: new Date(),
-          actorName: user.displayName ?? '',
-          actorRole: user.role,
-          action: 'edit',
-          assessmentId: a.id,
-          subjectName: a.subjectName,
-          round: a.round,
-          type: a.type,
-        }, ...prev])
-      }
+      setAssessments(prev => prev.map(x => x.id === record.id ? record : x))
       setEditAssessment(null)
     } else {
-      setAssessments(prev => [a, ...prev])
+      setAssessments(prev => [record, ...prev])
+    }
+
+    if (user) {
+      setAuditLogs(prev => [{
+        id: 'log-' + Date.now(),
+        timestamp: new Date(),
+        actorName: user.displayName ?? '',
+        actorRole: user.role,
+        action: isEdit ? 'edit' : 'create',
+        assessmentId: record.id,
+        subjectName: record.subjectName,
+        round: record.round,
+        type: record.type,
+      }, ...prev])
+    }
+
+    if (DEMO_MODE) return
+
+    try {
+      // `rp-<timestamp>` ids are client-side placeholders — saveRoleplayAssessment
+      // only reuses an id that came back from Firestore, otherwise it lets
+      // addDoc mint one.
+      const savedId = await saveRoleplayAssessment(
+        isEdit ? record : { ...record, id: '' }
+      )
+      if (!isEdit) {
+        // Swap the placeholder id for the real one so an immediate edit/delete
+        // targets the right document, in case the listener hasn't fired yet.
+        setAssessments(prev => prev.map(x => x.id === record.id ? { ...x, id: savedId } : x))
+      }
+    } catch (err) {
+      console.error('saveRoleplayAssessment failed', err)
+      // Roll the optimistic row back so the UI can't show an assessment that
+      // was never stored — the old code silently kept it until a reload.
+      setAssessments(prev => isEdit
+        ? prev.map(x => x.id === record.id ? a : x)
+        : prev.filter(x => x.id !== record.id))
+      alertError('บันทึกผลประเมินไม่สำเร็จ', 'กรุณาลองใหม่อีกครั้ง หากยังไม่ได้ กรุณาแจ้งผู้ดูแลระบบ')
     }
   }
 
-  function handleDeleteAssessment(id: string) {
+  async function handleDeleteAssessment(id: string) {
     const a = assessments.find(x => x.id === id)
     if (!a || !user) return
     setAssessments(prev => prev.filter(x => x.id !== id))
@@ -1254,6 +1310,16 @@ export default function RoleplayPage() {
       round: a.round,
       type: a.type,
     }, ...prev])
+
+    if (DEMO_MODE) return
+
+    try {
+      await deleteRoleplayAssessment(id)
+    } catch (err) {
+      console.error('deleteRoleplayAssessment failed', err)
+      setAssessments(prev => [a, ...prev]) // put the row back
+      alertError('ลบผลประเมินไม่สำเร็จ', 'กรุณาลองใหม่อีกครั้ง')
+    }
   }
 
   // For sale users: their own assessments
@@ -1950,16 +2016,14 @@ export default function RoleplayPage() {
             <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
               {auditLogs.map(log => (
                 <div key={log.id} className="px-5 py-3 flex items-center gap-3">
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                    log.action === 'delete' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
-                  }`}>
-                    {log.action === 'delete' ? 'ลบ' : 'แก้ไข'}
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${AUDIT_ACTION_STYLE[log.action]}`}>
+                    {AUDIT_ACTION_LABEL[log.action]}
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-gray-700">
                       <span className="font-bold">{log.actorName}</span>
                       {' '}({log.actorRole}){' '}
-                      {log.action === 'delete' ? 'ลบ' : 'แก้ไข'}{' '}
+                      {AUDIT_ACTION_LABEL[log.action]}{' '}
                       <span className="font-bold">{log.subjectName}</span>
                       {' — '}{log.type === 'pre' ? 'Pre' : 'Post'} Test รอบที่ {log.round}
                     </p>

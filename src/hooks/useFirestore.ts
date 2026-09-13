@@ -1155,6 +1155,36 @@ export async function saveShadowAcknowledgment(recordId: string, ack: ShadowAckn
   })
 }
 
+// ── Roleplay assessments ──────────────────────────────────────────────────────
+// The assessor form on /courses/roleplay had no write path at all: saving only
+// touched local state, which the live listener then overwrote on its next
+// snapshot, so every evaluation was silently lost. These are the missing writes.
+// firestore.rules requires assessorUid == the caller, so the record is always
+// attributable to whoever scored it.
+
+export async function saveRoleplayAssessment(assessment: RoleplayAssessment): Promise<string> {
+  const { getClientFirestore } = await import('@/lib/firebase/client')
+  const { doc, setDoc, collection, addDoc, Timestamp } = await import('firebase/firestore')
+  const db = getClientFirestore()
+  const { id, createdAt, ...rest } = assessment
+  const payload = { ...rest, createdAt: Timestamp.fromDate(createdAt) }
+
+  // An edit keeps its id; a new evaluation lets Firestore mint one so two
+  // assessors filling in the same member at once can't collide on a local id.
+  if (id && !id.startsWith('local-')) {
+    await setDoc(doc(db, 'roleplayAssessments', id), payload, { merge: true })
+    return id
+  }
+  const ref = await addDoc(collection(db, 'roleplayAssessments'), payload)
+  return ref.id
+}
+
+export async function deleteRoleplayAssessment(id: string): Promise<void> {
+  const { getClientFirestore } = await import('@/lib/firebase/client')
+  const { doc, deleteDoc } = await import('firebase/firestore')
+  await deleteDoc(doc(getClientFirestore(), 'roleplayAssessments', id))
+}
+
 // ── Bucket assessment results (one doc per uid per questionnaire) ─────────────
 // Written only by POST /api/personality/submit; read here to render the result
 // cards on the learner's profile.

@@ -262,13 +262,32 @@ service cloud.firestore {
     }
 
     // ── /roleplayAssessments ───────────────────────────────────────────────────
-    // Scored assessments — populated only by the super_admin CSV import
-    // (/api/csv/roleplay, Admin SDK, bypasses these rules). No client write path
-    // exists, so allowing one only let a learner score their own roleplay.
+    // Scored assessments, from two sources: the super_admin CSV import
+    // (/api/csv/roleplay, Admin SDK, bypasses these rules) and the in-app
+    // assessor form on /courses/roleplay.
+    //
+    // The form was previously not allowed to write at all, so every evaluation a
+    // team lead filled in was lost on the next snapshot. Opening it up carries
+    // the risk the old comment named — a learner scoring their own roleplay — so
+    // two things are enforced rather than one:
+    //   • the writer must be team_lead or above (same bar as a shadow sign-off), and
+    //   • `assessorUid` must be the caller, so a score is always attributable, and
+    //   • the assessor must not be the subject, so nobody grades themselves.
+    // Edits are restricted to the assessor who made the record; only a
+    // super_admin can rewrite or remove someone else's evaluation.
     match /roleplayAssessments/{recordId} {
       allow read: if isStaff();
-      allow create, update: if isSuperAdmin();
-      allow delete: if isSuperAdmin();
+      allow create: if isSuperAdmin()
+                    || (isTeamLeadOrAbove()
+                        && request.resource.data.assessorUid == uid()
+                        && request.resource.data.subjectUid != uid());
+      allow update: if isSuperAdmin()
+                    || (isTeamLeadOrAbove()
+                        && resource.data.assessorUid == uid()
+                        && request.resource.data.assessorUid == uid()
+                        && request.resource.data.subjectUid != uid());
+      allow delete: if isSuperAdmin()
+                    || (isTeamLeadOrAbove() && resource.data.assessorUid == uid());
     }
 
     // ── /notifications (subcollection per user) ────────────────────────────────
