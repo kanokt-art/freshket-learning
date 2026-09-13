@@ -3718,7 +3718,29 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
   function updateTopic(id: string, patch: Partial<CourseTopic>) {
     onChange(topics.map((t) => (t.id === id ? { ...t, ...patch } : t)))
   }
-  function removeTopic(id: string) {
+  // Deleting a topic takes every lesson inside it, so the count goes in the
+  // prompt — "ลบหัวข้อนี้?" alone hides how much is about to disappear. An empty
+  // topic has nothing to lose, so that case deletes straight away rather than
+  // training people to click through a dialog that never matters.
+  async function removeTopic(id: string) {
+    const topic = topics.find((t) => t.id === id)
+    if (!topic) return
+
+    if (topic.lessons.length > 0) {
+      const quizCount = topic.lessons.filter((l) => l.type === 'quiz').length
+      const ok = await confirmAction({
+        title: `ลบหัวข้อ "${topic.title || 'ไม่มีชื่อ'}"?`,
+        text: `บทเรียน ${topic.lessons.length} รายการในหัวข้อนี้จะถูกลบไปด้วย และกู้คืนไม่ได้`
+          // Same distinction the lesson prompt draws: the assessment documents
+          // themselves live elsewhere and survive.
+          + (quizCount > 0 ? ` (ตัวแบบทดสอบ ${quizCount} ชุดและคะแนนที่ผู้เรียนทำไว้จะยังอยู่)` : ''),
+        confirmText: 'ลบหัวข้อ',
+        cancelText: 'ยกเลิก',
+        danger: true,
+      })
+      if (!ok) return
+    }
+
     onChange(topics.filter((t) => t.id !== id))
     if (selectedKey?.startsWith(`${id}:`)) setSelectedKey(null)
   }
@@ -3746,9 +3768,29 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
   // Exactly one lesson per course may hold each pre/post role — assigning it
   // here strips it from whichever OTHER lesson held it, across every topic,
   // in the same update so the two writes can't land as separate saves.
-  function removeLesson(topicId: string, lessonId: string) {
+  // Deleting is the one action here that can't be undone by re-dragging or
+  // re-typing — the lesson's URL, article body or linked quiz goes with it — so
+  // it asks first. Both entry points (the × in the list and ลบบทเรียนนี้ in the
+  // editor) route through here, so one guard covers both.
+  async function removeLesson(topicId: string, lessonId: string) {
     const topic = topics.find((t) => t.id === topicId)
     if (!topic) return
+    const lesson = topic.lessons.find((l) => l.id === lessonId)
+    if (!lesson) return
+
+    const ok = await confirmAction({
+      title: `ลบบทเรียน "${lesson.title || 'ไม่มีชื่อ'}"?`,
+      text: lesson.type === 'quiz'
+        // The assessment itself lives in its own collection and is reused by
+        // other courses, so say plainly that only the link is being removed.
+        ? 'บทเรียนนี้จะถูกลบออกจากหลักสูตร (ตัวแบบทดสอบและคะแนนที่ผู้เรียนทำไว้จะยังอยู่)'
+        : 'เนื้อหาของบทเรียนนี้จะถูกลบออกจากหลักสูตร และกู้คืนไม่ได้',
+      confirmText: 'ลบบทเรียน',
+      cancelText: 'ยกเลิก',
+      danger: true,
+    })
+    if (!ok) return
+
     updateTopic(topicId, { lessons: topic.lessons.filter((l) => l.id !== lessonId) })
     if (selectedKey === `${topicId}:${lessonId}`) setSelectedKey(null)
   }
@@ -3820,7 +3862,7 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
                 <input value={topic.title} onChange={(e) => updateTopic(topic.id, { title: e.target.value })}
                   className="flex-1 min-w-0 text-sm font-bold text-gray-800 bg-transparent focus:outline-none focus:ring-1 focus:ring-freshket-300 rounded px-1.5 py-1"
                 />
-                <button type="button" onClick={() => removeTopic(topic.id)}
+                <button type="button" onClick={() => void removeTopic(topic.id)}
                   className="size-6 flex items-center justify-center rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-all shrink-0">
                   <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
@@ -3852,7 +3894,7 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
                         <LessonTypeIcon type={lesson.type} className="size-4 shrink-0" />
                         <span className="flex-1 truncate">{lesson.title}</span>
                       </button>
-                      <button type="button" onClick={() => removeLesson(topic.id, lesson.id)}
+                      <button type="button" onClick={() => void removeLesson(topic.id, lesson.id)}
                         className={`size-6 flex items-center justify-center rounded shrink-0 mr-1 transition-all ${selected ? 'text-white/70 hover:bg-white/20' : 'text-gray-300 hover:text-rose-600 hover:bg-rose-50'}`}>
                         <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                       </button>
@@ -3892,7 +3934,7 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
             lesson={selectedLesson}
             assessments={assessments}
             onChange={(patch) => updateLesson(selectedTopic!.id, selectedLesson!.id, patch)}
-            onDelete={() => removeLesson(selectedTopic!.id, selectedLesson!.id)}
+            onDelete={() => void removeLesson(selectedTopic!.id, selectedLesson!.id)}
           />
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-gray-300">
