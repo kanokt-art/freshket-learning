@@ -53,6 +53,8 @@ async function notifyManagerOfCompletion(
   score: number,
   passed: boolean,
   courseId: string,
+  /** No auto-gradeable questions — the score is meaningless, so don't quote it. */
+  awaitingReview = false,
 ) {
   try {
     const learnerSnap = await db.collection('users').doc(uid).get()
@@ -63,7 +65,10 @@ async function notifyManagerOfCompletion(
       + (learner.nickname ? ` (${learner.nickname})` : '')
     const roleLine = [learner.position, learner.department].filter(Boolean).join(' · ')
     const title = `${name} เรียนจบ "${courseTitle}"`
-    const body = `${roleLine ? roleLine + ' — ' : ''}${passed ? 'ทำแบบทดสอบผ่านแล้ว' : 'ทำแบบทดสอบแล้ว แต่ยังไม่ผ่านเกณฑ์'} ได้คะแนน ${score} คะแนน`
+    const verdict = awaitingReview
+      ? 'ส่งคำตอบแบบเขียนแล้ว รอตรวจ'
+      : `${passed ? 'ทำแบบทดสอบผ่านแล้ว' : 'ทำแบบทดสอบแล้ว แต่ยังไม่ผ่านเกณฑ์'} ได้คะแนน ${score} คะแนน`
+    const body = `${roleLine ? roleLine + ' — ' : ''}${verdict}`
 
     let targetUids: string[]
     if (learner.managerId) {
@@ -224,7 +229,11 @@ export async function POST(req: NextRequest) {
     const passingScore = typeof assessment.passingScore === 'number' ? assessment.passingScore : 70
 
     const graded = gradeSubmission(questions, answers)
-    const passed = graded.score >= passingScore
+    // A quiz made entirely of written questions has nothing to auto-grade, so a
+    // 0% here means "not gradeable", not "answered badly" — failing the learner
+    // on it would be wrong. Treat it as passed and let a human read the answers.
+    const nothingToAutoGrade = graded.pointsPossible === 0
+    const passed = nothingToAutoGrade || graded.score >= passingScore
 
     // Attempt number = how many rows this learner already has for this quiz.
     // Counted rather than incremented so it stays right even if a write was lost.
@@ -313,7 +322,7 @@ export async function POST(req: NextRequest) {
       // (or a plain lesson-quiz with no pre/post concept at all), never the
       // pre-assessment, which only means the learner is just starting out.
       if (step !== 'pre') {
-        await notifyManagerOfCompletion(db, uid, payload.courseTitle as string, graded.score, passed, courseId)
+        await notifyManagerOfCompletion(db, uid, payload.courseTitle as string, graded.score, passed, courseId, nothingToAutoGrade)
       }
     }
 

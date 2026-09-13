@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
-import type { UserStats } from '@/types/stats'
+import { computeStreakDays, type UserStats } from '@/types/stats'
 import { CATEGORY_LABELS, type Course, type CourseCategory } from '@/types/course'
 import { STATUS_LABELS, type TrainingRecord, type TrainingStatus } from '@/types/tracking'
 import { ROLE_LABELS, canAccess, type UserProfile } from '@/types/user'
@@ -188,7 +188,10 @@ export default function SaleDashboardPage() {
     () => completedRecords.reduce((s, r) => s + (courseMap[r.courseId]?.durationMinutes ?? 0), 0) / 60,
     [completedRecords, courseMap],
   )
-  const streakDays = Math.min(myRecords.length * 2, 14)
+  const streakDays = useMemo(
+    () => computeStreakDays(completedRecords.map((r) => r.completedAt)),
+    [completedRecords],
+  )
 
   // Admin-specific stats — from the summaries when built, else the raw records.
   const adminTotals = useMemo(() => {
@@ -573,10 +576,17 @@ export default function SaleDashboardPage() {
 
           {sidebarOpen && (
             <div className="flex-1 min-w-0 overflow-y-auto p-5 pt-0 space-y-4">
-              {/* Streak card */}
+              {/* Streak card — the copy has to work at 0, which is where every
+                  learner starts and where anyone who misses a day lands. */}
               <div className="rounded-2xl p-4" style={{ background: 'linear-gradient(135deg,#eef2ff 0%,#e0e7ff 100%)' }}>
-                <p className="text-sm font-bold text-indigo-900">You&apos;re on fire, {firstName}! 🔥</p>
-                <p className="text-xs text-indigo-600/80 mt-1 leading-relaxed">เรียนมาแล้ว {streakDays} วันติดต่อกัน<br />Keep the momentum going!</p>
+                <p className="text-sm font-bold text-indigo-900">
+                  {streakDays > 0 ? `You're on fire, ${firstName}! 🔥` : `พร้อมเริ่มหรือยัง ${firstName}?`}
+                </p>
+                <p className="text-xs text-indigo-600/80 mt-1 leading-relaxed">
+                  {streakDays > 0
+                    ? <>เรียนจบมาแล้ว {streakDays} วันติดต่อกัน<br />Keep the momentum going!</>
+                    : <>เรียนจบคอร์สวันนี้เพื่อเริ่มนับสถิติ<br />ต่อเนื่องกันทุกวัน</>}
+                </p>
                 <button onClick={() => router.push('/courses')}
                   className="mt-3 w-full py-2 rounded-xl bg-white text-indigo-600 text-xs font-bold hover:bg-indigo-50 transition-all border border-indigo-100 shadow-sm">
                   Start Learning

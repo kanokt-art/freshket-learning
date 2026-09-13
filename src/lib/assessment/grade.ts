@@ -17,15 +17,22 @@ export type GivenAnswers = Record<string, string | Record<string, string>>
 /**
  * Grade a submission against the full (key-bearing) questions.
  *
- * Scoring rules, preserved from the previous client-side implementation so
- * existing scores stay comparable:
+ * Scoring rules:
  *  - multiple_choice: the chosen choice id must be the one flagged isCorrect
  *  - drag_drop: every pair must be matched to its own `right` text (all-or-nothing)
- *  - open_ended: NOT auto-graded — earns 0 but still counts in the denominator
+ *  - open_ended: NOT auto-graded, and NOT counted in the denominator either
  *
- * That last rule is a known wart (a quiz with many open-ended questions is
- * unpassable). It is deliberately kept as-is here: changing the maths would move
- * every historical score. Tracked separately as L-08 in the test plan.
+ * On that last rule: open-ended answers used to earn 0 while still inflating
+ * `pointsPossible`, which made any quiz with a meaningful share of written
+ * questions mathematically unpassable — a learner could answer every gradeable
+ * question perfectly and still land under the pass mark. The result screen even
+ * tells the learner "รอผู้สอนตรวจ", but no marking UI exists, so the score was
+ * final the moment it was shown. The percentage is therefore now computed over
+ * auto-gradeable questions only; written answers are still stored verbatim on
+ * the attempt for a human to read.
+ *
+ * Historical scores were left untouched, so attempts graded before this change
+ * may read lower than an identical attempt graded today.
  */
 export function gradeSubmission(questions: Question[], given: GivenAnswers): GradeResult {
   let pointsEarned = 0
@@ -34,8 +41,12 @@ export function gradeSubmission(questions: Question[], given: GivenAnswers): Gra
 
   for (const q of questions) {
     const pts = q.points ?? 0
-    pointsPossible += pts
     const ans = given[q.id]
+    const autoGradeable = q.type !== 'open_ended'
+
+    // Only auto-gradeable questions can move the percentage, so only they
+    // contribute to the denominator.
+    if (autoGradeable) pointsPossible += pts
 
     let correct: boolean | null = null
     let earned = 0
@@ -56,8 +67,10 @@ export function gradeSubmission(questions: Question[], given: GivenAnswers): Gra
       questionId: q.id,
       given: ans ?? '',
       correct,
+      // Reported as 0 so a written question doesn't read as "0 out of 20" on the
+      // review screen when it was never gradeable in the first place.
       pointsEarned: earned,
-      pointsPossible: pts,
+      pointsPossible: autoGradeable ? pts : 0,
     })
   }
 

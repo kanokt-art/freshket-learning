@@ -18,6 +18,7 @@ import {
 } from '@/types/assessment'
 import { getClientFirestore } from '@/lib/firebase/client'
 import { alertError } from '@/lib/ui/alert'
+import { parseFormJson, type ImportResult } from '@/lib/assessment/importFormJson'
 import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
@@ -459,9 +460,24 @@ function AssessmentEditor({
   // question isn't wrong just because it's still being filled in, only if the
   // admin tried to save it incomplete.
   const [questionErrors, setQuestionErrors] = useState<Record<string, { noText?: boolean; noCorrect?: boolean }>>({})
+  const [showImport, setShowImport] = useState(false)
 
   function addQuestion(type: QuestionType) {
     setQuestions((prev) => [...prev, emptyQuestion(type, prev.length + 1)])
+  }
+
+  /**
+   * Append questions pulled out of a Google Form. Appending rather than
+   * replacing means an admin can import a form into a quiz they've already
+   * started, and an accidental import is undone by deleting those questions
+   * instead of losing existing work.
+   */
+  function importQuestions(imported: Question[], formTitle: string) {
+    setQuestions((prev) => [...prev, ...imported].map((q, i) => ({ ...q, order: i + 1 })))
+    // Only fill the title in when it's still blank — never overwrite what the
+    // admin typed.
+    if (!title.trim() && formTitle) setTitle(formTitle)
+    setShowImport(false)
   }
   function removeQuestion(id: string) {
     setQuestions((prev) => prev.filter((q) => q.id !== id).map((q, i) => ({ ...q, order: i + 1 })))
@@ -656,6 +672,13 @@ function AssessmentEditor({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-bold text-gray-600">คำถาม ({questions.length})</p>
+                <button type="button" onClick={() => setShowImport(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-freshket-700 bg-freshket-100 border border-freshket-200 hover:bg-freshket-200 transition-all">
+                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
+                  </svg>
+                  นำเข้าจาก Google Form
+                </button>
               </div>
 
               {questions.map((q, idx) => (
@@ -695,6 +718,13 @@ function AssessmentEditor({
           </button>
         </div>
       </div>
+
+      {showImport && (
+        <ImportFromFormModal
+          onCancel={() => setShowImport(false)}
+          onImport={importQuestions}
+        />
+      )}
     </div>
   )
 }
@@ -893,6 +923,122 @@ function QuestionEditor({
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Google Form import ────────────────────────────────────────────────────────
+//
+// An embedded Google Form grades itself, so the LMS never sees per-question
+// results and can't apply its own timer, anti-cheat or answer review. Pulling
+// the questions in turns a form into a real assessment.
+//
+// The transport is a copy-paste of JSON produced by docs/apps-script/
+// FormToQuestions.gs, because reading a form's answer key requires either Apps
+// Script or a sensitive OAuth scope, and Apps Script needs no consent-screen
+// verification to ship.
+
+function ImportFromFormModal({ onCancel, onImport }: {
+  onCancel: () => void
+  onImport: (questions: Question[], formTitle: string) => void
+}) {
+  const [raw, setRaw] = useState('')
+  const [result, setResult] = useState<ImportResult | null>(null)
+
+  function handlePreview() {
+    setResult(parseFormJson(raw, genId))
+  }
+
+  const imported = result?.ok ? result.data! : null
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+      onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}>
+
+        <div className="px-6 py-4 border-b border-gray-100 shrink-0">
+          <h3 className="text-sm font-bold text-gray-900">นำเข้าคำถามจาก Google Form</h3>
+          <p className="text-xs text-gray-400 mt-0.5">คัดลอก JSON จาก Apps Script มาวางที่นี่</p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {/* Steps — the script lives outside this app, so the path to it has to
+              be spelled out or the paste box is a dead end. */}
+          <ol className="text-xs text-gray-600 space-y-1.5 bg-slate-50 rounded-xl p-4 list-decimal list-inside">
+            <li>เปิด Google Form → เมนู ⋮ มุมขวาบน → <span className="font-bold">Apps Script</span></li>
+            <li>วางไฟล์ <span className="font-mono text-freshket-700">FormToQuestions.gs</span> (อยู่ใน docs/apps-script) แล้วบันทึก</li>
+            <li>กด Run ที่ฟังก์ชัน <span className="font-mono text-freshket-700">exportQuestions</span> แล้วอนุญาตสิทธิ์</li>
+            <li>เปิด View → Logs แล้วคัดลอก JSON ที่อยู่ระหว่างบรรทัด <span className="font-mono">=====</span></li>
+          </ol>
+
+          <div>
+            <label className="text-xs font-bold text-gray-600 block mb-1.5">JSON จาก Apps Script</label>
+            <textarea
+              value={raw}
+              onChange={(e) => { setRaw(e.target.value); setResult(null) }}
+              rows={8}
+              placeholder='{ "title": "...", "questions": [ ... ] }'
+              className="w-full px-3 py-2.5 text-xs font-mono rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
+            />
+          </div>
+
+          {result && !result.ok && (
+            <div className="rounded-xl bg-rose-50 border border-rose-100 px-4 py-3">
+              <p className="text-xs font-bold text-rose-700">{result.error}</p>
+            </div>
+          )}
+
+          {imported && (
+            <div className="rounded-xl border border-freshket-200 bg-freshket-50 px-4 py-3 space-y-2">
+              <p className="text-xs font-bold text-freshket-700">
+                พบ {imported.questions.length} คำถาม
+                {imported.title && <span className="font-normal text-freshket-600"> · {imported.title}</span>}
+              </p>
+              <ul className="text-xs text-gray-600 space-y-1 max-h-40 overflow-y-auto">
+                {imported.questions.map((q, i) => (
+                  <li key={q.id} className="flex items-start gap-2">
+                    <span className="text-gray-400 shrink-0">{i + 1}.</span>
+                    <span className="flex-1 min-w-0 truncate">{q.text}</span>
+                    <span className={`shrink-0 text-xs font-bold px-1.5 rounded-full ${QUESTION_TYPE_COLORS[q.type]}`}>
+                      {QUESTION_TYPE_LABELS[q.type]}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Warnings show for a successful import too — that's the case where
+              they matter most (e.g. a placeholder answer key that must be fixed). */}
+          {result && result.warnings.length > 0 && (
+            <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3">
+              <p className="text-xs font-bold text-amber-700 mb-1.5">ต้องตรวจสอบ {result.warnings.length} รายการ</p>
+              <ul className="text-xs text-amber-700/90 space-y-1 max-h-32 overflow-y-auto">
+                {result.warnings.map((w, i) => <li key={i}>• {w}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3 shrink-0">
+          <button type="button" onClick={onCancel}
+            className="px-4 py-2.5 text-sm font-normal text-gray-600 hover:text-gray-800 rounded-xl hover:bg-gray-100 transition-all">
+            ยกเลิก
+          </button>
+          {!imported ? (
+            <button type="button" onClick={handlePreview} disabled={!raw.trim()}
+              className="px-5 py-2.5 text-sm font-bold bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+              ตรวจสอบ
+            </button>
+          ) : (
+            <button type="button" onClick={() => onImport(imported.questions, imported.title)}
+              className="px-5 py-2.5 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all">
+              เพิ่ม {imported.questions.length} คำถาม
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

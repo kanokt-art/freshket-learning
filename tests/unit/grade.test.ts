@@ -94,14 +94,26 @@ describe('gradeSubmission — drag and drop', () => {
 })
 
 describe('gradeSubmission — open ended', () => {
-  it('is not auto-graded but still counts in the denominator', () => {
-    // Documents the known wart (test plan L-08): an open-ended question can never
-    // earn points, so it drags the achievable maximum down.
+  it('is excluded from the denominator so it cannot drag the score down', () => {
+    // Previously (test plan L-08) an open-ended question earned 0 while still
+    // counting toward pointsPossible, which made a quiz with enough written
+    // questions impossible to pass. The percentage is now computed over the
+    // auto-gradeable questions only.
     const r = gradeSubmission([mc('q1', 'a', 5), open('q2', 5)], { q1: 'a', q2: 'my answer' })
     expect(r.answers[1].correct).toBeNull()
     expect(r.answers[1].pointsEarned).toBe(0)
-    expect(r.pointsPossible).toBe(10)
-    expect(r.score).toBe(50)
+    expect(r.answers[1].pointsPossible).toBe(0)
+    expect(r.pointsPossible).toBe(5)
+    expect(r.score).toBe(100)
+  })
+
+  it('reports nothing gradeable when every question is written', () => {
+    // pointsPossible 0 is the signal the submit route uses to hold the attempt
+    // for human review instead of failing the learner on an unscoreable quiz.
+    const r = gradeSubmission([open('q1'), open('q2')], { q1: 'a', q2: 'b' })
+    expect(r.pointsPossible).toBe(0)
+    expect(r.pointsEarned).toBe(0)
+    expect(r.score).toBe(0)
   })
 
   it('preserves the submitted text for later review', () => {

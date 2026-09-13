@@ -313,10 +313,13 @@ export default function TakeAssessmentPage() {
       const source = MOCK_ASSESSMENTS.find((a) => a.id === id)
       const graded = gradeSubmission(source?.questions ?? [], answers)
       const passingScore = source?.passingScore ?? 70
+      // Mirrors the server rule: nothing auto-gradeable means the score is not a
+      // verdict, so don't fail the learner on it (api/assessment/submit).
+      const passed = graded.pointsPossible === 0 || graded.score >= passingScore
       setScore(graded.score)
       setSubmitResult({
         score: graded.score,
-        passed: graded.score >= passingScore,
+        passed,
         passingScore,
         pointsEarned: graded.pointsEarned,
         pointsPossible: graded.pointsPossible,
@@ -921,7 +924,11 @@ function ResultScreen({
                     )}
                   </div>
                   <span className="text-xs font-bold text-gray-400 shrink-0">
-                    {verdict?.pointsEarned ?? 0}/{verdict?.pointsPossible ?? q.points}
+                    {/* Written answers carry no auto-gradeable points, so "0/0"
+                        would read as a zero rather than as "not marked yet". */}
+                    {q.type === 'open_ended'
+                      ? 'รอตรวจ'
+                      : `${verdict?.pointsEarned ?? 0}/${verdict?.pointsPossible ?? q.points}`}
                   </span>
                 </div>
               </div>

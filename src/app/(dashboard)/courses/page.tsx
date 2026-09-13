@@ -3367,15 +3367,13 @@ function QuizLessonSettingsCard({
   const [timeLimitMinutes, setTimeLimitMinutes] = useState('0')
   const [antiCheatEnabled, setAntiCheatEnabled] = useState(false)
   const [description, setDescription] = useState('')
-  const [passingScore, setPassingScore] = useState('70')
   useEffect(() => {
     setTitle(currentAssessment?.title ?? '')
     setTimeLimitMinutes(String(currentAssessment?.timeLimitMinutes ?? 0))
     setAntiCheatEnabled(currentAssessment?.antiCheatEnabled ?? false)
     setDescription(currentAssessment?.description ?? '')
-    setPassingScore(String(currentAssessment?.passingScore ?? 70))
   }, [currentAssessment?.id, currentAssessment?.title, currentAssessment?.timeLimitMinutes,
-    currentAssessment?.antiCheatEnabled, currentAssessment?.description, currentAssessment?.passingScore])
+    currentAssessment?.antiCheatEnabled, currentAssessment?.description])
 
   // "ใช้เป็นแบบทดสอบก่อนเรียน": ON means the learner also sits this quiz
   // BEFORE the course, so the pair produces a before/after score; OFF leaves
@@ -3407,22 +3405,17 @@ function QuizLessonSettingsCard({
       void alertError('กรอกชื่อแบบทดสอบก่อน', 'ชื่อแบบทดสอบเป็นสิ่งที่ผู้เรียนเห็นก่อนเริ่มทำ')
       return
     }
-    // The grader compares against this exact value (api/assessment/submit),
-    // so an out-of-range one would silently make every attempt pass or fail.
-    const pass = Number(passingScore)
-    if (!Number.isFinite(pass) || pass < 0 || pass > 100) {
-      void alertError('เกณฑ์ผ่านไม่ถูกต้อง', 'กรอกเป็นตัวเลข 0–100')
-      return
-    }
     setSaving(true)
     try {
       if (!DEMO_MODE) {
+        // passingScore is intentionally absent: it is owned by the assessment
+        // editor. Writing it from here would push this screen's stale copy over
+        // a value the quiz author may have just changed.
         await updateDoc(doc(getClientFirestore(), 'assessments', currentAssessment.id), {
           title: title.trim(),
           timeLimitMinutes: Number(timeLimitMinutes) || 0,
           antiCheatEnabled,
           description: description.trim(),
-          passingScore: pass,
         })
       }
     } catch (e) {
@@ -3550,19 +3543,22 @@ function QuizLessonSettingsCard({
                 <p className="text-xs text-gray-400 mt-1">แสดงให้ผู้เรียนเห็นก่อนเริ่มทำแบบทดสอบ</p>
               </div>
 
-              {/* Google Form assessments are graded by Google, not by this app,
-                  so a pass threshold here would never be applied. */}
+              {/* The pass threshold is deliberately NOT editable here. It is set
+                  once where the quiz itself is authored (แบบทดสอบ → สร้าง/แก้ไข)
+                  and a second input for the same assessment field just invites
+                  the two screens to disagree. The current value is shown
+                  read-only so the setting is still visible in context. */}
               {!currentAssessment.googleFormUrl && (
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <label className="text-xs font-bold text-gray-600">ผ่านเมื่อทำแบบทดสอบได้คะแนนมากกว่าหรือเท่ากับ</label>
-                    <InfoTooltip text="เกณฑ์ที่ใช้ตัดสินผ่าน/ไม่ผ่านตอนตรวจคำตอบ มีผลกับแบบทดสอบที่สร้างเองเท่านั้น" />
+                    <label className="text-xs font-bold text-gray-600">เกณฑ์ผ่าน</label>
+                    <InfoTooltip text="ตั้งค่าได้ที่หน้าแบบทดสอบ (เมนู ⋮ → แก้ไข) เพื่อไม่ให้ตั้งซ้ำสองที่" />
                   </div>
-                  <div className="relative shrink-0 w-24">
-                    <input type="number" min={0} max={100} value={passingScore} onChange={(e) => setPassingScore(e.target.value)}
-                      className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-freshket-500 text-right pr-7" />
-                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">%</span>
-                  </div>
+                  {/* Same weight/colour the assessment table uses for this
+                      value, so the two screens read as one setting. */}
+                  <span className="shrink-0 text-sm font-normal text-gray-600">
+                    {currentAssessment.passingScore}%
+                  </span>
                 </div>
               )}
 
