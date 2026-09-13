@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { canAccess } from '@/types/user'
@@ -9,6 +9,9 @@ import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 import { FreshketToolTabs } from '@/components/layout/FreshketToolTabs'
 
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
+import { useNewJoinerList, saveNewJoinerList } from '@/hooks/useFirestore'
+import { alertError, confirmAction } from '@/lib/ui/alert'
+import { DEMO_MODE } from '@/lib/demo/demoMode'
 
 // ── Sale Tools ────────────────────────────────────────────────────────────────
 
@@ -485,9 +488,88 @@ export default function NewJoinerPage() {
   const pct = Math.min(100, Math.round((daysSince / NEW_JOINER_DAYS) * 100))
   const firstName = user?.nickname ?? user?.displayName?.split(' ')[0] ?? ''
 
+  // Content lives in Firestore (appConfig/newJoiner*) so an admin's edits are
+  // seen by everyone and survive a refresh. The INIT_* arrays are now only a
+  // seed: they render until the docs load, and stay in use if the docs were
+  // never created. `data === null` (missing doc) is deliberately distinct from
+  // an empty items array (admin deleted everything on purpose).
+  const liveTeams = useNewJoinerList<TeamCard>('newJoinerTeams')
+  const liveProblems = useNewJoinerList<ProblemGuide>('newJoinerProblems')
+
   const [teams, setTeams] = useState<TeamCard[]>(INIT_TEAMS)
   const [problems, setProblems] = useState<ProblemGuide[]>(INIT_PROBLEMS)
   const [tools] = useState<HighlightedTool[]>(INIT_TOOLS)
+
+  useEffect(() => {
+    if (DEMO_MODE) return
+    const items = liveTeams.data?.items
+    if (items) setTeams(items)
+  }, [liveTeams.data])
+
+  useEffect(() => {
+    if (DEMO_MODE) return
+    const items = liveProblems.data?.items
+    if (items) setProblems(items)
+  }, [liveProblems.data])
+
+  // Every mutation goes through one of these two: write first, and only keep
+  // the optimistic list if the write lands. A failed save used to leave the
+  // admin looking at content nobody else would ever see.
+  async function commitTeams(next: TeamCard[], prev: TeamCard[]) {
+    setTeams(next)
+    if (DEMO_MODE) return
+    try {
+      await saveNewJoinerList('newJoinerTeams', next)
+    } catch (err) {
+      console.error('saveNewJoinerList(newJoinerTeams) failed', err)
+      setTeams(prev)
+      alertError('บันทึกไม่สำเร็จ', 'ไม่สามารถบันทึกข้อมูลทีมได้ กรุณาลองใหม่อีกครั้ง')
+    }
+  }
+
+  async function commitProblems(next: ProblemGuide[], prev: ProblemGuide[]) {
+    setProblems(next)
+    if (DEMO_MODE) return
+    try {
+      await saveNewJoinerList('newJoinerProblems', next)
+    } catch (err) {
+      console.error('saveNewJoinerList(newJoinerProblems) failed', err)
+      setProblems(prev)
+      alertError('บันทึกไม่สำเร็จ', 'ไม่สามารถบันทึกข้อมูลปัญหาได้ กรุณาลองใหม่อีกครั้ง')
+    }
+  }
+
+  async function handleDeleteTeam(team: TeamCard) {
+    const ok = await confirmAction({
+      title: 'ลบการ์ดทีมนี้?',
+      text: `"${team.name}" จะถูกลบออกจาก New Joiner Hub สำหรับพนักงานทุกคน`,
+      confirmText: 'ลบ',
+      danger: true,
+    })
+    if (!ok) return
+    await commitTeams(teams.filter(t => t.id !== team.id), teams)
+  }
+
+  async function handleDeleteProblem(problem: ProblemGuide) {
+    const ok = await confirmAction({
+      title: 'ลบรายการนี้?',
+      text: `"${problem.problem}" จะถูกลบออกจากคู่มือติดต่อทีม`,
+      confirmText: 'ลบ',
+      danger: true,
+    })
+    if (!ok) return
+    await commitProblems(problems.filter(x => x.id !== problem.id), problems)
+  }
+
+  function handleSaveTeam(t: TeamCard) {
+    const next = teamModal.item ? teams.map(x => x.id === t.id ? t : x) : [...teams, t]
+    void commitTeams(next, teams)
+  }
+
+  function handleSaveProblem(pg: ProblemGuide) {
+    const next = problemModal.item ? problems.map(x => x.id === pg.id ? pg : x) : [...problems, pg]
+    void commitProblems(next, problems)
+  }
 
   const [activeTab, setActiveTab] = useState<'overview' | 'tools' | 'team' | 'problems'>('overview')
   const [editMode, setEditMode] = useState(false)
@@ -854,7 +936,7 @@ export default function NewJoinerPage() {
                       className="size-6 rounded-lg flex items-center justify-center bg-gray-100 hover:bg-blue-100 text-gray-400 hover:text-blue-600 transition-colors">
                       <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" /></svg>
                     </button>
-                    <button type="button" onClick={() => setTeams(prev => prev.filter(t => t.id !== team.id))}
+                    <button type="button" onClick={() => { void handleDeleteTeam(team) }}
                       className="size-6 rounded-lg flex items-center justify-center bg-gray-100 hover:bg-rose-100 text-gray-400 hover:text-rose-500 transition-colors">
                       <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
@@ -911,7 +993,7 @@ export default function NewJoinerPage() {
                   <ProblemRow key={p.id} problem={p} editMode={editMode} expanded={expandedProblems.has(p.id)}
                     onToggle={() => toggleProblem(p.id)}
                     onEdit={() => setProblemModal({ open: true, item: p })}
-                    onDelete={() => setProblems(prev => prev.filter(x => x.id !== p.id))}
+                    onDelete={() => { void handleDeleteProblem(p) }}
                   />
                 ))}
               </div>
@@ -926,7 +1008,7 @@ export default function NewJoinerPage() {
                   <ProblemRow key={p.id} problem={p} editMode={editMode} expanded={expandedProblems.has(p.id)}
                     onToggle={() => toggleProblem(p.id)}
                     onEdit={() => setProblemModal({ open: true, item: p })}
-                    onDelete={() => setProblems(prev => prev.filter(x => x.id !== p.id))}
+                    onDelete={() => { void handleDeleteProblem(p) }}
                   />
                 ))}
               </div>
@@ -942,14 +1024,14 @@ export default function NewJoinerPage() {
       {teamModal.open && (
         <TeamFormModal
           initial={teamModal.item}
-          onSave={t => setTeams(prev => teamModal.item ? prev.map(x => x.id === t.id ? t : x) : [...prev, t])}
+          onSave={handleSaveTeam}
           onClose={() => setTeamModal({ open: false })}
         />
       )}
       {problemModal.open && (
         <ProblemFormModal
           initial={problemModal.item}
-          onSave={p => setProblems(prev => problemModal.item ? prev.map(x => x.id === p.id ? p : x) : [...prev, p])}
+          onSave={handleSaveProblem}
           onClose={() => setProblemModal({ open: false })}
         />
       )}

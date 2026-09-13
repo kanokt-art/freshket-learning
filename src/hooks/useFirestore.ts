@@ -1250,3 +1250,44 @@ export function useAllRoleplayAssessments(enabled = true): UseResult<RoleplayAss
   if (DEMO_MODE) return { data: [], loading: false, error: null }
   return result
 }
+
+// ── New Joiner Hub content (team cards + problem routing guide) ───────────────
+// Stored as two documents under appConfig rather than a collection per kind:
+// the lists are short, always read together with the page, and a doc read is
+// one billed read instead of one per card. appConfig already carries exactly
+// the access this needs (staff read, super_admin write) — see firestore.rules.
+//
+// Before this, the Hub rendered from hardcoded INIT_TEAMS/INIT_PROBLEMS arrays
+// and the admin "แก้ไขเนื้อหา" mode only mutated React state, so every edit was
+// gone on the next refresh and nobody but the editor ever saw it.
+export interface NewJoinerListDoc<T> {
+  items: T[]
+  updatedAt?: unknown
+}
+
+/**
+ * Live content list for the New Joiner Hub.
+ *
+ * Returns `null` data when the document doesn't exist yet, which the page
+ * distinguishes from an empty list: a missing doc falls back to the built-in
+ * seed content, while an explicitly empty list means an admin deleted
+ * everything and must stay empty.
+ */
+export function useNewJoinerList<T>(docId: 'newJoinerTeams' | 'newJoinerProblems') {
+  return useFirestoreDoc<NewJoinerListDoc<T>>(`appConfig/${docId}`, !DEMO_MODE)
+}
+
+export async function saveNewJoinerList<T>(
+  docId: 'newJoinerTeams' | 'newJoinerProblems',
+  items: T[],
+): Promise<void> {
+  const { getClientFirestore } = await import('@/lib/firebase/client')
+  const { doc, setDoc, serverTimestamp } = await import('firebase/firestore')
+  // merge:true so we only touch these two fields, matching the convention the
+  // moduleAccess save in /admin/settings uses.
+  await setDoc(
+    doc(getClientFirestore(), 'appConfig', docId),
+    { items, updatedAt: serverTimestamp() },
+    { merge: true },
+  )
+}
