@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminFirestore } from '@/lib/firebase/admin'
 import { requireStaff } from '@/lib/firebase/requireStaff'
 import type { NotifType } from '@/types/notification'
+import type { UserProfile } from '@/types/user'
+import { postShadowSubmittedToSlack, isSalesDepartment } from '@/lib/notifications/slack'
 
 // Server-side notification writer.
 //
@@ -87,6 +89,43 @@ export async function POST(req: NextRequest) {
         // be traced back to the account that actually triggered it.
         createdByUid: gate.uid,
       })
+    // Slack mirror for shadow visits awaiting assessment.
+    //
+    // The client fans this route out once per recipient (the learner's manager,
+    // or every team_lead+ when they have none), so posting per call would put
+    // the same visit in the channel several times. A marker doc keyed by the
+    // shadow record makes the first call the only one that posts — and because
+    // it is a create, concurrent calls race on the write rather than on a read,
+    // so exactly one wins.
+    if (type === 'shadow_pending_ack') {
+      const claimRef = db.collection('slackPosts').doc(`shadow_${refId}`)
+      let claimed = false
+      try {
+        await claimRef.create({ postedAt: new Date(), kind: 'shadow_pending_ack' })
+        claimed = true
+      } catch {
+        claimed = false // another recipient's call already posted this one
+      }
+      if (claimed) {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, '')
+        const senderSnap = await db.collection('users').doc(gate.uid).get()
+        const sender = senderSnap.exists ? (senderSnap.data() as Partial<UserProfile>) : {}
+        if (isSalesDepartment(sender.department)) {
+          await postShadowSubmittedToSlack({
+            observerName: (sender.displayNameEN?.trim() || sender.displayName || 'พนักงาน')
+              + (sender.nickname ? ` (${sender.nickname})` : ''),
+            position: sender.position,
+            department: sender.department,
+            // Reuses the line the client already composed for the in-app
+            // notification ("ร้าน X · segment · รอการ Acknowledge") so both
+            // channels describe the visit identically.
+            visitSummary: notifBody,
+            shadowUrl: appUrl ? `${appUrl}/shadow` : undefined,
+          })
+        }
+      }
+    }
+
     return NextResponse.json({ ok: true, id: docId })
   } catch (err) {
     console.error('notifications/push failed', err)

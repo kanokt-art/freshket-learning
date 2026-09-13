@@ -90,7 +90,7 @@ export async function postCompletionToSlack(ev: SlackCompletionEvent): Promise<b
             type: 'actions',
             elements: [{
               type: 'button',
-              text: { type: 'plain_text', text: 'ดูหลักสูตร' },
+              text: { type: 'plain_text', text: 'ดูประวัติการเรียน' },
               url: ev.courseUrl,
             }],
           }]
@@ -98,6 +98,11 @@ export async function postCompletionToSlack(ev: SlackCompletionEvent): Promise<b
     ],
   }
 
+  return post(webhook, payload)
+}
+
+/** The single place that actually talks to Slack. */
+async function post(webhook: string, payload: unknown): Promise<boolean> {
   try {
     const res = await fetch(webhook, {
       method: 'POST',
@@ -115,4 +120,123 @@ export async function postCompletionToSlack(ev: SlackCompletionEvent): Promise<b
     console.error('Slack webhook failed', err)
     return false
   }
+}
+
+/**
+ * Trim free text to a preview length, cutting on a word boundary where one is
+ * near the limit so the excerpt doesn't end mid-word.
+ */
+export function excerpt(text: string, max = 100): string {
+  const t = text.trim().replace(/\s+/g, ' ')
+  if (t.length <= max) return t
+  const cut = t.slice(0, max)
+  const lastSpace = cut.lastIndexOf(' ')
+  // Thai doesn't use spaces between words, so a space-based cut only helps when
+  // one is actually close to the limit; otherwise take the hard cut.
+  return (lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd() + '…'
+}
+
+export interface SlackShadowSubmittedEvent {
+  observerName: string
+  position?: string
+  department?: string
+  /**
+   * One line describing the visit — store, segment and persona as the app
+   * already phrases it for the in-app notification, so the two channels say the
+   * same thing and there's only one place composing it.
+   */
+  visitSummary: string
+  shadowUrl?: string
+}
+
+/**
+ * A new shadow visit is waiting for a team lead to assess. The point of this
+ * one is turnaround time — it is posted so somebody picks it up, which is why
+ * it leads with the ask rather than with the submission.
+ */
+export async function postShadowSubmittedToSlack(ev: SlackShadowSubmittedEvent): Promise<boolean> {
+  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
+  if (!webhook) return false
+
+  const meta = [ev.position, ev.department].filter(Boolean).join(' · ')
+
+  return post(webhook, {
+    text: `${ev.observerName} ส่ง Shadow Visit ใหม่ — รอการประเมิน`,
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `📋 *${ev.observerName}* ส่ง Shadow Visit ใหม่ — _รอการประเมิน_\n${ev.visitSummary}`,
+        },
+      },
+      ...(meta
+        ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: meta }] }]
+        : []),
+      ...(ev.shadowUrl
+        ? [{
+            type: 'actions',
+            elements: [{
+              type: 'button',
+              style: 'primary',
+              text: { type: 'plain_text', text: 'เข้าไปประเมิน' },
+              url: ev.shadowUrl,
+            }],
+          }]
+        : []),
+    ],
+  })
+}
+
+export interface SlackTakeAwayEvent {
+  learnerName: string
+  position?: string
+  department?: string
+  courseTitle: string
+  /** The learner's own words — excerpted before it reaches the channel. */
+  text: string
+  /** Deep link to the learner's card on the team page, where the full text is. */
+  memberUrl?: string
+}
+
+/**
+ * A learner's post-course summary. The full text is the learner's own writing
+ * and can be personal, so only a short excerpt goes to the channel; the whole
+ * thing stays in the app behind the link.
+ */
+export async function postTakeAwayToSlack(ev: SlackTakeAwayEvent): Promise<boolean> {
+  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
+  if (!webhook) return false
+
+  const meta = [ev.position, ev.department].filter(Boolean).join(' · ')
+
+  return post(webhook, {
+    text: `${ev.learnerName} เขียนสรุปหลังเรียน "${ev.courseTitle}"`,
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `✍️ *${ev.learnerName}* เขียนสรุปหลังเรียน\n*${ev.courseTitle}*`,
+        },
+      },
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `>${excerpt(ev.text)}` },
+      },
+      ...(meta
+        ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: meta }] }]
+        : []),
+      ...(ev.memberUrl
+        ? [{
+            type: 'actions',
+            elements: [{
+              type: 'button',
+              text: { type: 'plain_text', text: 'อ่านฉบับเต็ม' },
+              url: ev.memberUrl,
+            }],
+          }]
+        : []),
+    ],
+  })
 }

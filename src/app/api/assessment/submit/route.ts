@@ -113,7 +113,9 @@ async function notifyManagerOfCompletion(
         score,
         passed,
         awaitingReview,
-        courseUrl: appUrl ? `${appUrl}/courses/${courseId}` : undefined,
+        // The learner's card on the team page, not the course: whoever reads
+        // this in Slack wants the person's history and their own comment box.
+        courseUrl: appUrl ? `${appUrl}/manager?user=${encodeURIComponent(uid)}` : undefined,
       })
     }
   } catch (err) {

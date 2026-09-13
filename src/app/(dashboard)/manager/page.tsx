@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { getClientFirestore } from '@/lib/firebase/client'
 import { getDemoMode } from '@/lib/demo/demoMode'
@@ -13,6 +14,7 @@ import { canAccess, ROLE_LABELS, getTeamManagerIds, getTeamLeadIds, type UserPro
 import type { AssessmentScore } from '@/types/assessmentScore'
 import { canViewByLevel } from '@/lib/jobLevel'
 import { formatDateEN } from '@/lib/utils/dateFormatter'
+import { MOCK_TAKEAWAYS } from '@/lib/utils/mockData'
 import { alertError } from '@/lib/ui/alert'
 
 // ── Dept color palette ─────────────────────────────────────────────────────────
@@ -120,7 +122,14 @@ export default function ManagerPage() {
   const { data: records, loading } = useTeamTrainingRecords(memberUids)
   const [activeDept, setActiveDept] = useState<string>('all')
   const [userSearch, setUserSearch] = useState('')
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
+  // Seeded from ?user=<uid> so a Slack notification can deep-link straight to
+  // the member's card instead of dropping the reader on the team list to go
+  // find them. Read once on mount rather than tracked: closing the panel must
+  // not fight a param that is still in the address bar.
+  const searchParams = useSearchParams()
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(
+    () => searchParams.get('user'),
+  )
   const [sortField, setSortField] = useState<'name' | 'position' | 'department' | 'startDate' | 'team'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
@@ -513,13 +522,27 @@ function EmployeeSidebar({
 
   const takeaways = useMemo(() => {
     const m: Record<string, string> = {}
+    // Demo mode never opens the Firestore listener above, so without this the
+    // reflection panel always reads "ยังไม่มี reflection" and the feature can't
+    // be shown or reviewed at all.
+    if (getDemoMode()) {
+      for (const [key, text] of Object.entries(MOCK_TAKEAWAYS)) {
+        const [uid, ...rest] = key.split('_')
+        if (uid === user.uid) m[rest.join('_')] = text
+      }
+      return m
+    }
     for (const d of takeawayDocs.data) if (d.courseId) m[d.courseId] = d.text ?? ''
     return m
-  }, [takeawayDocs.data])
+  }, [takeawayDocs.data, user.uid])
 
   // Local optimistic overlay for feedback the lead just saved — merged on top of
   // the live docs so the UI reflects a save instantly, before the listener
   // round-trips. Once the listener catches up the overlay is simply redundant.
+  // A reflection can run to several paragraphs. Showing it inline stretched the
+  // course card until the score and the lead's feedback fell off screen, so the
+  // card carries an excerpt and the full text opens here.
+  const [readingReflection, setReadingReflection] = useState<{ courseTitle: string; text: string } | null>(null)
   const [feedbackOverlay, setFeedbackOverlay] = useState<Record<string, { comment: string; score: number | null; leadName?: string }>>({})
   const feedback = useMemo(() => {
     const m: Record<string, { comment: string; score: number | null; leadName?: string }> = {}
@@ -716,7 +739,10 @@ function EmployeeSidebar({
                   <div className="bg-freshket-50 border-b border-freshket-100 px-3 py-2.5">
                     <p className="text-xs font-bold text-freshket-700 mb-1">Reflect Knowledge (จากพนักงาน)</p>
                     {takeaways[rec.courseId] ? (
-                      <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{takeaways[rec.courseId]}</p>
+                      <ReflectionPreview
+                        text={takeaways[rec.courseId]}
+                        onOpen={() => setReadingReflection({ courseTitle: rec.courseTitle, text: takeaways[rec.courseId] })}
+                      />
                     ) : (
                       <p className="text-xs text-gray-400 italic">ยังไม่มี reflection จากพนักงาน</p>
                     )}
@@ -844,6 +870,93 @@ function EmployeeSidebar({
           )
         )}
 
+      </div>
+
+      {readingReflection && (
+        <ReflectionModal
+          courseTitle={readingReflection.courseTitle}
+          text={readingReflection.text}
+          onClose={() => setReadingReflection(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Reflect Knowledge — excerpt on the card, full text in a modal ──────────────
+
+/** Roughly two lines' worth; past this the card starts pushing content off screen. */
+const REFLECTION_PREVIEW_CHARS = 120
+
+function ReflectionPreview({ text, onOpen }: { text: string; onOpen: () => void }) {
+  const flat = text.trim().replace(/\s+/g, ' ')
+  const isLong = flat.length > REFLECTION_PREVIEW_CHARS
+
+  // A short reflection is fully visible already — giving it a "read more" that
+  // reveals nothing new would just be a dead control.
+  if (!isLong) {
+    return <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{text}</p>
+  }
+
+  return (
+    <div>
+      <p className="text-xs text-gray-700 leading-relaxed">
+        {flat.slice(0, REFLECTION_PREVIEW_CHARS).trimEnd()}…
+      </p>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="mt-1.5 inline-flex items-center gap-1 text-xs font-bold text-freshket-700 hover:text-freshket-600 transition-colors"
+      >
+        อ่านทั้งหมด
+        <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
+function ReflectionModal({ courseTitle, text, onClose }: {
+  courseTitle: string
+  text: string
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
+        style={{ animation: 'panelIn 0.2s cubic-bezier(0.16,1,0.3,1)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100 shrink-0">
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-freshket-700">Reflect Knowledge</p>
+            <p className="text-sm font-bold text-gray-900 truncate mt-0.5">{courseTitle}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="size-8 shrink-0 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-all"
+          >
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        {/* whitespace-pre-wrap so the learner's own paragraph breaks survive. */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+          <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{text}</p>
+        </div>
       </div>
     </div>
   )

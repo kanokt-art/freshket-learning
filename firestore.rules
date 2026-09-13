@@ -325,5 +325,16 @@ service cloud.firestore {
     match /_meta/{docId} {
       allow read, write: if false;
     }
+
+    // ── /slackPosts (de-duplication markers, server-side only) ─────────────────
+    // One doc per event already mirrored to Slack, so a fan-out that calls the
+    // notification route once per recipient still posts to the channel once.
+    // Written by the Admin SDK only — a client that could create these could
+    // suppress a colleague's Slack notification by claiming the marker first.
+    // Firestore denies unmatched paths anyway; this is written out so the intent
+    // is on the record rather than resting on a default.
+    match /slackPosts/{docId} {
+      allow read, write: if false;
+    }
   }
 }

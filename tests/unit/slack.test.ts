@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { isSalesDepartment } from '@/lib/notifications/slack'
+import { isSalesDepartment, excerpt } from '@/lib/notifications/slack'
 
 // The department string comes from the HR export and is not stable: live data
 // says "Sales Management", the demo fixtures say "Sale". Getting this predicate
@@ -68,5 +68,41 @@ describe('isSalesDepartment — configured via env', () => {
   it('falls back to the default when set to an empty string', () => {
     process.env.SLACK_SALES_DEPARTMENTS = '   '
     expect(isSalesDepartment('Sales Management')).toBe(true)
+  })
+})
+
+describe('excerpt', () => {
+  it('leaves short text untouched', () => {
+    expect(excerpt('สรุปสั้นๆ')).toBe('สรุปสั้นๆ')
+  })
+
+  it('collapses whitespace and newlines', () => {
+    expect(excerpt('บรรทัดแรก\n\n  บรรทัดสอง')).toBe('บรรทัดแรก บรรทัดสอง')
+  })
+
+  it('truncates past the limit and marks it', () => {
+    const out = excerpt('ก'.repeat(200))
+    expect(out.endsWith('…')).toBe(true)
+    // 100 characters plus the ellipsis.
+    expect(out.length).toBe(101)
+  })
+
+  it('cuts on a word boundary when one is near the limit', () => {
+    const text = Array.from({ length: 30 }, (_, i) => `word${i}`).join(' ')
+    const out = excerpt(text, 50)
+    expect(out.endsWith('…')).toBe(true)
+    // The cut lands between words, so the last kept token is whole.
+    expect(out.slice(0, -1).trim().split(' ').pop()).toMatch(/^word\d+$/)
+  })
+
+  it('takes a hard cut when there is no space to break on', () => {
+    // Thai does not space between words — a boundary-only rule would return
+    // almost nothing here.
+    const out = excerpt('ก'.repeat(60) + ' ท้าย', 50)
+    expect(out.length).toBeGreaterThan(40)
+  })
+
+  it('respects a custom limit', () => {
+    expect(excerpt('ก'.repeat(50), 10)).toHaveLength(11)
   })
 })

@@ -66,6 +66,17 @@ function saveTakeAway(courseId: string, text: string, uid?: string, courseTitle?
         { uid, courseId, courseTitle: courseTitle ?? '', text, updatedAt: serverTimestamp() },
         { merge: true },
       )
+      // Mirror to Slack after the write lands — the route re-reads the saved
+      // document, so calling it earlier would find nothing to quote. Server-side
+      // because the webhook URL must not reach the browser. Fire-and-forget: the
+      // takeaway is already saved and a Slack failure is not the learner's
+      // problem.
+      const { authedFetch } = await import('@/lib/api/authedFetch')
+      await authedFetch('/api/takeaway/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ courseId }),
+      })
     } catch (e) { console.error('saveTakeAway firestore', e) }
   })()
 }
