@@ -1,50 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { Timestamp } from 'firebase-admin/firestore'
-import { getAdminFirestore } from '@/lib/firebase/admin'
 
 // POST /api/sheets/pvp-sync
 //
-// Webhook target for the "PVP" Apps Script trigger (docs/apps-script/PvpSync.gs).
-// Apps Script only PINGS this route on edit/schedule — it never attaches sheet
-// data — so this route does the actual work: read the "PVP" tab via the Google
-// Sheets API (read-only, service account), then upsert/delete rows in the
-// Firestore `pvpPrices` collection. Keeping the pull server-side avoids the
-// Apps Script 6-minute execution ceiling and moves the Sheets→Firestore
-// bandwidth off Google's infra entirely.
+// Sync target for the "PVP" Apps Script driver (docs/apps-script/PvpSync.gs).
+// Apps Script never attaches sheet data — it only passes offset/limit — and
+// this route reads the "PVP" tab itself via the Google Sheets API and writes
+// the Firestore `pvpPrices` collection. Keeping the pull server-side avoids
+// the Apps Script 6-minute execution ceiling.
 //
 // Auth: Apps Script cannot present a Firebase ID token, so this route is
 // gated by a shared secret (SHEETS_SYNC_SECRET) sent as `x-sync-secret`
 // instead of requireSuperAdmin.
 //
-// Scale note: the PVP tab runs ~25k rows. This project is on Vercel's Hobby
-// plan (60s hard ceiling per function, not extendable), and even with
-// parallel batch commits a single-request sync of the whole sheet blew past
-// that ceiling (FUNCTION_INVOCATION_TIMEOUT). So this endpoint is chunked
-// instead of whole-sheet.
+// Why raw REST instead of firebase-admin: the Admin SDK talks gRPC, and on
+// Vercel's serverless runtime those calls hung here — the write landed in
+// Firestore but the promise never resolved, so every chunk burned the full
+// 60s and returned FUNCTION_INVOCATION_TIMEOUT. The same writes over the
+// Firestore REST API return in well under a second. (This is also what
+// docs/apps-script/ProductsSync.gs does, for its own reasons.) Other routes
+// in this app keep using the Admin SDK — their workloads are small enough
+// that they have not hit this.
 //
-// Region note: Firestore for this project lives in asia-southeast3, so this
-// function is pinned to sin1 in vercel.json. Left on Vercel's US default
-// (iad1/sfo1) every Firestore round-trip crossed the Pacific (~200ms+), and
-// even a single 3000-row chunk timed out.
+// Region: Firestore for this project is in asia-southeast3, so the function
+// is pinned to sin1 in vercel.json; on Vercel's US default every round-trip
+// crossed the Pacific.
 //
-// The chunk protocol:
+// Scale: the PVP tab runs ~25k rows, too many to sync inside one 60s
+// invocation, so the endpoint is chunked:
 //   POST ?offset=0&limit=3000        → syncs rows [offset, offset+limit) only
 //     → { done: false, nextOffset, written, skipped, problems, runId }
 //   POST ?offset=<last>&limit=3000   → last chunk, sheet exhausted
-//     → { done: true, ... } (same shape, no nextOffset)
-//   POST ?finalize=1&runId=<runId>   → deletes SKUs not seen by ANY chunk in
-//                                       that run (must run after `done: true`)
-// Apps Script drives the loop (see runFullSync_ in PvpSync.gs) — this route
-// itself has no memory of "the whole sync" beyond what's in the `pvpSyncRuns`
-// scratch doc for a given runId, written to and read by every chunk.
+//     → { done: true, ... } (no nextOffset)
+//   POST ?finalize=1&runId=<runId>   → deletes SKUs no chunk in that run saw
+// Apps Script drives the loop (runFullSync_ in PvpSync.gs); this route keeps
+// no cross-chunk state beyond the `pvpSyncRuns/<runId>` scratch doc.
 export const maxDuration = 60
 
 const SPREADSHEET_ID = '1QPkrSSDREZazXBlw0ZiVsu5eCqJ-1ODcfk4U1Zzs3wQ'
 const SHEET_NAME = 'PVP'
 const COLLECTION = 'pvpPrices'
-const RUNS_COLLECTION = 'pvpSyncRuns' // scratch parent: { startedAt }
-const RUN_CHUNKS_SUBCOLLECTION = 'chunks' // one doc per chunk: { skus: string[] }
+const RUNS_COLLECTION = 'pvpSyncRuns'
+const RUN_CHUNKS_SUBCOLLECTION = 'chunks'
+const BATCH_SIZE = 450 // Firestore :batchWrite caps at 500 writes per call
 
 // 0-based column layout of the PVP tab. Must match the sheet.
 const COL = {
@@ -65,8 +63,8 @@ function str(v: unknown): string {
   return v === null || v === undefined ? '' : String(v).trim()
 }
 
-// Empty cell → null (field is skipped, not written as 0) — a blank price
-// means "unknown", not "free".
+// Empty cell → null (field written as null, not 0) — a blank price means
+// "unknown", not "free".
 function num(v: unknown): number | null {
   const s = str(v)
   if (!s) return null
@@ -74,13 +72,21 @@ function num(v: unknown): number | null {
   return Number.isNaN(n) ? null : n
 }
 
+function base64url(input: string | Buffer): string {
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+}
+
 let cachedToken: { token: string; expiresAt: number } | null = null
 
-// Service-account JWT → OAuth access token for the read-only Sheets scope.
-// Reuses the same Firebase Admin service account already configured for this
-// app (FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY) — the PVP sheet must be
-// shared with that email as a Viewer.
-async function getSheetsAccessToken(): Promise<string> {
+// One service-account JWT covering both APIs this route uses: read-only
+// Sheets, and Firestore (datastore) for the REST writes below. Reuses the
+// Firebase Admin service account already configured for this app — the PVP
+// sheet must be shared with FIREBASE_CLIENT_EMAIL as a Viewer.
+async function getAccessToken(): Promise<string> {
   if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.token
 
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL!
@@ -90,7 +96,10 @@ async function getSheetsAccessToken(): Promise<string> {
   const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
   const claim = base64url(JSON.stringify({
     iss: clientEmail,
-    scope: 'https://www.googleapis.com/auth/spreadsheets.readonly',
+    scope: [
+      'https://www.googleapis.com/auth/spreadsheets.readonly',
+      'https://www.googleapis.com/auth/datastore',
+    ].join(' '),
     aud: 'https://oauth2.googleapis.com/token',
     exp: now + 3600,
     iat: now,
@@ -115,16 +124,7 @@ async function getSheetsAccessToken(): Promise<string> {
   return cachedToken.token
 }
 
-function base64url(input: string | Buffer): string {
-  return Buffer.from(input)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
-}
-
-// startRow/endRow are 1-based sheet row numbers (inclusive), matching the
-// A1-notation range directly — caller does the offset→row math.
+// startRow/endRow are 1-based sheet rows (inclusive), matching A1 notation.
 async function fetchSheetRows(token: string, startRow: number, endRow: number): Promise<string[][]> {
   const range = encodeURIComponent(`${SHEET_NAME}!A${startRow}:K${endRow}`)
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}`
@@ -134,38 +134,103 @@ async function fetchSheetRows(token: string, startRow: number, endRow: number): 
   return body.values ?? []
 }
 
-async function handleFinalize(req: NextRequest, db: FirebaseFirestore.Firestore) {
+// ── Firestore REST helpers ──────────────────────────────────────────────────
+
+const PROJECT_ID = () => process.env.FIREBASE_PROJECT_ID!
+const DB_ROOT = () => `projects/${PROJECT_ID()}/databases/(default)/documents`
+const API = 'https://firestore.googleapis.com/v1'
+
+type FsValue =
+  | { stringValue: string }
+  | { doubleValue: number }
+  | { nullValue: null }
+  | { timestampValue: string }
+  | { arrayValue: { values: FsValue[] } }
+
+function fsString(v: string): FsValue { return { stringValue: v } }
+function fsNumber(v: number | null): FsValue { return v === null ? { nullValue: null } : { doubleValue: v } }
+
+async function fsRequest(token: string, path: string, init?: RequestInit) {
+  const res = await fetch(`${API}/${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  })
+  if (!res.ok) throw new Error(`Firestore ${init?.method ?? 'GET'} ${path} ล้มเหลว: ${res.status} ${await res.text()}`)
+  return res.json()
+}
+
+/** Every document id in a collection, following pagination. Ids only. */
+async function listDocIds(token: string, collectionPath: string): Promise<string[]> {
+  const ids: string[] = []
+  let pageToken = ''
+  do {
+    const qs = new URLSearchParams({ pageSize: '1000', 'mask.fieldPaths': '__name__' })
+    if (pageToken) qs.set('pageToken', pageToken)
+    const body = await fsRequest(token, `${DB_ROOT()}/${collectionPath}?${qs}`)
+    for (const doc of body.documents ?? []) ids.push(String(doc.name).split('/').pop()!)
+    pageToken = body.nextPageToken ?? ''
+  } while (pageToken)
+  return ids
+}
+
+type Write =
+  | { update: { name: string; fields: Record<string, FsValue> }; updateMask: { fieldPaths: string[] } }
+  | { delete: string }
+
+async function batchWrite(token: string, writes: Write[]): Promise<void> {
+  if (writes.length === 0) return
+  await fsRequest(token, `${DB_ROOT()}:batchWrite`, {
+    method: 'POST',
+    body: JSON.stringify({ writes }),
+  })
+}
+
+function upsertWrite(collectionPath: string, docId: string, fields: Record<string, FsValue>): Write {
+  return {
+    update: { name: `${DB_ROOT()}/${collectionPath}/${docId}`, fields },
+    updateMask: { fieldPaths: Object.keys(fields) },
+  }
+}
+
+// ── Handlers ────────────────────────────────────────────────────────────────
+
+async function handleFinalize(req: NextRequest, token: string) {
   const runId = req.nextUrl.searchParams.get('runId') ?? ''
   if (!runId) return NextResponse.json({ error: 'ต้องระบุ runId' }, { status: 400 })
 
-  const runRef = db.collection(RUNS_COLLECTION).doc(runId)
-  const runDoc = await runRef.get()
-  if (!runDoc.exists) return NextResponse.json({ error: `ไม่พบ run ${runId}` }, { status: 404 })
-
-  const chunksSnap = await runRef.collection(RUN_CHUNKS_SUBCOLLECTION).get()
-  const seenSkus = new Set<string>()
-  chunksSnap.docs.forEach(d => {
-    const skus = d.data().skus as string[] | undefined
-    skus?.forEach(s => seenSkus.add(s))
-  })
-
-  const existingSnap = await db.collection(COLLECTION).select().get()
-  const toDelete = existingSnap.docs.map(d => d.id).filter(id => !seenSkus.has(id))
-
-  const commits: Promise<unknown>[] = []
-  for (let i = 0; i < toDelete.length; i += 450) {
-    const delBatch = db.batch()
-    for (const id of toDelete.slice(i, i + 450)) delBatch.delete(db.collection(COLLECTION).doc(id))
-    commits.push(delBatch.commit())
+  const chunkIds = await listDocIds(token, `${RUNS_COLLECTION}/${runId}/${RUN_CHUNKS_SUBCOLLECTION}`)
+  if (chunkIds.length === 0) {
+    return NextResponse.json({ error: `ไม่พบข้อมูล chunk ของ run ${runId}` }, { status: 404 })
   }
-  await Promise.all(commits)
 
-  // Clean up the scratch run doc + its chunk subcollection.
-  const cleanupBatch = db.batch()
-  chunksSnap.docs.forEach(d => cleanupBatch.delete(d.ref))
-  cleanupBatch.delete(runRef)
-  commits.push(cleanupBatch.commit())
-  await Promise.all(commits)
+  const seenSkus = new Set<string>()
+  for (const chunkId of chunkIds) {
+    const doc = await fsRequest(token, `${DB_ROOT()}/${RUNS_COLLECTION}/${runId}/${RUN_CHUNKS_SUBCOLLECTION}/${chunkId}`)
+    const values = doc.fields?.skus?.arrayValue?.values ?? []
+    for (const v of values) seenSkus.add(v.stringValue)
+  }
+
+  const existingIds = await listDocIds(token, COLLECTION)
+  const toDelete = existingIds.filter(id => !seenSkus.has(id))
+
+  for (let i = 0; i < toDelete.length; i += BATCH_SIZE) {
+    await batchWrite(token, toDelete.slice(i, i + BATCH_SIZE).map(id => ({
+      delete: `${DB_ROOT()}/${COLLECTION}/${id}`,
+    })))
+  }
+
+  // Clean up the scratch run doc + its chunks.
+  const cleanup: Write[] = chunkIds.map(id => ({
+    delete: `${DB_ROOT()}/${RUNS_COLLECTION}/${runId}/${RUN_CHUNKS_SUBCOLLECTION}/${id}`,
+  }))
+  cleanup.push({ delete: `${DB_ROOT()}/${RUNS_COLLECTION}/${runId}` })
+  for (let i = 0; i < cleanup.length; i += BATCH_SIZE) {
+    await batchWrite(token, cleanup.slice(i, i + BATCH_SIZE))
+  }
 
   return NextResponse.json({ deleted: toDelete.length })
 }
@@ -176,68 +241,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const db = getAdminFirestore()
-
-  if (req.nextUrl.searchParams.get('finalize') === '1') {
-    try {
-      return await handleFinalize(req, db)
-    } catch (e) {
-      console.error('POST /api/sheets/pvp-sync?finalize=1', e)
-      return NextResponse.json({ error: String(e) }, { status: 500 })
-    }
-  }
-
-  const offset = Number(req.nextUrl.searchParams.get('offset') ?? '0')
-  const limit = Number(req.nextUrl.searchParams.get('limit') ?? '3000')
-  let runId = req.nextUrl.searchParams.get('runId') ?? ''
-  if (!Number.isFinite(offset) || offset < 0 || !Number.isFinite(limit) || limit <= 0) {
-    return NextResponse.json({ error: 'offset/limit ไม่ถูกต้อง' }, { status: 400 })
-  }
-
   const t0 = Date.now()
   const timing: Record<string, number> = {}
-  const step = (m: string) => console.log(`[pvp-sync ${offset}/${limit}] +${Date.now() - t0}ms ${m}`)
 
   try {
-    step('start')
-    const token = await getSheetsAccessToken()
+    const token = await getAccessToken()
     timing.auth = Date.now() - t0
-    step('auth ok')
+
+    if (req.nextUrl.searchParams.get('finalize') === '1') {
+      return await handleFinalize(req, token)
+    }
+
+    const offset = Number(req.nextUrl.searchParams.get('offset') ?? '0')
+    const limit = Number(req.nextUrl.searchParams.get('limit') ?? '3000')
+    let runId = req.nextUrl.searchParams.get('runId') ?? ''
+    if (!Number.isFinite(offset) || offset < 0 || !Number.isFinite(limit) || limit <= 0) {
+      return NextResponse.json({ error: 'offset/limit ไม่ถูกต้อง' }, { status: 400 })
+    }
+    if (!runId) runId = `run-${Date.now()}`
+
     // Sheet row 1 is the header; offset 0 means "first data row" = sheet row 2.
     const startRow = offset + 2
-    const endRow = startRow + limit - 1
     const tSheet = Date.now()
-    const rows = await fetchSheetRows(token, startRow, endRow)
+    const rows = await fetchSheetRows(token, startRow, startRow + limit - 1)
     timing.fetchSheet = Date.now() - tSheet
-    step(`sheet ok, ${rows.length} rows`)
 
-    if (!runId) runId = `run-${Date.now()}`
-    const runRef = db.collection(RUNS_COLLECTION).doc(runId)
-    // Always awaited (not only on the first chunk): this doubles as the
-    // Firestore connection warm-up. Letting the very first write of the
-    // request be one of the parallel batch commits below made every
-    // offset>0 call hang until the function timed out.
-    const tWarm = Date.now()
-    await runRef.set({ startedAt: Timestamp.now() }, { merge: true })
-    timing.warmup = Date.now() - tWarm
-    step('warmup write ok')
-
-    const now = Timestamp.now()
-    const chunkSkus = new Set<string>()
+    const nowIso = new Date().toISOString()
+    const chunkSkus: string[] = []
+    const seenInChunk = new Set<string>()
     const problems: string[] = []
     let written = 0
     let skipped = 0
 
-    let batch = db.batch()
-    let batchCount = 0
-    const commits: Promise<unknown>[] = []
-    const flush = () => {
-      if (batchCount === 0) return
-      commits.push(batch.commit())
-      batch = db.batch()
-      batchCount = 0
-    }
-
+    const writes: Write[] = []
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i]
       const rowNo = startRow + i
@@ -251,46 +287,45 @@ export async function POST(req: NextRequest) {
         skipped++
         continue
       }
-      if (chunkSkus.has(sku)) {
+      if (seenInChunk.has(sku)) {
         problems.push(`แถว ${rowNo}: SKU ${sku} ซ้ำในชุดนี้ — ใช้ค่าจากแถวแรก`)
         skipped++
         continue
       }
-      chunkSkus.add(sku)
+      seenInChunk.add(sku)
+      chunkSkus.push(sku)
 
-      batch.set(db.collection(COLLECTION).doc(sku), {
-        sku,
-        name,
-        packSize: str(r[COL.packSize]),
-        category: str(r[COL.category]),
-        pictureUrl: str(r[COL.picture]),
-        publicPrice: num(r[COL.publicPrice]),
-        publicPriceExVat: num(r[COL.publicPriceExVat]),
-        privatePrice: num(r[COL.privatePrice]),
-        privatePriceExVat: num(r[COL.privatePriceExVat]),
-        vat: num(r[COL.vat]),
-        remark: str(r[COL.remark]),
-        updatedAt: now,
-      }, { merge: true })
-      batchCount++
+      writes.push(upsertWrite(COLLECTION, sku, {
+        sku: fsString(sku),
+        name: fsString(name),
+        packSize: fsString(str(r[COL.packSize])),
+        category: fsString(str(r[COL.category])),
+        pictureUrl: fsString(str(r[COL.picture])),
+        publicPrice: fsNumber(num(r[COL.publicPrice])),
+        publicPriceExVat: fsNumber(num(r[COL.publicPriceExVat])),
+        privatePrice: fsNumber(num(r[COL.privatePrice])),
+        privatePriceExVat: fsNumber(num(r[COL.privatePriceExVat])),
+        vat: fsNumber(num(r[COL.vat])),
+        remark: fsString(str(r[COL.remark])),
+        updatedAt: { timestampValue: nowIso },
+      }))
       written++
-
-      // Firestore batch hard cap is 500 writes.
-      if (batchCount === 450) flush()
     }
-    flush()
 
-    // One doc per chunk (not arrayUnion into a single doc) — a full sync
-    // sees ~25k SKUs total, which risks the 1MiB document-size limit if
-    // accumulated into one array field.
-    commits.push(runRef.collection(RUN_CHUNKS_SUBCOLLECTION).doc(String(offset)).set({
-      skus: Array.from(chunkSkus),
-    }))
-    step(`built ${commits.length} commits, awaiting`)
-    const tCommit = Date.now()
-    await Promise.all(commits)
-    timing.commit = Date.now() - tCommit
-    step('commits ok')
+    // Record which SKUs this chunk saw, so ?finalize=1 can work out what to
+    // delete. One doc per chunk rather than one growing array — a full sync
+    // sees ~25k SKUs, which would risk the 1MiB document limit.
+    writes.push(upsertWrite(
+      `${RUNS_COLLECTION}/${runId}/${RUN_CHUNKS_SUBCOLLECTION}`,
+      String(offset),
+      { skus: { arrayValue: { values: chunkSkus.map(fsString) } } },
+    ))
+
+    const tWrite = Date.now()
+    for (let i = 0; i < writes.length; i += BATCH_SIZE) {
+      await batchWrite(token, writes.slice(i, i + BATCH_SIZE))
+    }
+    timing.write = Date.now() - tWrite
     timing.total = Date.now() - t0
 
     const done = rows.length < limit // sheet ran out before filling this chunk
