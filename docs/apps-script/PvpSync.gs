@@ -23,6 +23,13 @@
  * onEdit only marks the sheet dirty (a script property); a 5-minute
  * time-based trigger does the actual sync, and only if dirty.
  *
+ * Note on quota: Firestore is on the free tier (20k writes/day) and the
+ * sheet has ~25k rows, so the backend only writes rows whose values
+ * actually changed since the last sync. A routine sync of a mostly-static
+ * sheet therefore reports a large "unchanged" count and very few writes.
+ * A first-time (or post-wipe) full load still exceeds one day's quota and
+ * will need to run across two days, or the project moved to Blaze.
+ *
  * ── SETUP ────────────────────────────────────────────────────────────────────
  * 1. Extensions → Apps Script (on this spreadsheet), paste this file.
  * 2. Share the spreadsheet (Viewer) with the Firebase service account email
@@ -84,17 +91,19 @@ function runFullSync_() {
 
   var runId = resuming ? resuming.runId : null
   var offset = resuming ? resuming.nextOffset : 0
-  var totals = { written: 0, skipped: 0, problems: [] }
+  var totals = { written: 0, unchanged: 0, skipped: 0, problems: [] }
 
   while (true) {
     var query = 'offset=' + offset + '&limit=' + CHUNK_SIZE + (runId ? '&runId=' + runId : '')
     var result = callSync_(query)
     runId = result.runId
     totals.written += result.written
+    totals.unchanged += result.unchanged || 0
     totals.skipped += result.skipped
     totals.problems = totals.problems.concat(result.problems || [])
 
-    Logger.log('PVP sync chunk offset=' + offset + ' → ' + result.written + ' written, ' + result.skipped + ' skipped')
+    Logger.log('PVP sync chunk offset=' + offset + ' → ' + result.written + ' written, ' +
+      (result.unchanged || 0) + ' unchanged, ' + result.skipped + ' skipped')
 
     if (result.done) break
     offset = result.nextOffset
@@ -109,7 +118,8 @@ function runFullSync_() {
   props.deleteProperty(DIRTY_KEY)
 
   Logger.log('PVP sync เสร็จสมบูรณ์ — เขียน ' + totals.written +
-    ' รายการ, ลบ ' + finalizeResult.deleted + ', ข้าม ' + totals.skipped)
+    ' รายการ, ไม่เปลี่ยนแปลง ' + totals.unchanged +
+    ', ลบ ' + finalizeResult.deleted + ', ข้าม ' + totals.skipped)
   if (totals.problems.length) {
     Logger.log('ปัญหาที่พบ (' + totals.problems.length + '):')
     totals.problems.slice(0, 20).forEach(function (p) { Logger.log('  - ' + p) })

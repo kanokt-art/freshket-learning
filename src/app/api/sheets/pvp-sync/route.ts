@@ -26,10 +26,15 @@ import crypto from 'crypto'
 // is pinned to sin1 in vercel.json; on Vercel's US default every round-trip
 // crossed the Pacific.
 //
+// Quota: Firestore is on the free tier here — 20k writes/day against a 25k-row
+// sheet, so a full rewrite every sync is not affordable. Each row stores a
+// `rowHash` of its sheet values, and a chunk only writes rows whose hash
+// changed. Reads (50k/day) are the cheaper side of that trade.
+//
 // Scale: the PVP tab runs ~25k rows, too many to sync inside one 60s
 // invocation, so the endpoint is chunked:
 //   POST ?offset=0&limit=3000        → syncs rows [offset, offset+limit) only
-//     → { done: false, nextOffset, written, skipped, problems, runId }
+//     → { done: false, nextOffset, written, unchanged, skipped, problems, runId }
 //   POST ?offset=<last>&limit=3000   → last chunk, sheet exhausted
 //     → { done: true, ... } (no nextOffset)
 //   POST ?finalize=1&runId=<runId>   → deletes SKUs no chunk in that run saw
@@ -177,6 +182,42 @@ async function listDocIds(token: string, collectionPath: string): Promise<string
   return ids
 }
 
+/**
+ * Current row-hash of every doc in a page of `pvpPrices`, so a chunk can skip
+ * rows whose sheet values are unchanged. Reads are ~10x cheaper than writes on
+ * Firestore's free tier (50k/day vs 20k/day), and a re-sync of an unchanged
+ * 25k-row sheet would otherwise burn the entire daily write quota to rewrite
+ * data that is already correct.
+ */
+async function fetchRowHashes(token: string, skus: string[]): Promise<Map<string, string>> {
+  const hashes = new Map<string, string>()
+  if (skus.length === 0) return hashes
+
+  // batchGet takes up to 1000 document names per call.
+  for (let i = 0; i < skus.length; i += 300) {
+    const slice = skus.slice(i, i + 300)
+    const body = await fsRequest(token, `${DB_ROOT().replace(/\/documents$/, '')}/documents:batchGet`, {
+      method: 'POST',
+      body: JSON.stringify({
+        documents: slice.map(sku => `${DB_ROOT()}/${COLLECTION}/${sku}`),
+        mask: { fieldPaths: ['rowHash'] },
+      }),
+    })
+    for (const entry of body as Array<{ found?: { name: string; fields?: Record<string, FsValue> } }>) {
+      if (!entry.found) continue
+      const id = entry.found.name.split('/').pop()!
+      const h = entry.found.fields?.rowHash
+      if (h && 'stringValue' in h) hashes.set(id, h.stringValue)
+    }
+  }
+  return hashes
+}
+
+/** Stable digest of the sheet values that get persisted for a row. */
+function rowHash(values: string[]): string {
+  return crypto.createHash('sha1').update(values.join(' ')).digest('base64')
+}
+
 type Write =
   | { update: { name: string; fields: Record<string, FsValue> }; updateMask: { fieldPaths: string[] } }
   | { delete: string }
@@ -271,9 +312,12 @@ export async function POST(req: NextRequest) {
     const seenInChunk = new Set<string>()
     const problems: string[] = []
     let written = 0
+    let unchanged = 0
     let skipped = 0
 
-    const writes: Write[] = []
+    // Parse first so the existing hashes can be fetched in one pass.
+    type Parsed = { sku: string; rowNo: number; values: string[]; hash: string }
+    const parsed: Parsed[] = []
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i]
       const rowNo = startRow + i
@@ -295,18 +339,46 @@ export async function POST(req: NextRequest) {
       seenInChunk.add(sku)
       chunkSkus.push(sku)
 
+      const values = [
+        sku, name,
+        str(r[COL.packSize]), str(r[COL.category]), str(r[COL.picture]),
+        str(r[COL.publicPrice]), str(r[COL.publicPriceExVat]),
+        str(r[COL.privatePrice]), str(r[COL.privatePriceExVat]),
+        str(r[COL.vat]), str(r[COL.remark]),
+      ]
+      parsed.push({ sku, rowNo, values, hash: rowHash(values) })
+    }
+
+    const tRead = Date.now()
+    const existingHashes = await fetchRowHashes(token, parsed.map(p => p.sku))
+    timing.readHashes = Date.now() - tRead
+
+    const writes: Write[] = []
+    for (const p of parsed) {
+      // Unchanged rows are the overwhelming majority on a routine re-sync;
+      // skipping them is what keeps a 25k-row sheet inside Firestore's
+      // 20k writes/day free-tier quota.
+      if (existingHashes.get(p.sku) === p.hash) {
+        unchanged++
+        continue
+      }
+      const [sku, name, packSize, category, picture,
+             publicPrice, publicPriceExVat, privatePrice, privatePriceExVat,
+             vat, remark] = p.values
+
       writes.push(upsertWrite(COLLECTION, sku, {
         sku: fsString(sku),
         name: fsString(name),
-        packSize: fsString(str(r[COL.packSize])),
-        category: fsString(str(r[COL.category])),
-        pictureUrl: fsString(str(r[COL.picture])),
-        publicPrice: fsNumber(num(r[COL.publicPrice])),
-        publicPriceExVat: fsNumber(num(r[COL.publicPriceExVat])),
-        privatePrice: fsNumber(num(r[COL.privatePrice])),
-        privatePriceExVat: fsNumber(num(r[COL.privatePriceExVat])),
-        vat: fsNumber(num(r[COL.vat])),
-        remark: fsString(str(r[COL.remark])),
+        packSize: fsString(packSize),
+        category: fsString(category),
+        pictureUrl: fsString(picture),
+        publicPrice: fsNumber(num(publicPrice)),
+        publicPriceExVat: fsNumber(num(publicPriceExVat)),
+        privatePrice: fsNumber(num(privatePrice)),
+        privatePriceExVat: fsNumber(num(privatePriceExVat)),
+        vat: fsNumber(num(vat)),
+        remark: fsString(remark),
+        rowHash: fsString(p.hash),
         updatedAt: { timestampValue: nowIso },
       }))
       written++
@@ -334,6 +406,7 @@ export async function POST(req: NextRequest) {
       nextOffset: done ? undefined : offset + limit,
       runId,
       written,
+      unchanged,
       skipped,
       problems,
       timing,
