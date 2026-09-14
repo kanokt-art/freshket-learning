@@ -4633,16 +4633,35 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     [summaryRows],
   )
 
+  // Search by name — first name / surname (Thai or English) / nickname.
+  // Doesn't touch summaryStats below: those numbers describe the toggle
+  // (active vs. all), and searching for one person shouldn't make the
+  // overview card read as if the course only had that one learner.
+  const [summarySearch, setSummarySearch] = useState('')
+  const searchedSummaryRows = useMemo(() => {
+    const q = summarySearch.trim().toLowerCase()
+    if (!q) return visibleSummaryRows
+    return visibleSummaryRows.filter((r) => {
+      const u = r.user
+      return (
+        u.displayName.toLowerCase().includes(q) ||
+        (u.displayNameEN?.toLowerCase() ?? '').includes(q) ||
+        (u.nickname?.toLowerCase() ?? '').includes(q)
+      )
+    })
+  }, [visibleSummaryRows, summarySearch])
+
   // Column sort for the summary table. 165 rows is far past what anyone can
   // scan unsorted, and this table had no sorting at all.
   const summarySort = useLearnerSort()
   const sortedSummaryRows = useMemo(
-    () => sortLearnerRows(visibleSummaryRows, summarySort.sortKey, summarySort.sortDir),
-    [visibleSummaryRows, summarySort.sortKey, summarySort.sortDir],
+    () => sortLearnerRows(searchedSummaryRows, summarySort.sortKey, summarySort.sortDir),
+    [searchedSummaryRows, summarySort.sortKey, summarySort.sortDir],
   )
 
-  // Stats reflect whatever the toggle currently shows, so the numbers above
-  // the table never disagree with the rows a super_admin is looking at.
+  // Stats reflect whatever the toggle currently shows (not the search), so
+  // the numbers above the table describe the course's real audience even
+  // while someone is searching for a specific person within it.
   const summaryStats = useMemo(() => {
     const total = visibleSummaryRows.length
     const completed = visibleSummaryRows.filter((r) => r.status === 'completed').length
@@ -5169,6 +5188,32 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                   </div>
                 </div>
 
+                {/* Search — ชื่อจริง / นามสกุล (ไทยหรืออังกฤษ) / ชื่อเล่น. Doesn't
+                    touch the overview stats above, which describe the whole
+                    course's audience, not a filtered search result. */}
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                    <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" />
+                    </svg>
+                  </span>
+                  <input
+                    type="text"
+                    value={summarySearch}
+                    onChange={(e) => setSummarySearch(e.target.value)}
+                    placeholder="ค้นหาจากชื่อจริง นามสกุล หรือชื่อเล่น..."
+                    className="w-full pl-10 pr-10 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-400"
+                  />
+                  {summarySearch && (
+                    <button type="button" onClick={() => setSummarySearch('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+                      <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
                 {/* Learner table */}
                 <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
                   <div className="max-h-[28rem] overflow-auto">
@@ -5188,7 +5233,9 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                       </thead>
                       <tbody>
                         {sortedSummaryRows.length === 0 ? (
-                          <tr><td colSpan={6 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0) + (!hasPreTest && !hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">ยังไม่มีผู้เรียนที่กำหนด</td></tr>
+                          <tr><td colSpan={6 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0) + (!hasPreTest && !hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">
+                            {summarySearch ? `ไม่พบผู้เรียนที่ตรงกับ "${summarySearch}"` : 'ยังไม่มีผู้เรียนที่กำหนด'}
+                          </td></tr>
                         ) : sortedSummaryRows.map(({ user: u, record, status }) => {
                           const pct = approxProgressPct(status, record)
                           return (
