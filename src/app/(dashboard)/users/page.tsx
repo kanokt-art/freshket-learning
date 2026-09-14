@@ -1982,7 +1982,6 @@ function AddEmployeeModal({
                         <li key={i} className="text-xs text-rose-600 leading-snug">
                           <span className="font-bold">{u.displayName}</span>
                           {u.nickname && <span> ({u.nickname})</span>}
-                          {u.employeeId && <span> · รหัส {u.employeeId}</span>}
                           {(u.department || u.position) && (
                             <span className="block text-rose-400">
                               {[u.department, u.position].filter(Boolean).join(' · ')}
