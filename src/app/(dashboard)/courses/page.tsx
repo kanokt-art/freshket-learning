@@ -3506,9 +3506,8 @@ function withPersonalityLesson(topics: CourseTopic[], enabled: boolean): CourseT
   return out.map((t) => ({ ...t, lessons: t.lessons.map((l, i) => ({ ...l, order: i })) }))
 }
 
-function QuizSettingsTab({ enabled, onEnable, topics, onChangeTopics, assessments }: {
+function QuizSettingsTab({ enabled, topics, onChangeTopics, assessments }: {
   enabled: boolean
-  onEnable: () => void
   topics: CourseTopic[]
   onChangeTopics: (t: CourseTopic[]) => void
   assessments: Assessment[]
@@ -3538,25 +3537,10 @@ function QuizSettingsTab({ enabled, onEnable, topics, onChangeTopics, assessment
     })))
   }
 
-  if (!enabled) {
-    return (
-      <div className="w-full px-6 py-8">
-        <div className="rounded-2xl border border-gray-100 bg-white p-10 text-center">
-          <div className="size-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
-            <svg className="size-6 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
-            </svg>
-          </div>
-          <p className="text-sm font-bold text-gray-700 mb-1">ยังไม่เปิดใช้งานแบบทดสอบ</p>
-          <p className="text-sm text-gray-400 mb-5">เปิดใช้งานเพื่อกำหนดค่าแบบทดสอบสำหรับหลักสูตรนี้</p>
-          <button type="button" onClick={onEnable}
-            className="px-5 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all">
-            เปิดใช้งานแบบทดสอบ
-          </button>
-        </div>
-      </div>
-    )
-  }
+  // Nothing to show when the quiz is off — the sidebar switch is the only
+  // control that matters, so an empty-state card here would just be a second
+  // way to say what the switch already says.
+  if (!enabled) return null
 
   return (
     <div className="w-full px-6 py-8 space-y-4">
@@ -3931,8 +3915,14 @@ function QuizStripPreview({ lesson, role, assessments }: {
 function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments }: {
   topics: CourseTopic[]; onChange: (t: CourseTopic[]) => void; assessments: Assessment[]
 }) {
+  // Both quiz and personality lessons are system-managed — created, positioned
+  // and removed by their own sidebar switches, never hand-authored here — so
+  // neither belongs in the editable topic list.
   const topics = useMemo(
-    () => allTopics.map((t) => ({ ...t, lessons: t.lessons.filter((l) => l.type !== 'quiz') })),
+    () => allTopics.map((t) => ({
+      ...t,
+      lessons: t.lessons.filter((l) => l.type !== 'quiz' && l.type !== 'personality'),
+    })),
     [allTopics],
   )
   // Shown as read-only strips bracketing the topic list — quiz lessons are
@@ -3945,9 +3935,13 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
     const quizzes = allTopics.flatMap((t) => t.lessons).filter((l) => l.type === 'quiz')
     const pre = quizzes.find((l) => l.quizRole === 'pre_test')
     const post = quizzes.find((l) => l.quizRole !== 'pre_test')
-    if (next.length === 0 || (!pre && !post)) { onChangeAll(next); return }
+    // Filtered out of the editable list above, so it has to be put back or
+    // any topic edit would silently delete it.
+    const personality = allTopics.flatMap((t) => t.lessons).find((l) => l.type === 'personality')
+    if (next.length === 0 || (!pre && !post && !personality)) { onChangeAll(next); return }
     const out = next.map((t) => ({ ...t, lessons: [...t.lessons] }))
     if (pre) out[0].lessons = [pre, ...out[0].lessons]
+    if (personality) out[out.length - 1].lessons = [...out[out.length - 1].lessons, personality]
     if (post) out[out.length - 1].lessons = [...out[out.length - 1].lessons, post]
     onChangeAll(out.map((t) => ({ ...t, lessons: t.lessons.map((l, i) => ({ ...l, order: i })) })))
   }
@@ -4461,7 +4455,9 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   async function toggleQuizEnabled() {
     if (form.quizEnabled) {
       const quizzes = form.topics.flatMap((t) => t.lessons).filter((l) => l.type === 'quiz')
-      if (quizzes.length > 0) {
+      // Only worth confirming if an assessment is actually attached — empty
+      // quiz lessons carry no scores, so switching off discards nothing.
+      if (quizzes.some((l) => l.assessmentId)) {
         const ok = await confirmAction({
           title: 'ปิดใช้งานแบบทดสอบทั้งคอร์ส?',
           text: `บทเรียนแบบทดสอบ ${quizzes.length} รายการจะถูกลบออกจากหลักสูตร และคะแนนจะไม่ถูกบันทึกลงคอลัมน์ Pre/Post อีก`,
@@ -4587,10 +4583,13 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     }
   }
 
-  // Counts what the Lessons tab actually lists — quiz lessons are managed by
-  // the แบบทดสอบ switch and hidden there, so counting them would make the
-  // badge disagree with the list.
-  const lessonCount = form.topics.reduce((s, t) => s + t.lessons.filter((l) => l.type !== 'quiz').length, 0)
+  // Counts what the Lessons tab actually lists — quiz and personality lessons
+  // are managed by their own switches and hidden there, so counting them would
+  // make the badge disagree with the list.
+  const lessonCount = form.topics.reduce(
+    (s, t) => s + t.lessons.filter((l) => l.type !== 'quiz' && l.type !== 'personality').length,
+    0,
+  )
   // "สรุปผลการเรียน" only makes sense once the course exists and can have real
   // training records — hide it while creating a brand-new course.
   const visibleTabs = isEdit ? BUILDER_TABS : BUILDER_TABS.filter((t) => t.id !== 'summary')
@@ -4974,7 +4973,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
               {tab === 'quiz' && (
                 <QuizSettingsTab
                   enabled={form.quizEnabled}
-                  onEnable={toggleQuizEnabled}
                   topics={form.topics}
                   onChangeTopics={(topics) => set('topics', topics)}
                   assessments={assessments}
