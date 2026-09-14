@@ -8,7 +8,7 @@ import {
 } from '@/hooks/useFirestore'
 import { alertError } from '@/lib/ui/alert'
 import { useModuleAccess, useModuleConfig } from '@/hooks/useModuleAccess'
-import { canAccess, getTeamManagerIds } from '@/types/user'
+import { canAccess, getTeamManagerIds, getTeamLeadIds } from '@/types/user'
 import type { UserProfile } from '@/types/user'
 import { DEMO_MODE } from '@/lib/demo/demoMode'
 import { Header } from '@/components/layout/Header'
@@ -1399,11 +1399,17 @@ export default function RoleplayPage() {
         (myTeamIds.size > 0 ? (!!u.teamId && myTeamIds.has(u.teamId)) : u.managerId === user.uid)
       )
     }
-    // team_lead: only members in the same team
-    if (!user.teamId) return []
+    // team_lead: members across every team this uid actually leads (teamLeadIds),
+    // unioned with their own teamId. A team lead can lead more than one team —
+    // comparing only against user.teamId (a single scalar) silently hid every
+    // other team's members from a lead who covers more than one, the same gap
+    // fixed on /team-lead.
+    const myTeamIds = new Set(teams.filter(t => getTeamLeadIds(t).includes(user.uid)).map(t => t.id))
+    if (user.teamId) myTeamIds.add(user.teamId)
+    if (myTeamIds.size === 0) return []
     return allProfiles.filter(u =>
       (u.role === 'sale' || u.role === 'team_lead') &&
-      u.teamId === user.teamId &&
+      !!u.teamId && myTeamIds.has(u.teamId) &&
       u.uid !== user.uid
     )
   }, [allUsers, user, isManager, teams, roleplayDeptNames])

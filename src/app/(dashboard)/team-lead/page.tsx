@@ -4,10 +4,10 @@ import { useState, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { Header } from '@/components/layout/Header'
 import { useAuth } from '@/hooks/useAuth'
-import { useTeamTrainingRecords, useAllUsers } from '@/hooks/useFirestore'
+import { useTeamTrainingRecords, useAllUsers, useTeams } from '@/hooks/useFirestore'
 import { STATUS_LABELS, STATUS_COLORS, type TrainingRecord } from '@/types/tracking'
 import { formatDate } from '@/lib/utils/dateFormatter'
-import { canAccess, ROLE_LABELS, type UserProfile } from '@/types/user'
+import { canAccess, ROLE_LABELS, getTeamLeadIds, type UserProfile } from '@/types/user'
 import { getDemoMode } from '@/lib/demo/demoMode'
 
 const DEMO_MODE = getDemoMode()
@@ -477,12 +477,26 @@ function MemberCard({
 export default function TeamLeadPage() {
   const { user } = useAuth()
   const { data: allUsers } = useAllUsers()
+  const { data: teams } = useTeams()
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
 
+  // A team lead can lead more than one team (the same person appears in
+  // teamLeadIds on multiple team docs) — this used to only compare against
+  // the lead's own `teamId`, a single scalar field, so anyone leading a
+  // second team never saw that team's members here at all. Union every team
+  // this uid is a lead of with their own teamId, mirroring how /manager scopes
+  // managedTeamIds for the same reason.
+  const ledTeamIds = useMemo(() => {
+    const set = new Set<string>()
+    teams.forEach(t => { if (getTeamLeadIds(t).includes(user?.uid ?? '')) set.add(t.id) })
+    if (user?.teamId) set.add(user.teamId)
+    return set
+  }, [teams, user?.uid, user?.teamId])
+
   const teamMembers = useMemo(() => {
-    if (!user?.teamId) return []
-    return allUsers.filter(u => u.teamId === user.teamId && u.role === 'sale')
-  }, [allUsers, user?.teamId])
+    if (ledTeamIds.size === 0) return []
+    return allUsers.filter(u => u.teamId && ledTeamIds.has(u.teamId) && u.role === 'sale')
+  }, [allUsers, ledTeamIds])
 
   // Records are fetched BY MEMBER UID — trainingRecords has no teamId field, so
   // the old team-scoped query always came back empty (see useTeamTrainingRecords).
