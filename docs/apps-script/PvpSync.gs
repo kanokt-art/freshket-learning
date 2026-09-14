@@ -20,15 +20,22 @@
  *
  * Why debounced, not synced on every keystroke: onEdit fires per cell edit,
  * and a full ~9-chunk sync of 25k rows is too expensive to run on every one.
- * onEdit only marks the sheet dirty (a script property); a 5-minute
+ * onEdit only marks the sheet dirty (a script property); an hourly
  * time-based trigger does the actual sync, and only if dirty.
  *
- * Note on quota: Firestore is on the free tier (20k writes/day) and the
- * sheet has ~25k rows, so the backend only writes rows whose values
- * actually changed since the last sync. A routine sync of a mostly-static
- * sheet therefore reports a large "unchanged" count and very few writes.
- * A first-time (or post-wipe) full load still exceeds one day's quota and
- * will need to run across two days, or the project moved to Blaze.
+ * Note on quota: Firestore is on the free tier — 20k writes and 50k reads a
+ * day — and the sheet has ~25k rows, so the backend only writes rows whose
+ * values actually changed since the last sync. A routine sync of a
+ * mostly-static sheet therefore reports a large "unchanged" count and very
+ * few writes.
+ *
+ * A first-time (or post-wipe) full load still exceeds one day's quota. When
+ * the backend reports quotaExhausted, this script parks the run (keeping its
+ * offset) and sets PAUSED_UNTIL_KEY to the next midnight US/Pacific, so the
+ * hourly trigger stays quiet until the quota resets and then picks up where
+ * it left off. Without that pause, the retries themselves burned the new
+ * day's READ quota and locked the database out entirely. Expect a full load
+ * to take ~2 days; move the project to Blaze if that is too slow.
  *
  * ── SETUP ────────────────────────────────────────────────────────────────────
  * 1. Extensions → Apps Script (on this spreadsheet), paste this file.
@@ -54,6 +61,7 @@
 var CHUNK_SIZE = 3000     // rows per backend call — keeps each request well under 60s
 var DIRTY_KEY = 'pvp_dirty'
 var RUN_KEY = 'pvp_active_run' // { runId, nextOffset } while a sync is in progress
+var PAUSED_UNTIL_KEY = 'pvp_paused_until' // epoch ms; set when Firestore quota runs out
 
 function props_() {
   var p = PropertiesService.getScriptProperties()
@@ -63,6 +71,24 @@ function props_() {
   }
   for (var k in v) if (!v[k]) throw new Error('ยังไม่ได้ตั้ง Script Property: ' + k)
   return v
+}
+
+/**
+ * Firestore's free-tier daily quota resets at midnight US/Pacific. Returns the
+ * next such instant in epoch ms, plus a few minutes of slack so a sync doesn't
+ * start on the boundary and race the reset.
+ */
+function nextQuotaResetMs_() {
+  var now = new Date()
+  // Pacific is UTC-7 (PDT) or UTC-8 (PST). Using -8 always means the pause may
+  // last up to an hour longer than strictly needed during PDT, which is the
+  // safe direction to be wrong in — resuming early just burns the new quota on
+  // a request that 429s again.
+  var pacificOffsetMs = 8 * 3600 * 1000
+  var pacificNow = new Date(now.getTime() - pacificOffsetMs)
+  var nextMidnightPacific = Date.UTC(
+    pacificNow.getUTCFullYear(), pacificNow.getUTCMonth(), pacificNow.getUTCDate() + 1, 0, 0, 0)
+  return nextMidnightPacific + pacificOffsetMs + 5 * 60 * 1000
 }
 
 function callSync_(query) {
@@ -111,8 +137,10 @@ function runFullSync_() {
     // this same offset instead of restarting or skipping rows.
     if (result.quotaExhausted) {
       props.setProperty(RUN_KEY, JSON.stringify({ runId: runId, nextOffset: result.nextOffset }))
+      props.setProperty(PAUSED_UNTIL_KEY, String(nextQuotaResetMs_()))
       Logger.log('PVP sync หยุดชั่วคราว — Firestore quota หมดแล้ววันนี้ ' +
-        '(เขียนไปแล้ว ' + totals.written + ' รายการ). จะ sync ต่อเองหลังโควตารีเซ็ต')
+        '(เขียนไปแล้ว ' + totals.written + ' รายการ). จะ sync ต่อหลังโควตารีเซ็ต ' +
+        new Date(nextQuotaResetMs_()).toISOString())
       return totals
     }
 
@@ -146,12 +174,22 @@ function onPvpSheetEdit(e) {
 }
 
 /**
- * Fires every 5 minutes (see createTriggers). Only does work if the sheet
- * was edited since the last sync, OR a previous sync is mid-run and needs
- * resuming — otherwise this is a no-op tick.
+ * Fires hourly (see createTriggers). Only does work if the sheet was edited
+ * since the last sync, OR a previous sync is mid-run and needs resuming —
+ * otherwise this is a no-op tick. Hourly rather than every few minutes
+ * because one tick of a 25k-row sheet costs thousands of Firestore reads,
+ * and the free tier only allows 50k a day.
  */
 function drainIfDirty() {
   var props = PropertiesService.getScriptProperties()
+
+  // Parked until the Firestore quota resets. Retrying before then just spends
+  // the next day's read quota on requests that 429 — which is how a stalled
+  // sync previously locked the database out for reads as well as writes.
+  var pausedUntil = Number(props.getProperty(PAUSED_UNTIL_KEY) || 0)
+  if (pausedUntil && Date.now() < pausedUntil) return
+  if (pausedUntil) props.deleteProperty(PAUSED_UNTIL_KEY)
+
   var dirty = props.getProperty(DIRTY_KEY) === '1'
   var resuming = props.getProperty(RUN_KEY) !== null
   if (!dirty && !resuming) return
@@ -160,6 +198,9 @@ function drainIfDirty() {
 
 /** Safety-net: forces a full sync once a day regardless of the dirty flag. */
 function scheduledFullSync() {
+  var props = PropertiesService.getScriptProperties()
+  var pausedUntil = Number(props.getProperty(PAUSED_UNTIL_KEY) || 0)
+  if (pausedUntil && Date.now() < pausedUntil) return
   runFullSync_()
 }
 
@@ -179,10 +220,10 @@ function resumeStuckRun() {
 }
 
 /**
- * Run once. Wires: onEdit (marks dirty only), a 5-minute drain trigger
- * (does the real sync, only if dirty/resuming), and a daily 02:30
- * safety-net full sync. Safe to re-run — clears any previous triggers for
- * these functions first.
+ * Run once. Wires: onEdit (marks dirty only), an hourly drain trigger (does
+ * the real sync, only if dirty/resuming and not paused for quota), and a
+ * daily 02:30 safety-net full sync. Safe to re-run — clears any previous
+ * triggers for these functions first.
  */
 function createTriggers() {
   var ss = SpreadsheetApp.getActiveSpreadsheet()
@@ -194,8 +235,21 @@ function createTriggers() {
   })
 
   ScriptApp.newTrigger('onPvpSheetEdit').forSpreadsheet(ss).onEdit().create()
-  ScriptApp.newTrigger('drainIfDirty').timeBased().everyMinutes(5).create()
+  ScriptApp.newTrigger('drainIfDirty').timeBased().everyHours(1).create()
   ScriptApp.newTrigger('scheduledFullSync').timeBased().atHour(2).nearMinute(30).everyDays(1).create()
 
-  Logger.log('ตั้ง trigger เรียบร้อย: onEdit (flag dirty) + drain ทุก 5 นาที + daily 02:30 safety-net')
+  Logger.log('ตั้ง trigger เรียบร้อย: onEdit (flag dirty) + drain ทุกชั่วโมง + daily 02:30 safety-net')
+}
+
+/**
+ * Clears the quota pause and any in-progress run, so the next tick starts a
+ * fresh sync from offset 0. Use after fixing something mid-run; not needed
+ * for a normal quota pause, which lifts itself.
+ */
+function resetSyncState() {
+  var props = PropertiesService.getScriptProperties()
+  props.deleteProperty(PAUSED_UNTIL_KEY)
+  props.deleteProperty(RUN_KEY)
+  props.deleteProperty(DIRTY_KEY)
+  Logger.log('ล้างสถานะ sync แล้ว — ตาถัดไปจะเริ่มใหม่จาก offset 0')
 }
