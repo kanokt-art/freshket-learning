@@ -105,6 +105,17 @@ function runFullSync_() {
     Logger.log('PVP sync chunk offset=' + offset + ' → ' + result.written + ' written, ' +
       (result.unchanged || 0) + ' unchanged, ' + result.skipped + ' skipped')
 
+    // Firestore's daily free-tier write quota ran out. The rows that landed
+    // are saved; park the run here (keeping RUN_KEY and the dirty flag) so a
+    // later tick — after the quota resets at midnight Pacific — resumes from
+    // this same offset instead of restarting or skipping rows.
+    if (result.quotaExhausted) {
+      props.setProperty(RUN_KEY, JSON.stringify({ runId: runId, nextOffset: result.nextOffset }))
+      Logger.log('PVP sync หยุดชั่วคราว — Firestore quota หมดแล้ววันนี้ ' +
+        '(เขียนไปแล้ว ' + totals.written + ' รายการ). จะ sync ต่อเองหลังโควตารีเซ็ต')
+      return totals
+    }
+
     if (result.done) break
     offset = result.nextOffset
     // Persist progress BEFORE the next call — if this execution gets killed

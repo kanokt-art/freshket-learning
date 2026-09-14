@@ -155,6 +155,11 @@ type FsValue =
 function fsString(v: string): FsValue { return { stringValue: v } }
 function fsNumber(v: number | null): FsValue { return v === null ? { nullValue: null } : { doubleValue: v } }
 
+/** Thrown when Firestore reports the daily free-tier quota is spent. */
+class QuotaExhaustedError extends Error {
+  constructor() { super('Firestore quota หมดแล้ววันนี้') }
+}
+
 async function fsRequest(token: string, path: string, init?: RequestInit) {
   const res = await fetch(`${API}/${path}`, {
     ...init,
@@ -164,6 +169,7 @@ async function fsRequest(token: string, path: string, init?: RequestInit) {
       ...(init?.headers ?? {}),
     },
   })
+  if (res.status === 429) throw new QuotaExhaustedError()
   if (!res.ok) throw new Error(`Firestore ${init?.method ?? 'GET'} ${path} ล้มเหลว: ${res.status} ${await res.text()}`)
   return res.json()
 }
@@ -384,21 +390,56 @@ export async function POST(req: NextRequest) {
       written++
     }
 
+    // Data writes first, chunk bookkeeping last: if the quota runs out
+    // mid-chunk we want the rows that DID land to be recorded as seen, so a
+    // later finalize doesn't treat them as deleted.
+    const tWrite = Date.now()
+    let quotaExhausted = false
+    let committed = 0
+    for (let i = 0; i < writes.length; i += BATCH_SIZE) {
+      const slice = writes.slice(i, i + BATCH_SIZE)
+      try {
+        await batchWrite(token, slice)
+        committed += slice.length
+      } catch (e) {
+        if (e instanceof QuotaExhaustedError) { quotaExhausted = true; break }
+        throw e
+      }
+    }
+    timing.write = Date.now() - tWrite
+
     // Record which SKUs this chunk saw, so ?finalize=1 can work out what to
     // delete. One doc per chunk rather than one growing array — a full sync
     // sees ~25k SKUs, which would risk the 1MiB document limit.
-    writes.push(upsertWrite(
-      `${RUNS_COLLECTION}/${runId}/${RUN_CHUNKS_SUBCOLLECTION}`,
-      String(offset),
-      { skus: { arrayValue: { values: chunkSkus.map(fsString) } } },
-    ))
-
-    const tWrite = Date.now()
-    for (let i = 0; i < writes.length; i += BATCH_SIZE) {
-      await batchWrite(token, writes.slice(i, i + BATCH_SIZE))
+    try {
+      await batchWrite(token, [upsertWrite(
+        `${RUNS_COLLECTION}/${runId}/${RUN_CHUNKS_SUBCOLLECTION}`,
+        String(offset),
+        { skus: { arrayValue: { values: chunkSkus.map(fsString) } } },
+      )])
+    } catch (e) {
+      if (e instanceof QuotaExhaustedError) quotaExhausted = true
+      else throw e
     }
-    timing.write = Date.now() - tWrite
+
     timing.total = Date.now() - t0
+
+    // A quota stop is not an error — it means "resume tomorrow". Reporting
+    // done:false with the SAME offset makes the caller retry this chunk on
+    // its next run rather than skipping the rows that never landed.
+    if (quotaExhausted) {
+      return NextResponse.json({
+        done: false,
+        quotaExhausted: true,
+        nextOffset: offset,
+        runId,
+        written: committed,
+        unchanged,
+        skipped,
+        problems,
+        timing,
+      })
+    }
 
     const done = rows.length < limit // sheet ran out before filling this chunk
     return NextResponse.json({
