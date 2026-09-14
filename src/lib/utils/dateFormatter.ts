@@ -1,8 +1,18 @@
 import { Timestamp } from 'firebase/firestore'
 
-type DateLike = Date | Timestamp | string | undefined | null
+export type DateLike = Date | Timestamp | string | undefined | null
 
-function toDate(date: DateLike): Date | null {
+// Exported so callers that need the underlying Date (not just a formatted
+// string) — e.g. a table's sort comparator — normalize the same way this
+// module's own formatters do. A user's startDate is a real Date once it comes
+// through convertTimestamps(), but a record still sitting in the localStorage
+// import overlay round-trips through JSON.stringify/parse first, which turns
+// it into a plain ISO string. A comparator that only accepted `instanceof
+// Date` silently treated every such row as epoch 0 (sorting it as if newer
+// than everyone, or older, depending on direction) while this same value
+// still *displayed* correctly via formatDate/formatDateEN below — sort and
+// display disagreeing is far more confusing than either being wrong outright.
+export function toDate(date: DateLike): Date | null {
   if (!date) return null
   if (date instanceof Timestamp) return date.toDate()
   if (date instanceof Date) return date

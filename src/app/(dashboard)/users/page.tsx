@@ -11,7 +11,7 @@ import { canAccess, ROLE_LABELS, getTeamManagerIds, type UserRole, type UserProf
 import type { ShadowRecord } from '@/types/shadow'
 import type { RoleplayAssessment } from '@/types/roleplay'
 import { STATUS_LABELS, STATUS_COLORS } from '@/types/tracking'
-import { formatDate, formatDateEN } from '@/lib/utils/dateFormatter'
+import { formatDate, formatDateEN, toDate } from '@/lib/utils/dateFormatter'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { alertError, alertSuccess, alertWarning } from '@/lib/ui/alert'
 import { ImportAssessmentModal } from '@/components/features/ImportAssessmentModal'
@@ -176,9 +176,18 @@ export default function UsersPage() {
       } else if (sortField === 'empId') {
         cmp = (a.employeeId ?? '').localeCompare(b.employeeId ?? '', undefined, { numeric: true })
       } else {
-        const da = a.startDate instanceof Date ? a.startDate.getTime() : 0
-        const db = b.startDate instanceof Date ? b.startDate.getTime() : 0
-        cmp = da - db
+        // toDate() (not a bare `instanceof Date` check) so a startDate that
+        // survived a localStorage round-trip as a plain ISO string still
+        // sorts correctly instead of falling back to epoch 0 — see the
+        // comment on toDate() in dateFormatter.ts. Missing dates sort last in
+        // both directions: no start date is not "older than everyone",
+        // pushing them to the end keeps real dates first either way.
+        const da = toDate(a.startDate)?.getTime()
+        const db = toDate(b.startDate)?.getTime()
+        if (da == null && db == null) cmp = 0
+        else if (da == null) return 1
+        else if (db == null) return -1
+        else cmp = da - db
       }
       return sortDir === 'asc' ? cmp : -cmp
     })
