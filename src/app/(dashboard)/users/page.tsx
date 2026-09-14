@@ -13,8 +13,9 @@ import type { RoleplayAssessment } from '@/types/roleplay'
 import { STATUS_LABELS, STATUS_COLORS } from '@/types/tracking'
 import { formatDate, formatDateEN, toDate } from '@/lib/utils/dateFormatter'
 import { parseCsvDate } from '@/lib/users/parseCsvDate'
+import { computeAutoTeamMappings } from '@/lib/users/autoMapTeam'
 import { authedFetch } from '@/lib/api/authedFetch'
-import { alertError, alertSuccess, alertWarning } from '@/lib/ui/alert'
+import { alertError, alertSuccess, alertWarning, confirmAction } from '@/lib/ui/alert'
 import { ImportAssessmentModal } from '@/components/features/ImportAssessmentModal'
 import { OrgBoard, isRosterRole, PHASE1_DEPARTMENTS } from '@/components/features/OrgBoard'
 import { demoStore } from '@/lib/demo/demoStore'
@@ -116,6 +117,7 @@ export default function UsersPage() {
   const [rebuildingStats, setRebuildingStats] = useState(false)
   const [dedupRunning, setDedupRunning] = useState(false)
   const [dedupResult, setDedupResult] = useState<{ mergedGroups: number; deletedDocs: number; uidMap?: Record<string, string> } | null>(null)
+  const [autoMapping, setAutoMapping] = useState(false)
   const [savingAssignments, setSavingAssignments] = useState(false)
   const [savedAssignments, setSavedAssignments] = useState(false)
   const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number; hidden: number; missing: number } | null>(null)
@@ -468,6 +470,60 @@ export default function UsersPage() {
     }
   }
 
+  // Auto-map teamId by matching lineManager against a team's own lead — see
+  // src/lib/users/autoMapTeam.ts for the full rationale. Additive only: a
+  // person who already has a teamId is never touched, so this is safe to run
+  // repeatedly as new people join without a team yet.
+  async function handleAutoMapTeams() {
+    const targets = computeAutoTeamMappings(users, teams)
+    if (targets.length === 0) {
+      void alertSuccess('ไม่มีรายการที่ต้อง map', 'ทุกคนที่ line manager ตรงกับ team lead มีทีมอยู่แล้ว')
+      return
+    }
+
+    const byTeamId = new Map(teams.map(t => [t.id, t]))
+    // confirmAction's `text` is plain SweetAlert2 text — no line breaks — so a
+    // per-person bulleted list would run together on one unreadable line.
+    // Group into "N คน → team" counts instead, which stays readable at any
+    // list size and still tells the admin exactly where people are headed
+    // before they commit.
+    const countByTeam = new Map<string, number>()
+    for (const t of targets) {
+      countByTeam.set(t.teamId, (countByTeam.get(t.teamId) ?? 0) + 1)
+    }
+    const summary = Array.from(countByTeam.entries())
+      .map(([teamId, count]) => `${byTeamId.get(teamId)?.name ?? teamId}: ${count} คน`)
+      .join(' · ')
+
+    const ok = await confirmAction({
+      title: `Auto-map ${targets.length} คนเข้าทีม?`,
+      text: summary,
+      confirmText: 'Map เลย',
+    })
+    if (!ok) return
+
+    setAutoMapping(true)
+    try {
+      const res = await authedFetch('/api/users/save-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignments: targets.map(t => ({ uid: t.uid, teamId: t.teamId })) }),
+      })
+      const json = await res.json()
+      if (!res.ok) { void alertError('Auto-map ไม่สำเร็จ', json.error ?? 'Unknown error'); return }
+      if (json.skipped?.length > 0) {
+        void alertError('บางรายการไม่สำเร็จ', `ข้าม ${json.skipped.length} คน (ไม่พบข้อมูลใน Firestore แล้ว) — ${json.saved} คนสำเร็จ`)
+      } else {
+        void alertSuccess('Auto-map สำเร็จ', `บันทึกทีมให้ ${json.saved} คนแล้ว`)
+      }
+    } catch (e) {
+      void alertError('Auto-map ไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
+      console.error(e)
+    } finally {
+      setAutoMapping(false)
+    }
+  }
+
   // One-off migration: push every locally-patched team binding to Firestore.
   // Covers real (non-csv) users whose teamId/visibleTeamIds previously lived only
   // in this browser's localStorage. `role` is intentionally never sent — patches
@@ -770,6 +826,19 @@ export default function UsersPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
               </svg>
               {rebuildingStats ? 'กำลังอัปเดต...' : 'อัปเดตสถิติ'}
+            </button>
+          )}
+          {user?.role === 'super_admin' && (
+            <button
+              onClick={() => { void handleAutoMapTeams() }}
+              disabled={autoMapping}
+              title="เติมทีมให้พนักงานที่ยังไม่มีทีม โดยจับคู่จาก Line Manager กับ team lead ของแต่ละทีม — ไม่แตะคนที่มีทีมอยู่แล้ว"
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <svg className={`size-4 ${autoMapping ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+              </svg>
+              {autoMapping ? 'กำลัง Map...' : 'Auto-map ทีม'}
             </button>
           )}
           {/* super_admin, not manager: the import batch writes `role` on every
