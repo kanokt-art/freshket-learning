@@ -1977,9 +1977,18 @@ function AddEmployeeModal({
                       พบพนักงานหายไป {csvResult.missing.length} คน (มีในระบบ แต่ไม่มีในไฟล์นี้)
                     </p>
                     <p className="text-xs text-rose-600 mb-2">จะถูกตั้งสถานะเป็น &quot;Resigned&quot; และซ่อนจากรายชื่อ — ประวัติการอบรมยังอยู่ครบ ไม่ถูกลบถาวร</p>
-                    <ul className="space-y-0.5 max-h-32 overflow-y-auto mb-2">
+                    <ul className="space-y-1 max-h-40 overflow-y-auto mb-2">
                       {csvResult.missing.map((u, i) => (
-                        <li key={i} className="text-xs text-rose-600">• {u.displayName}{u.employeeId ? ` (รหัส ${u.employeeId})` : ''}</li>
+                        <li key={i} className="text-xs text-rose-600 leading-snug">
+                          <span className="font-bold">{u.displayName}</span>
+                          {u.nickname && <span> ({u.nickname})</span>}
+                          {u.employeeId && <span> · รหัส {u.employeeId}</span>}
+                          {(u.department || u.position) && (
+                            <span className="block text-rose-400">
+                              {[u.department, u.position].filter(Boolean).join(' · ')}
+                            </span>
+                          )}
+                        </li>
                       ))}
                     </ul>
                     <label className="flex items-center gap-2 text-xs font-bold text-rose-700 cursor-pointer">
