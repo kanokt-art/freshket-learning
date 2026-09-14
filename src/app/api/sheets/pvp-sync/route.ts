@@ -196,16 +196,20 @@ export async function POST(req: NextRequest) {
 
   const t0 = Date.now()
   const timing: Record<string, number> = {}
+  const step = (m: string) => console.log(`[pvp-sync ${offset}/${limit}] +${Date.now() - t0}ms ${m}`)
 
   try {
+    step('start')
     const token = await getSheetsAccessToken()
     timing.auth = Date.now() - t0
+    step('auth ok')
     // Sheet row 1 is the header; offset 0 means "first data row" = sheet row 2.
     const startRow = offset + 2
     const endRow = startRow + limit - 1
     const tSheet = Date.now()
     const rows = await fetchSheetRows(token, startRow, endRow)
     timing.fetchSheet = Date.now() - tSheet
+    step(`sheet ok, ${rows.length} rows`)
 
     if (!runId) runId = `run-${Date.now()}`
     const runRef = db.collection(RUNS_COLLECTION).doc(runId)
@@ -216,6 +220,7 @@ export async function POST(req: NextRequest) {
     const tWarm = Date.now()
     await runRef.set({ startedAt: Timestamp.now() }, { merge: true })
     timing.warmup = Date.now() - tWarm
+    step('warmup write ok')
 
     const now = Timestamp.now()
     const chunkSkus = new Set<string>()
@@ -281,9 +286,11 @@ export async function POST(req: NextRequest) {
     commits.push(runRef.collection(RUN_CHUNKS_SUBCOLLECTION).doc(String(offset)).set({
       skus: Array.from(chunkSkus),
     }))
+    step(`built ${commits.length} commits, awaiting`)
     const tCommit = Date.now()
     await Promise.all(commits)
     timing.commit = Date.now() - tCommit
+    step('commits ok')
     timing.total = Date.now() - t0
 
     const done = rows.length < limit // sheet ran out before filling this chunk
