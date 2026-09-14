@@ -17,16 +17,27 @@ import { getAdminFirestore } from '@/lib/firebase/admin'
 // gated by a shared secret (SHEETS_SYNC_SECRET) sent as `x-sync-secret`
 // instead of requireSuperAdmin.
 //
-// Scale note: the PVP tab runs ~25k rows, and this project is on Vercel's
-// Hobby plan (60s hard ceiling per function, not extendable). Batches are
-// dispatched concurrently (not awaited one-by-one) to fit that ceiling —
-// ~56 batches of 450 writes finishes well under 60s in parallel, whereas
-// sequential commits alone got close to timing out at this row count.
+// Scale note: the PVP tab runs ~25k rows. This project is on Vercel's Hobby
+// plan (60s hard ceiling per function, not extendable), and even with
+// parallel batch commits a single-request sync of the whole sheet blew past
+// that ceiling (FUNCTION_INVOCATION_TIMEOUT). So this endpoint is chunked
+// instead of whole-sheet:
+//   POST ?offset=0&limit=3000        → syncs rows [offset, offset+limit) only
+//     → { done: false, nextOffset, written, skipped, problems, runId }
+//   POST ?offset=<last>&limit=3000   → last chunk, sheet exhausted
+//     → { done: true, ... } (same shape, no nextOffset)
+//   POST ?finalize=1&runId=<runId>   → deletes SKUs not seen by ANY chunk in
+//                                       that run (must run after `done: true`)
+// Apps Script drives the loop (see runFullSync_ in PvpSync.gs) — this route
+// itself has no memory of "the whole sync" beyond what's in the `pvpSyncRuns`
+// scratch doc for a given runId, written to and read by every chunk.
 export const maxDuration = 60
 
 const SPREADSHEET_ID = '1QPkrSSDREZazXBlw0ZiVsu5eCqJ-1ODcfk4U1Zzs3wQ'
 const SHEET_NAME = 'PVP'
 const COLLECTION = 'pvpPrices'
+const RUNS_COLLECTION = 'pvpSyncRuns' // scratch parent: { startedAt }
+const RUN_CHUNKS_SUBCOLLECTION = 'chunks' // one doc per chunk: { skus: string[] }
 
 // 0-based column layout of the PVP tab. Must match the sheet.
 const COL = {
@@ -105,13 +116,51 @@ function base64url(input: string | Buffer): string {
     .replace(/=+$/, '')
 }
 
-async function fetchSheetRows(token: string): Promise<string[][]> {
-  const range = encodeURIComponent(`${SHEET_NAME}!A2:K`)
+// startRow/endRow are 1-based sheet row numbers (inclusive), matching the
+// A1-notation range directly — caller does the offset→row math.
+async function fetchSheetRows(token: string, startRow: number, endRow: number): Promise<string[][]> {
+  const range = encodeURIComponent(`${SHEET_NAME}!A${startRow}:K${endRow}`)
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}`
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) throw new Error(`อ่านชีต PVP ไม่สำเร็จ: ${res.status} ${await res.text()}`)
   const body = await res.json()
   return body.values ?? []
+}
+
+async function handleFinalize(req: NextRequest, db: FirebaseFirestore.Firestore) {
+  const runId = req.nextUrl.searchParams.get('runId') ?? ''
+  if (!runId) return NextResponse.json({ error: 'ต้องระบุ runId' }, { status: 400 })
+
+  const runRef = db.collection(RUNS_COLLECTION).doc(runId)
+  const runDoc = await runRef.get()
+  if (!runDoc.exists) return NextResponse.json({ error: `ไม่พบ run ${runId}` }, { status: 404 })
+
+  const chunksSnap = await runRef.collection(RUN_CHUNKS_SUBCOLLECTION).get()
+  const seenSkus = new Set<string>()
+  chunksSnap.docs.forEach(d => {
+    const skus = d.data().skus as string[] | undefined
+    skus?.forEach(s => seenSkus.add(s))
+  })
+
+  const existingSnap = await db.collection(COLLECTION).select().get()
+  const toDelete = existingSnap.docs.map(d => d.id).filter(id => !seenSkus.has(id))
+
+  const commits: Promise<unknown>[] = []
+  for (let i = 0; i < toDelete.length; i += 450) {
+    const delBatch = db.batch()
+    for (const id of toDelete.slice(i, i + 450)) delBatch.delete(db.collection(COLLECTION).doc(id))
+    commits.push(delBatch.commit())
+  }
+  await Promise.all(commits)
+
+  // Clean up the scratch run doc + its chunk subcollection.
+  const cleanupBatch = db.batch()
+  chunksSnap.docs.forEach(d => cleanupBatch.delete(d.ref))
+  cleanupBatch.delete(runRef)
+  commits.push(cleanupBatch.commit())
+  await Promise.all(commits)
+
+  return NextResponse.json({ deleted: toDelete.length })
 }
 
 export async function POST(req: NextRequest) {
@@ -120,29 +169,43 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  try {
-    const db = getAdminFirestore()
+  const db = getAdminFirestore()
 
-    // Fetch the sheet and the current collection at the same time — at 25k
-    // rows, doing these sequentially alone cost a couple of seconds that
-    // matter against a 60s ceiling.
-    const [token, existingSnap] = await Promise.all([
-      getSheetsAccessToken(),
-      db.collection(COLLECTION).select().get(),
-    ])
-    const existingIds = new Set(existingSnap.docs.map(d => d.id))
-    const rows = await fetchSheetRows(token)
+  if (req.nextUrl.searchParams.get('finalize') === '1') {
+    try {
+      return await handleFinalize(req, db)
+    } catch (e) {
+      console.error('POST /api/sheets/pvp-sync?finalize=1', e)
+      return NextResponse.json({ error: String(e) }, { status: 500 })
+    }
+  }
+
+  const offset = Number(req.nextUrl.searchParams.get('offset') ?? '0')
+  const limit = Number(req.nextUrl.searchParams.get('limit') ?? '3000')
+  let runId = req.nextUrl.searchParams.get('runId') ?? ''
+  if (!Number.isFinite(offset) || offset < 0 || !Number.isFinite(limit) || limit <= 0) {
+    return NextResponse.json({ error: 'offset/limit ไม่ถูกต้อง' }, { status: 400 })
+  }
+
+  try {
+    const token = await getSheetsAccessToken()
+    // Sheet row 1 is the header; offset 0 means "first data row" = sheet row 2.
+    const startRow = offset + 2
+    const endRow = startRow + limit - 1
+    const rows = await fetchSheetRows(token, startRow, endRow)
+
+    if (!runId) runId = `run-${Date.now()}`
+    const runRef = db.collection(RUNS_COLLECTION).doc(runId)
+    if (offset === 0) {
+      await runRef.set({ startedAt: Timestamp.now() })
+    }
 
     const now = Timestamp.now()
-    const seenSkus = new Set<string>()
+    const chunkSkus = new Set<string>()
     const problems: string[] = []
-    let created = 0
-    let updated = 0
+    let written = 0
     let skipped = 0
 
-    // Build every write up front, then flush all batches concurrently
-    // instead of one commit-then-wait at a time — sequential commits at 25k
-    // rows (~56 batches) ran too close to Vercel's 60s Hobby-plan ceiling.
     let batch = db.batch()
     let batchCount = 0
     const commits: Promise<unknown>[] = []
@@ -155,7 +218,7 @@ export async function POST(req: NextRequest) {
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i]
-      const rowNo = i + 2 // account for header row + 0-index
+      const rowNo = startRow + i
       const sku = str(r[COL.sku])
       const name = str(r[COL.name])
 
@@ -166,14 +229,13 @@ export async function POST(req: NextRequest) {
         skipped++
         continue
       }
-      if (seenSkus.has(sku)) {
-        problems.push(`แถว ${rowNo}: SKU ${sku} ซ้ำ — ใช้ค่าจากแถวแรก`)
+      if (chunkSkus.has(sku)) {
+        problems.push(`แถว ${rowNo}: SKU ${sku} ซ้ำในชุดนี้ — ใช้ค่าจากแถวแรก`)
         skipped++
         continue
       }
-      seenSkus.add(sku)
+      chunkSkus.add(sku)
 
-      const isNew = !existingIds.has(sku)
       batch.set(db.collection(COLLECTION).doc(sku), {
         sku,
         name,
@@ -186,29 +248,33 @@ export async function POST(req: NextRequest) {
         privatePriceExVat: num(r[COL.privatePriceExVat]),
         vat: num(r[COL.vat]),
         remark: str(r[COL.remark]),
-        ...(isNew ? { createdAt: now } : {}),
         updatedAt: now,
       }, { merge: true })
       batchCount++
-      isNew ? created++ : updated++
+      written++
 
       // Firestore batch hard cap is 500 writes.
       if (batchCount === 450) flush()
     }
     flush()
 
-    // A SKU no longer present in the sheet is a delisted price — deleted
-    // outright, since this collection mirrors a live price list.
-    const toDelete = Array.from(existingIds).filter(id => !seenSkus.has(id))
-    for (let i = 0; i < toDelete.length; i += 450) {
-      const delBatch = db.batch()
-      for (const id of toDelete.slice(i, i + 450)) delBatch.delete(db.collection(COLLECTION).doc(id))
-      commits.push(delBatch.commit())
-    }
-
+    // One doc per chunk (not arrayUnion into a single doc) — a full sync
+    // sees ~25k SKUs total, which risks the 1MiB document-size limit if
+    // accumulated into one array field.
+    commits.push(runRef.collection(RUN_CHUNKS_SUBCOLLECTION).doc(String(offset)).set({
+      skus: Array.from(chunkSkus),
+    }))
     await Promise.all(commits)
 
-    return NextResponse.json({ created, updated, deleted: toDelete.length, skipped, problems })
+    const done = rows.length < limit // sheet ran out before filling this chunk
+    return NextResponse.json({
+      done,
+      nextOffset: done ? undefined : offset + limit,
+      runId,
+      written,
+      skipped,
+      problems,
+    })
   } catch (e) {
     console.error('POST /api/sheets/pvp-sync', e)
     return NextResponse.json({ error: String(e) }, { status: 500 })

@@ -163,6 +163,18 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    // ── /pvpSyncRuns ───────────────────────────────────────────────────────────
+    // Scratch progress state for the chunked PVP sync (POST /api/sheets/pvp-sync),
+    // tracking which SKUs each chunk has seen so the final ?finalize=1 call knows
+    // what to delete. Server-side only (Admin SDK) — never read or written by a
+    // client, same as /_meta and /slackPosts.
+    match /pvpSyncRuns/{runId} {
+      allow read, write: if false;
+      match /chunks/{chunkId} {
+        allow read, write: if false;
+      }
+    }
+
     // ── /resources ─────────────────────────────────────────────────────────────
     match /resources/{resourceId} {
       allow read: if isStaff();
