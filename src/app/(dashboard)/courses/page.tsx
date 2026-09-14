@@ -1982,10 +1982,25 @@ function computeGroupState(ids: string[], assignedSet: Set<string>, enrolledUser
   return 'unchecked'
 }
 
-function GroupCheckbox({ state, onChange }: { state: GroupState; onChange: () => void }) {
+function GroupCheckbox({ state, onChange, allowIndeterminate = true }: {
+  state: GroupState; onChange: () => void
+  /**
+   * The dash/indeterminate mark reads as "this GROUP is a mix of selected and
+   * unselected members" — correct for DepartmentTeamPicker's real tree
+   * (department → team → member), where a partially-checked department
+   * genuinely means some but not all of its teams are picked. But
+   * ConditionGroupPicker's buckets (rank/position/tenure) are flat and
+   * independent, not parent/child — since tenure buckets can now overlap
+   * (ไม่เกิน 3 เดือน sits inside น้อยกว่า 1 ปี), checking the narrower one
+   * leaves the wider one showing a dash that has nothing to do with a
+   * hierarchy, since there isn't one. Pass allowIndeterminate={false} there
+   * so it just reads unchecked until the whole bucket is picked.
+   */
+  allowIndeterminate?: boolean
+}) {
   return (
     <input type="checkbox" checked={state === 'checked'} disabled={state === 'empty'}
-      ref={(el) => { if (el) el.indeterminate = state === 'partial' }}
+      ref={(el) => { if (el) el.indeterminate = allowIndeterminate && state === 'partial' }}
       onChange={onChange}
       className="rounded border-gray-300 text-freshket-500 focus:ring-freshket-300 size-4 shrink-0 disabled:opacity-30"
     />
@@ -2273,7 +2288,7 @@ function ConditionGroupPicker({ title, groups, assignedIds, enrolledUserIds, onC
         const state = computeGroupState(g.userIds, draft, enrolledUserIds)
         return (
           <label key={g.key} className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition-colors">
-            <GroupCheckbox state={state} onChange={() => toggleDraftGroup(g.userIds.filter((id) => !enrolledUserIds.has(id)), state !== 'checked')} />
+            <GroupCheckbox state={state} allowIndeterminate={false} onChange={() => toggleDraftGroup(g.userIds.filter((id) => !enrolledUserIds.has(id)), state !== 'checked')} />
             <span className="flex-1 text-sm font-bold text-gray-800 truncate">{g.label}</span>
             <span className="text-xs text-gray-400 shrink-0">{g.userIds.length} คน</span>
           </label>
@@ -4147,7 +4162,14 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
   )
 }
 
+// Buckets are NOT required to be disjoint — the picker just unions the
+// userIds of every checked bucket, so "ไม่เกิน 3 เดือน" deliberately overlaps
+// "น้อยกว่า 1 ปี" rather than splitting it: someone 2 months in still belongs
+// under "less than 1 year" too, and a rule built for onboarding-stage
+// employees needs the finer 3-month cut without losing the coarser one other
+// courses already rely on.
 const TENURE_BUCKETS: { key: string; label: string; test: (years: number) => boolean }[] = [
+  { key: 'lt3mo', label: 'ไม่เกิน 3 เดือน', test: (y) => y <= 3 / 12 },
   { key: 'lt1',  label: 'น้อยกว่า 1 ปี', test: (y) => y < 1 },
   { key: '1to3', label: '1-3 ปี',        test: (y) => y >= 1 && y < 3 },
   { key: '3to5', label: '3-5 ปี',        test: (y) => y >= 3 && y < 5 },
@@ -4221,13 +4243,27 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   // hide most of the company from the picker.
   const assignableUsers = useMemo(() => onlyActiveEmployees(allUsers), [allUsers])
 
+  // A user's teamId can point at a team document that no longer exists (the
+  // team was deleted/merged and the member was never re-homed) — found via a
+  // real case: a department showed as only "partially selected" no matter
+  // what an admin checked, because one manager's stale teamId excluded her
+  // from BOTH the team-membership map (her team isn't in `teams` anymore)
+  // AND the unassignedIds bucket (her teamId field is still non-empty, so
+  // `!u.teamId` was false) — she was invisible to this picker entirely, with
+  // nothing on screen to explain why "select all" wouldn't stick.
+  // A stale reference is functionally identical to having no team, so it's
+  // treated as unassigned here rather than only checking `!u.teamId`.
+  const validTeamIds = useMemo(() => new Set(teams.map((t) => t.id)), [teams])
+
   const deptTree: DeptTreeNode[] = useMemo(() => departments.map((dept) => ({
     id: dept.id, name: dept.name,
     teams: teams.filter((t) => t.departmentId === dept.id).map((t) => ({
       id: t.id, name: t.name, memberIds: assignableUsers.filter((u) => u.teamId === t.id).map((u) => u.uid),
     })),
-    unassignedIds: assignableUsers.filter((u) => u.department === dept.name && !u.teamId).map((u) => u.uid),
-  })), [departments, teams, assignableUsers])
+    unassignedIds: assignableUsers
+      .filter((u) => u.department === dept.name && (!u.teamId || !validTeamIds.has(u.teamId)))
+      .map((u) => u.uid),
+  })), [departments, teams, assignableUsers, validTeamIds])
 
   const rankGroups = useMemo(() => {
     const map = new Map<string, string[]>()
