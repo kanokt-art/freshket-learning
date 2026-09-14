@@ -100,3 +100,57 @@ describe('computeDepartmentAssignmentSync', () => {
     expect(results).toEqual([])
   })
 })
+
+describe('computeDepartmentAssignmentSync — assignedTeamIds (partial team-level selection)', () => {
+  it('adds a new active employee whose teamId matches a tracked team', () => {
+    const results = computeDepartmentAssignmentSync(
+      [{ id: 'c1', assignedTeamIds: ['team-samc'], assignedUserIds: ['u1'] }],
+      [
+        { uid: 'u1', teamId: 'team-samc' },
+        { uid: 'u2', teamId: 'team-samc' }, // new joiner to the tracked team
+        { uid: 'u3', teamId: 'team-other' }, // different team, must not match
+      ],
+    )
+    expect(results).toEqual([
+      { courseId: 'c1', newAssignedUserIds: ['u1', 'u2'], addedUids: ['u2'] },
+    ])
+  })
+
+  it('matches on EITHER assignedDepartments OR assignedTeamIds', () => {
+    const results = computeDepartmentAssignmentSync(
+      [{ id: 'c1', assignedDepartments: ['Portfolio Management'], assignedTeamIds: ['team-samc'], assignedUserIds: [] }],
+      [
+        { uid: 'u1', department: 'Portfolio Management' }, // matches by department
+        { uid: 'u2', teamId: 'team-samc' },                // matches by team, different department
+        { uid: 'u3', department: 'Marketing', teamId: 'team-other' }, // matches neither
+      ],
+    )
+    expect(results[0].addedUids.sort()).toEqual(['u1', 'u2'])
+  })
+
+  it('does not double-add someone who matches both conditions', () => {
+    const results = computeDepartmentAssignmentSync(
+      [{ id: 'c1', assignedDepartments: ['Key Account Management'], assignedTeamIds: ['team-samc'], assignedUserIds: [] }],
+      [{ uid: 'u1', department: 'Key Account Management', teamId: 'team-samc' }],
+    )
+    expect(results).toEqual([
+      { courseId: 'c1', newAssignedUserIds: ['u1'], addedUids: ['u1'] },
+    ])
+  })
+
+  it('produces nothing for a course with neither condition set', () => {
+    const results = computeDepartmentAssignmentSync(
+      [{ id: 'c1', assignedUserIds: ['u1'] }],
+      [{ uid: 'u2', teamId: 'team-samc' }],
+    )
+    expect(results).toEqual([])
+  })
+
+  it('excludes a resigned employee even if their teamId matches', () => {
+    const results = computeDepartmentAssignmentSync(
+      [{ id: 'c1', assignedTeamIds: ['team-samc'], assignedUserIds: [] }],
+      [{ uid: 'u1', teamId: 'team-samc', employmentStatus: 'Resigned' }],
+    )
+    expect(results).toEqual([])
+  })
+})

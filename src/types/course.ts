@@ -93,18 +93,29 @@ export interface Course {
   thumbnailUrl?: string
   isRequired: boolean
   targetRoles: string[]
-  assignedUserIds?: string[]  // specific user assignment (empty = all target roles) — resolved snapshot, kept in sync with assignedDepartments below
-  // Department names selected as a full condition in the "เลือกสังกัด" picker
-  // (every team + the unassigned bucket under that department was checked —
-  // a partial selection inside a department carries no name here, since
-  // there's no stable rule to describe it). When set, /api/courses/
-  // sync-department-assignments additively unions anyone currently in these
-  // departments into assignedUserIds, so a newly-hired or newly-imported
-  // employee is picked up without a super_admin re-opening this course.
-  // Additive only, same as auto-map-teams: never removes an id that was
-  // manually added or that no longer matches (a resignation is handled by
-  // the Employees list hiding them, not by this route pruning the course).
+  assignedUserIds?: string[]  // specific user assignment (empty = all target roles) — resolved snapshot, kept in sync with assignedDepartments/assignedTeamIds below
+  // Department names selected as a WHOLE condition in the "เลือกสังกัด"
+  // picker — every team + the unassigned bucket under that department was
+  // checked. When set, /api/courses/sync-department-assignments additively
+  // unions anyone with a matching `department` string into assignedUserIds,
+  // so a newly-hired or newly-imported employee is picked up without a
+  // super_admin re-opening this course.
   assignedDepartments?: string[]
+  // Team ids selected individually (a department only PARTIALLY checked —
+  // some but not all of its teams, e.g. "just the Chain team", not the whole
+  // of Key Account Management). Synced the same way as assignedDepartments
+  // but matched by `teamId` instead of the department string, since a team
+  // membership is a firmer signal than the free-text department field a
+  // person's HR record carries (the two can drift apart — see
+  // computeAutoTeamMappings for a concrete case). A course can carry both
+  // fields at once (e.g. all of one department + a specific team elsewhere);
+  // the sync route unions matches from either.
+  //
+  // Both fields are additive-only, same as auto-map-teams: never removes an
+  // id that was manually added or that no longer matches (a resignation is
+  // handled by the Employees list hiding them, not by this route pruning the
+  // course).
+  assignedTeamIds?: string[]
   startDate?: Date            // null = publish immediately
   endDate?: Date              // null = no deadline
   slideUrl?: string

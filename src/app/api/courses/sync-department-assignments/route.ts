@@ -12,12 +12,14 @@ import { computeDepartmentAssignmentSync } from '@/lib/courses/syncDepartmentAss
 // and never even saw the course on /courses (visibility there checks
 // assignedUserIds directly).
 //
-// This route re-derives, for every course that recorded WHICH departments it
-// targets (assignedDepartments — only set when a picker selection covered a
-// whole department, not a partial team-level pick), who should now be in
-// assignedUserIds, and additively writes the difference. Called after CSV
-// import completes; also exposed as a manual "ซิงก์ผู้เรียนอัตโนมัติ" button on
-// /courses for admins who add someone outside of a bulk import.
+// This route re-derives, for every course that recorded a condition —
+// assignedDepartments (a whole department: every team + the unassigned
+// bucket checked) and/or assignedTeamIds (individual teams checked within a
+// department that isn't wholly selected, matched by teamId instead of the
+// department string) — who should now be in assignedUserIds, and additively
+// writes the difference. Called after CSV import completes; also exposed as
+// a manual "ซิงก์ผู้เรียนอัตโนมัติ" button on /courses for admins who add
+// someone outside of a bulk import.
 export async function POST(req: NextRequest) {
   try {
     const gate = await requireSuperAdmin(req)
@@ -32,11 +34,13 @@ export async function POST(req: NextRequest) {
     const courses = coursesSnap.docs.map(d => ({
       id: d.id,
       assignedDepartments: d.data().assignedDepartments as string[] | undefined,
+      assignedTeamIds: d.data().assignedTeamIds as string[] | undefined,
       assignedUserIds: d.data().assignedUserIds as string[] | undefined,
     }))
     const users = usersSnap.docs.map(d => ({
       uid: d.id,
       department: d.data().department as string | undefined,
+      teamId: d.data().teamId as string | undefined,
       employmentStatus: d.data().employmentStatus as string | undefined,
     }))
 

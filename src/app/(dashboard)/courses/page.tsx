@@ -2175,10 +2175,15 @@ interface DeptTreeNode {
 
 function DepartmentTeamPicker({ deptTree, assignedIds, enrolledUserIds, onConfirm, onClose }: {
   deptTree: DeptTreeNode[]; assignedIds: string[]; enrolledUserIds: Set<string>
-  /** `departments` = names selected as a WHOLE department (every team + the
+  /**
+   * `departments` = names selected as a WHOLE department (every team + the
    * unassigned bucket checked) — see the assignedDepartments comment on the
-   * Course type for why only a full selection counts. */
-  onConfirm: (ids: string[], departments: string[]) => void; onClose: () => void
+   * Course type. `teamIds` = individual teams fully checked within a
+   * department that ISN'T wholly selected (see assignedTeamIds) — e.g.
+   * checking just "Chain" inside Key Account Management without checking
+   * every other team there too.
+   */
+  onConfirm: (ids: string[], departments: string[], teamIds: string[]) => void; onClose: () => void
 }) {
   const [draft, setDraft] = useState<Set<string>>(() => new Set(assignedIds))
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -2197,13 +2202,26 @@ function DepartmentTeamPicker({ deptTree, assignedIds, enrolledUserIds, onConfir
   }
 
   function handleConfirm() {
-    const fullyCheckedDepts = deptTree
-      .filter((dept) => {
-        const allDeptIds = [...dept.unassignedIds, ...dept.teams.flatMap((t) => t.memberIds)]
-        return computeGroupState(allDeptIds, draft, enrolledUserIds) === 'checked'
-      })
-      .map((dept) => dept.name)
-    onConfirm(Array.from(draft), fullyCheckedDepts)
+    const fullyCheckedDepts: string[] = []
+    const fullyCheckedTeamIds: string[] = []
+    for (const dept of deptTree) {
+      const allDeptIds = [...dept.unassignedIds, ...dept.teams.flatMap((t) => t.memberIds)]
+      if (computeGroupState(allDeptIds, draft, enrolledUserIds) === 'checked') {
+        // Whole department — assignedDepartments already covers every team
+        // and the unassigned bucket under it, so recording individual teams
+        // here too would be redundant.
+        fullyCheckedDepts.push(dept.name)
+        continue
+      }
+      // Department isn't wholly selected, but individual teams under it can
+      // still be — e.g. "just the Chain team" out of Key Account Management.
+      for (const team of dept.teams) {
+        if (computeGroupState(team.memberIds, draft, enrolledUserIds) === 'checked') {
+          fullyCheckedTeamIds.push(team.id)
+        }
+      }
+    }
+    onConfirm(Array.from(draft), fullyCheckedDepts, fullyCheckedTeamIds)
     onClose()
   }
 
@@ -2360,8 +2378,9 @@ type FormState = {
   hasCertificate: boolean; allowRetake: boolean
   topics: CourseTopic[]
   assignedUserIds: string[]
-  /** See the assignedDepartments comment on the Course type. */
+  /** See the assignedDepartments / assignedTeamIds comments on the Course type. */
   assignedDepartments: string[]
+  assignedTeamIds: string[]
   hasKeyTakeAway: boolean; keyTakeAwayPrompt: string
   quizEnabled: boolean
   isPublished: boolean
@@ -2393,6 +2412,7 @@ function formFromCourse(c: Course): FormState {
     topics: c.topics ?? [],
     assignedUserIds: c.assignedUserIds ?? [],
     assignedDepartments: c.assignedDepartments ?? [],
+    assignedTeamIds: c.assignedTeamIds ?? [],
     hasKeyTakeAway: !!c.hasKeyTakeAway,
     keyTakeAwayPrompt: c.keyTakeAwayPrompt ?? '',
     // Older courses predate this flag: infer it from whether any lesson
@@ -4317,6 +4337,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     hasCertificate: false, allowRetake: false, topics: [],
     assignedUserIds: [],
     assignedDepartments: [],
+    assignedTeamIds: [],
     hasKeyTakeAway: false, keyTakeAwayPrompt: '', quizEnabled: false,
     isPublished: true,
     isChallenge: false, challengeWindowStart: '', challengeWindowEnd: '', challengeMultiplier: '2',
@@ -4343,22 +4364,41 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   // ── Learner assignment UI state ──
   const [openPanel, setOpenPanel] = useState<'individual' | 'department' | 'rank' | 'position' | 'tenure' | null>(null)
   // Both toggles used to always start at false, forgetting on every reopen
-  // that a course already had a condition configured (assignedDepartments was
-  // the only thing actually saved — the toggle itself had no memory). Seed
-  // from what's actually persisted so re-opening an existing course shows its
-  // real state instead of looking unconfigured.
-  const hasSavedDeptCondition = (editCourse?.assignedDepartments?.length ?? 0) > 0
+  // that a course already had a condition configured (assignedDepartments/
+  // assignedTeamIds were the only things actually saved — the toggle itself
+  // had no memory). Seed from what's actually persisted so re-opening an
+  // existing course shows its real state instead of looking unconfigured.
+  const hasSavedDeptCondition =
+    (editCourse?.assignedDepartments?.length ?? 0) > 0 ||
+    (editCourse?.assignedTeamIds?.length ?? 0) > 0
   const [condMasterOn, setCondMasterOn] = useState(hasSavedDeptCondition)
   const [condToggles, setCondToggles] = useState({
     department: hasSavedDeptCondition, rank: false, position: false, tenure: false,
   })
   // Only the department condition has a picker that reports back WHICH values
-  // were chosen (assignedDepartments) — rank/position/tenure still resolve
-  // straight to a uid snapshot with no persisted "what was picked" of their
-  // own, so they can't yet show a saved summary or an edit-vs-standby state.
-  // Tracks form.assignedDepartments (not the editCourse snapshot above) so it
-  // updates the moment a picker confirms, in the same render pass.
-  const deptConditionSaved = form.assignedDepartments.length > 0
+  // were chosen (assignedDepartments for a whole department, assignedTeamIds
+  // for individual teams within a partially-selected one) — rank/position/
+  // tenure still resolve straight to a uid snapshot with no persisted "what
+  // was picked" of their own, so they can't yet show a saved summary or an
+  // edit-vs-standby state.
+  // Tracks form.* (not the editCourse snapshot above) so it updates the
+  // moment a picker confirms, in the same render pass.
+  const deptConditionSaved = form.assignedDepartments.length > 0 || form.assignedTeamIds.length > 0
+
+  // Standalone teams saved via assignedTeamIds, grouped by their department
+  // for display — "just the Chain team" needs to show WHERE Chain is, since
+  // team names alone (e.g. two different "Team A"s in different
+  // departments) aren't unique enough on their own.
+  const assignedTeamsByDept = useMemo(() => {
+    const teamIdSet = new Set(form.assignedTeamIds)
+    if (teamIdSet.size === 0) return []
+    return deptTree
+      .map((dept) => ({
+        deptName: dept.name,
+        teamNames: dept.teams.filter((t) => teamIdSet.has(t.id)).map((t) => t.name),
+      }))
+      .filter((g) => g.teamNames.length > 0)
+  }, [form.assignedTeamIds, deptTree])
   const [showConfirm, setShowConfirm] = useState(false)
   const [showAssignedTable, setShowAssignedTable] = useState(false)
   const [showLessonPreview, setShowLessonPreview] = useState(false)
@@ -4367,18 +4407,20 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     setForm((p) => ({ ...p, [key]: val }))
   }
 
-  // Manually removing someone breaks the "whole department" guarantee that
-  // assignedDepartments relies on — the auto-sync route would otherwise just
-  // re-add that person on the next CSV import, silently undoing an admin's
-  // explicit removal. So any manual removal clears assignedDepartments
-  // entirely: department auto-sync has to be re-selected in the picker if
-  // still wanted, rather than the system guessing which department(s) are
-  // still "whole" after an arbitrary uid was pulled out.
+  // Manually removing someone breaks the "whole department"/"whole team"
+  // guarantee that assignedDepartments/assignedTeamIds rely on — the
+  // auto-sync route would otherwise just re-add that person on the next CSV
+  // import, silently undoing an admin's explicit removal. So any manual
+  // removal clears BOTH conditions entirely: department/team auto-sync has
+  // to be re-selected in the picker if still wanted, rather than the system
+  // guessing which department(s)/team(s) are still "whole" after an
+  // arbitrary uid was pulled out.
   function removeAssignedUser(uid: string) {
     setForm((p) => ({
       ...p,
       assignedUserIds: p.assignedUserIds.filter((id) => id !== uid),
       assignedDepartments: [],
+      assignedTeamIds: [],
     }))
   }
 
@@ -4391,6 +4433,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
       ...p,
       assignedUserIds: p.assignedUserIds.filter((id) => !drop.has(id)),
       assignedDepartments: [],
+      assignedTeamIds: [],
     }))
   }
 
@@ -4486,6 +4529,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
         isRequired: form.isRequired, targetRoles: [],
         assignedUserIds: form.assignedUserIds,
         assignedDepartments: form.assignedDepartments,
+        assignedTeamIds: form.assignedTeamIds,
         thumbnailUrl: form.thumbnailUrl.trim() || undefined,
         slideUrl: form.slideUrl.trim() || undefined,
         formUrl: form.formUrl.trim() || undefined,
@@ -4999,10 +5043,11 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                                     didn't fit — Portfolio Management, Key
                                     Account Management showed as just the
                                     first). Team names underneath are what's
-                                    actually included, since a department
-                                    condition here is only ever a WHOLE
-                                    department (every team + unassigned) —
-                                    see assignedDepartments on the Course type. */}
+                                    actually included: every team for a WHOLE
+                                    department (assignedDepartments), or the
+                                    specific team(s) picked when only part of
+                                    a department was checked (assignedTeamIds,
+                                    e.g. "just the Chain team"). */}
                                 <div className="min-w-0 space-y-1.5">
                                   {form.assignedDepartments.map((deptName) => {
                                     const dept = deptTree.find((d) => d.name === deptName)
@@ -5017,6 +5062,12 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                                       </div>
                                     )
                                   })}
+                                  {assignedTeamsByDept.map((g) => (
+                                    <div key={g.deptName}>
+                                      <p className="text-xs font-bold text-gray-700 truncate">{g.deptName}</p>
+                                      <p className="text-xs text-gray-400 truncate">{g.teamNames.join(', ')}</p>
+                                    </div>
+                                  ))}
                                 </div>
                                 <button type="button" onClick={() => setOpenPanel(row.key)}
                                   title={`แก้ไข${row.label}`}
@@ -5222,9 +5273,9 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
           deptTree={deptTree}
           assignedIds={form.assignedUserIds}
           enrolledUserIds={enrolledUserIds}
-          onConfirm={(ids, departments) => {
+          onConfirm={(ids, departments, teamIds) => {
             set('assignedUserIds', ids)
-            setForm((p) => ({ ...p, assignedDepartments: departments }))
+            setForm((p) => ({ ...p, assignedDepartments: departments, assignedTeamIds: teamIds }))
           }}
           onClose={() => setOpenPanel(null)}
         />
