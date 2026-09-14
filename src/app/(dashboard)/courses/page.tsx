@@ -34,6 +34,7 @@ import {
 import { STATUS_LABELS, STATUS_COLORS, recordProgressPercent, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
 import { QUESTION_TYPE_LABELS, QUESTION_TYPE_COLORS, type Assessment } from '@/types/assessment'
 import type { UserProfile, UserRole, Department, Team } from '@/types/user'
+import { getTeamLeadIds, getTeamManagerIds } from '@/types/user'
 import { getClientFirestore } from '@/lib/firebase/client'
 import { formatDateEN } from '@/lib/utils/dateFormatter'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
@@ -4255,15 +4256,40 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   // treated as unassigned here rather than only checking `!u.teamId`.
   const validTeamIds = useMemo(() => new Set(teams.map((t) => t.id)), [teams])
 
+  // A team's lead/manager doesn't necessarily carry that team's id in their
+  // own teamId field (teamLeadIds/managerIds on the TEAM doc is the actual
+  // source of truth for who leads it — same relationship /team-lead and
+  // /manager already read the same way). Without folding them in here, a
+  // lead who has no personal teamId showed up under "ยังไม่มีทีม" even though
+  // they plainly are attached to a team — confusing, since unchecking that
+  // bucket then left the department permanently stuck at "partial" for
+  // someone who isn't actually unassigned.
+  const leadOrManagerTeamId = useMemo(() => {
+    const map = new Map<string, string>() // uid -> teamId they lead/manage
+    for (const t of teams) {
+      for (const uid of [...getTeamLeadIds(t), ...getTeamManagerIds(t)]) {
+        if (!map.has(uid)) map.set(uid, t.id) // first team wins if someone leads more than one
+      }
+    }
+    return map
+  }, [teams])
+
   const deptTree: DeptTreeNode[] = useMemo(() => departments.map((dept) => ({
     id: dept.id, name: dept.name,
     teams: teams.filter((t) => t.departmentId === dept.id).map((t) => ({
-      id: t.id, name: t.name, memberIds: assignableUsers.filter((u) => u.teamId === t.id).map((u) => u.uid),
+      id: t.id, name: t.name,
+      memberIds: assignableUsers
+        .filter((u) => u.teamId === t.id || leadOrManagerTeamId.get(u.uid) === t.id)
+        .map((u) => u.uid),
     })),
     unassignedIds: assignableUsers
-      .filter((u) => u.department === dept.name && (!u.teamId || !validTeamIds.has(u.teamId)))
+      .filter((u) =>
+        u.department === dept.name &&
+        (!u.teamId || !validTeamIds.has(u.teamId)) &&
+        !leadOrManagerTeamId.has(u.uid),
+      )
       .map((u) => u.uid),
-  })), [departments, teams, assignableUsers, validTeamIds])
+  })), [departments, teams, assignableUsers, validTeamIds, leadOrManagerTeamId])
 
   const rankGroups = useMemo(() => {
     const map = new Map<string, string[]>()
