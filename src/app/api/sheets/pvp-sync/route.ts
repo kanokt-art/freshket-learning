@@ -21,7 +21,14 @@ import { getAdminFirestore } from '@/lib/firebase/admin'
 // plan (60s hard ceiling per function, not extendable), and even with
 // parallel batch commits a single-request sync of the whole sheet blew past
 // that ceiling (FUNCTION_INVOCATION_TIMEOUT). So this endpoint is chunked
-// instead of whole-sheet:
+// instead of whole-sheet.
+//
+// Region note: Firestore for this project lives in asia-southeast3, so this
+// function is pinned to sin1 in vercel.json. Left on Vercel's US default
+// (iad1/sfo1) every Firestore round-trip crossed the Pacific (~200ms+), and
+// even a single 3000-row chunk timed out.
+//
+// The chunk protocol:
 //   POST ?offset=0&limit=3000        → syncs rows [offset, offset+limit) only
 //     → { done: false, nextOffset, written, skipped, problems, runId }
 //   POST ?offset=<last>&limit=3000   → last chunk, sheet exhausted
@@ -187,12 +194,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'offset/limit ไม่ถูกต้อง' }, { status: 400 })
   }
 
+  const t0 = Date.now()
+  const timing: Record<string, number> = {}
+
   try {
     const token = await getSheetsAccessToken()
+    timing.auth = Date.now() - t0
     // Sheet row 1 is the header; offset 0 means "first data row" = sheet row 2.
     const startRow = offset + 2
     const endRow = startRow + limit - 1
+    const tSheet = Date.now()
     const rows = await fetchSheetRows(token, startRow, endRow)
+    timing.fetchSheet = Date.now() - tSheet
 
     if (!runId) runId = `run-${Date.now()}`
     const runRef = db.collection(RUNS_COLLECTION).doc(runId)
@@ -264,7 +277,10 @@ export async function POST(req: NextRequest) {
     commits.push(runRef.collection(RUN_CHUNKS_SUBCOLLECTION).doc(String(offset)).set({
       skus: Array.from(chunkSkus),
     }))
+    const tCommit = Date.now()
     await Promise.all(commits)
+    timing.commit = Date.now() - tCommit
+    timing.total = Date.now() - t0
 
     const done = rows.length < limit // sheet ran out before filling this chunk
     return NextResponse.json({
@@ -274,6 +290,7 @@ export async function POST(req: NextRequest) {
       written,
       skipped,
       problems,
+      timing,
     })
   } catch (e) {
     console.error('POST /api/sheets/pvp-sync', e)
