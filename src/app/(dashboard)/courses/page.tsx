@@ -47,7 +47,7 @@ import { demoStore } from '@/lib/demo/demoStore'
 import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
-import { alertError, confirmAction } from '@/lib/ui/alert'
+import { alertError, alertSuccess, confirmAction } from '@/lib/ui/alert'
 import { formatPersonName } from '@/lib/users/displayName'
 import { onlyActiveEmployees, isActiveEmployee } from '@/lib/users/active'
 import { authedFetch } from '@/lib/api/authedFetch'
@@ -207,6 +207,7 @@ export default function CoursesPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
   const [learnerResultsCourse, setLearnerResultsCourse] = useState<Course | null>(null)
   const [showImportResults, setShowImportResults] = useState(false)
+  const [syncingDeptAssignments, setSyncingDeptAssignments] = useState(false)
 
   const isSuperAdmin = user?.role === 'super_admin'
   const { allowedModules, loading: moduleLoading } = useModuleAccess(user?.role, user?.department)
@@ -319,6 +320,31 @@ export default function CoursesPage() {
     }
   }
 
+  // Manual trigger for the department auto-assignment sync — see
+  // src/app/api/courses/sync-department-assignments/route.ts. The CSV import
+  // flow on /users also calls this a few seconds after a successful import,
+  // but this button covers everything else (a single employee added by hand,
+  // a department reassignment, or just wanting to force a re-check).
+  async function handleSyncDeptAssignments() {
+    if (syncingDeptAssignments) return
+    setSyncingDeptAssignments(true)
+    try {
+      const res = await authedFetch('/api/courses/sync-department-assignments', { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) { void alertError('ซิงก์ไม่สำเร็จ', json.error ?? 'Unknown error'); return }
+      if (json.totalAdded === 0) {
+        void alertSuccess('ไม่มีอะไรต้องซิงก์', 'ทุกหลักสูตรที่ผูกกับแผนกมีผู้เรียนครบแล้ว')
+      } else {
+        void alertSuccess('ซิงก์สำเร็จ', `เพิ่มผู้เรียนใหม่ ${json.totalAdded} คน ใน ${json.coursesUpdated} หลักสูตร`)
+      }
+    } catch (e) {
+      void alertError('ซิงก์ไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
+      console.error(e)
+    } finally {
+      setSyncingDeptAssignments(false)
+    }
+  }
+
   if (!user) return null
 
   if (moduleLoading) {
@@ -416,6 +442,21 @@ export default function CoursesPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
                 </svg>
                 นำเข้าผลคะแนน
+              </button>
+            )}
+            {/* Sync department-based auto-assignment (super_admin) — see
+                handleSyncDeptAssignments above */}
+            {isSuperAdmin && (
+              <button
+                onClick={() => { void handleSyncDeptAssignments() }}
+                disabled={syncingDeptAssignments}
+                title="เติมผู้เรียนใหม่ให้หลักสูตรที่กำหนดผู้เรียนแบบ 'ทั้งแผนก' ไว้ — ใช้เมื่อมีพนักงานเข้าใหม่นอกรอบ import CSV"
+                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white border border-gray-200 text-sm font-bold text-gray-700 hover:border-freshket-500 hover:text-freshket-600 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <svg className={`size-4 ${syncingDeptAssignments ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+                {syncingDeptAssignments ? 'กำลังซิงก์...' : 'ซิงก์ผู้เรียนอัตโนมัติ'}
               </button>
             )}
             {/* View toggle — right after search */}
@@ -2118,7 +2159,10 @@ interface DeptTreeNode {
 
 function DepartmentTeamPicker({ deptTree, assignedIds, enrolledUserIds, onConfirm, onClose }: {
   deptTree: DeptTreeNode[]; assignedIds: string[]; enrolledUserIds: Set<string>
-  onConfirm: (ids: string[]) => void; onClose: () => void
+  /** `departments` = names selected as a WHOLE department (every team + the
+   * unassigned bucket checked) — see the assignedDepartments comment on the
+   * Course type for why only a full selection counts. */
+  onConfirm: (ids: string[], departments: string[]) => void; onClose: () => void
 }) {
   const [draft, setDraft] = useState<Set<string>>(() => new Set(assignedIds))
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -2136,9 +2180,20 @@ function DepartmentTeamPicker({ deptTree, assignedIds, enrolledUserIds, onConfir
     })
   }
 
+  function handleConfirm() {
+    const fullyCheckedDepts = deptTree
+      .filter((dept) => {
+        const allDeptIds = [...dept.unassignedIds, ...dept.teams.flatMap((t) => t.memberIds)]
+        return computeGroupState(allDeptIds, draft, enrolledUserIds) === 'checked'
+      })
+      .map((dept) => dept.name)
+    onConfirm(Array.from(draft), fullyCheckedDepts)
+    onClose()
+  }
+
   return (
     <SidePanel title="เลือกสังกัด" onClose={onClose}
-      footer={<PanelFooter selectedCount={draft.size} onCancel={onClose} onConfirm={() => { onConfirm(Array.from(draft)); onClose() }} />}
+      footer={<PanelFooter selectedCount={draft.size} onCancel={onClose} onConfirm={handleConfirm} />}
     >
       {deptTree.length === 0 ? (
         <p className="text-xs text-gray-400 text-center py-8">ไม่พบข้อมูลแผนก</p>
@@ -2289,6 +2344,8 @@ type FormState = {
   hasCertificate: boolean; allowRetake: boolean
   topics: CourseTopic[]
   assignedUserIds: string[]
+  /** See the assignedDepartments comment on the Course type. */
+  assignedDepartments: string[]
   hasKeyTakeAway: boolean; keyTakeAwayPrompt: string
   quizEnabled: boolean
   isPublished: boolean
@@ -2319,6 +2376,7 @@ function formFromCourse(c: Course): FormState {
     hasCertificate: !!c.hasCertificate, allowRetake: !!c.allowRetake,
     topics: c.topics ?? [],
     assignedUserIds: c.assignedUserIds ?? [],
+    assignedDepartments: c.assignedDepartments ?? [],
     hasKeyTakeAway: !!c.hasKeyTakeAway,
     keyTakeAwayPrompt: c.keyTakeAwayPrompt ?? '',
     // Older courses predate this flag: infer it from whether any lesson
@@ -4196,6 +4254,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     instructorId: '', courseAdminIds: [], introVideoUrl: '',
     hasCertificate: false, allowRetake: false, topics: [],
     assignedUserIds: [],
+    assignedDepartments: [],
     hasKeyTakeAway: false, keyTakeAwayPrompt: '', quizEnabled: false,
     isPublished: true,
     isChallenge: false, challengeWindowStart: '', challengeWindowEnd: '', challengeMultiplier: '2',
@@ -4231,8 +4290,19 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     setForm((p) => ({ ...p, [key]: val }))
   }
 
+  // Manually removing someone breaks the "whole department" guarantee that
+  // assignedDepartments relies on — the auto-sync route would otherwise just
+  // re-add that person on the next CSV import, silently undoing an admin's
+  // explicit removal. So any manual removal clears assignedDepartments
+  // entirely: department auto-sync has to be re-selected in the picker if
+  // still wanted, rather than the system guessing which department(s) are
+  // still "whole" after an arbitrary uid was pulled out.
   function removeAssignedUser(uid: string) {
-    setForm((p) => ({ ...p, assignedUserIds: p.assignedUserIds.filter((id) => id !== uid) }))
+    setForm((p) => ({
+      ...p,
+      assignedUserIds: p.assignedUserIds.filter((id) => id !== uid),
+      assignedDepartments: [],
+    }))
   }
 
   // One state update for the whole selection. Calling removeAssignedUser in a
@@ -4240,7 +4310,11 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   // one — correct, but O(n²) over a 165-learner list.
   function removeAssignedUsers(uids: string[]) {
     const drop = new Set(uids)
-    setForm((p) => ({ ...p, assignedUserIds: p.assignedUserIds.filter((id) => !drop.has(id)) }))
+    setForm((p) => ({
+      ...p,
+      assignedUserIds: p.assignedUserIds.filter((id) => !drop.has(id)),
+      assignedDepartments: [],
+    }))
   }
 
   // Master switch for the course's quiz. Quiz lessons are system-managed: they
@@ -4334,6 +4408,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
         // targetRoles is left empty so CoursesPage's OR-based visibility check relies solely on assignedUserIds.
         isRequired: form.isRequired, targetRoles: [],
         assignedUserIds: form.assignedUserIds,
+        assignedDepartments: form.assignedDepartments,
         thumbnailUrl: form.thumbnailUrl.trim() || undefined,
         slideUrl: form.slideUrl.trim() || undefined,
         formUrl: form.formUrl.trim() || undefined,
@@ -5018,7 +5093,10 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
           deptTree={deptTree}
           assignedIds={form.assignedUserIds}
           enrolledUserIds={enrolledUserIds}
-          onConfirm={(ids) => set('assignedUserIds', ids)}
+          onConfirm={(ids, departments) => {
+            set('assignedUserIds', ids)
+            setForm((p) => ({ ...p, assignedDepartments: departments }))
+          }}
           onClose={() => setOpenPanel(null)}
         />
       )}

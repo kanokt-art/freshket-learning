@@ -93,7 +93,18 @@ export interface Course {
   thumbnailUrl?: string
   isRequired: boolean
   targetRoles: string[]
-  assignedUserIds?: string[]  // specific user assignment (empty = all target roles)
+  assignedUserIds?: string[]  // specific user assignment (empty = all target roles) — resolved snapshot, kept in sync with assignedDepartments below
+  // Department names selected as a full condition in the "เลือกสังกัด" picker
+  // (every team + the unassigned bucket under that department was checked —
+  // a partial selection inside a department carries no name here, since
+  // there's no stable rule to describe it). When set, /api/courses/
+  // sync-department-assignments additively unions anyone currently in these
+  // departments into assignedUserIds, so a newly-hired or newly-imported
+  // employee is picked up without a super_admin re-opening this course.
+  // Additive only, same as auto-map-teams: never removes an id that was
+  // manually added or that no longer matches (a resignation is handled by
+  // the Employees list hiding them, not by this route pruning the course).
+  assignedDepartments?: string[]
   startDate?: Date            // null = publish immediately
   endDate?: Date              // null = no deadline
   slideUrl?: string

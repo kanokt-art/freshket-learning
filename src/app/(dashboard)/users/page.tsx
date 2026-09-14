@@ -1097,6 +1097,18 @@ export default function UsersPage() {
               newUsers.forEach(u => demoStore.addUser(u))
             } else {
               saveLocalImportedUsers(newUsers)
+              // saveLocalImportedUsers writes to Firestore in the background
+              // (fire-and-forget by design — see its own comments), so this
+              // can't await it directly. Give the batch commit a few seconds
+              // to land before asking the sync route to read the same
+              // collection back; a few-second lag before a new hire appears
+              // in their course's roster is fine for a "the day HR onboards
+              // someone" scenario, unlike a failed write, which the earlier
+              // reportWriteFailure() alert already surfaces on its own.
+              setTimeout(() => {
+                authedFetch('/api/courses/sync-department-assignments', { method: 'POST' })
+                  .catch(err => console.error('sync-department-assignments after import failed', err))
+              }, 5_000)
             }
             setImportResult({ added: newUsers.length - updatedCount - missingCount, updated: updatedCount, skipped, hidden: hiddenCount, missing: missingCount })
             setShowAddEmployee(false)
