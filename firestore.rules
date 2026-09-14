@@ -154,6 +154,15 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    // ── /pvpPrices ─────────────────────────────────────────────────────────────
+    // PVP price list, synced from the "PVP" tab via docs/apps-script/PvpSync.gs
+    // (a thin webhook ping) + POST /api/sheets/pvp-sync (the actual Sheets→
+    // Firestore pull, Admin SDK, bypasses these rules). Same shape as /products.
+    match /pvpPrices/{sku} {
+      allow read: if isStaff();
+      allow write: if isSuperAdmin();
+    }
+
     // ── /resources ─────────────────────────────────────────────────────────────
     match /resources/{resourceId} {
       allow read: if isStaff();
