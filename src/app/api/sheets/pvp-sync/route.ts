@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
     const existingSnap = await db.collection(COLLECTION).get()
     const existingIds = new Set(existingSnap.docs.map(d => d.id))
 
-    const batch = db.batch()
+    let batch = db.batch()
     let batchCount = 0
 
     for (let i = 0; i < rows.length; i++) {
@@ -171,9 +171,11 @@ export async function POST(req: NextRequest) {
       batchCount++
       isNew ? created++ : updated++
 
-      // Firestore batch hard cap is 500 writes.
+      // Firestore batch hard cap is 500 writes. A committed batch can't be
+      // reused, so start a fresh one before continuing the loop.
       if (batchCount === 450) {
         await batch.commit()
+        batch = db.batch()
         batchCount = 0
       }
     }
