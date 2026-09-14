@@ -12,6 +12,7 @@ import type { ShadowRecord } from '@/types/shadow'
 import type { RoleplayAssessment } from '@/types/roleplay'
 import { STATUS_LABELS, STATUS_COLORS } from '@/types/tracking'
 import { formatDate, formatDateEN, toDate } from '@/lib/utils/dateFormatter'
+import { parseCsvDate } from '@/lib/users/parseCsvDate'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { alertError, alertSuccess, alertWarning } from '@/lib/ui/alert'
 import { ImportAssessmentModal } from '@/components/features/ImportAssessmentModal'
@@ -1576,32 +1577,10 @@ function SortIcon({ active, dir }: { active: boolean; dir: 'asc' | 'desc' }) {
 }
 
 // ── CSV helpers ────────────────────────────────────────────────────────────────
-
-const MONTH_SHORT: Record<string, number> = {
-  Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,
-  Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12,
-}
-
-function parseCsvDate(s: string): Date | undefined {
-  if (!s) return undefined
-  // DD-Mon-YYYY e.g. "27-Aug-2018"
-  const m1 = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/)
-  if (m1) {
-    const mo = MONTH_SHORT[m1[2].charAt(0).toUpperCase() + m1[2].slice(1).toLowerCase()]
-    if (mo) {
-      const d = new Date(parseInt(m1[3]), mo - 1, parseInt(m1[1]))
-      if (!isNaN(d.getTime())) return d
-    }
-  }
-  // DD/MM/YYYY
-  const m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (m2) {
-    const d = new Date(parseInt(m2[3]), parseInt(m2[2]) - 1, parseInt(m2[1]))
-    if (!isNaN(d.getTime())) return d
-  }
-  const d = new Date(s)
-  return isNaN(d.getTime()) ? undefined : d
-}
+// parseCsvDate lives in src/lib/users/parseCsvDate.ts so it can be unit-tested
+// directly — its only coverage before that was whatever happened to reach
+// this page in a browser, which is exactly how the "Sept" 4-letter-month rows
+// went unnoticed (see that file for the full explanation).
 
 function parseCSVLine(line: string): string[] {
   const result: string[] = []
@@ -1932,26 +1911,28 @@ function AddEmployeeModal({
                 {/* Column reference — the parser reads columns by POSITION
                     only (the header row is always discarded, its text is
                     never matched), so what matters to whoever builds the file
-                    is column order, not header spelling. */}
+                    is column order, not header spelling. Header names below
+                    are the actual HR export headers, cross-checked column by
+                    column against parseCsvToProfiles' cols[N] reads. */}
                 <div className="rounded-2xl border border-gray-100 bg-gray-50/60 px-4 py-3.5">
                   <p className="text-xs font-bold text-gray-600 mb-2">โครงสร้างไฟล์ CSV ที่ต้องใช้ (16 คอลัมน์ เรียงตามลำดับ — ไม่อ้างอิงชื่อหัวตาราง)</p>
                   <ol className="text-xs text-gray-500 space-y-0.5 list-none">
-                    <li><span className="font-mono text-gray-400 mr-1.5">1.</span>(ไม่ใช้)</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">1.</span><span className="text-gray-400">ems</span> — ไม่ใช้</li>
                     <li><span className="font-mono text-gray-400 mr-1.5">2.</span><span className="font-bold text-gray-700">Status</span> — เช่น Active / Resigned / No show</li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">3.</span><span className="font-bold text-gray-700">รหัสพนักงาน</span></li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">4.</span>(ไม่ใช้)</li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">5.</span><span className="font-bold text-gray-700">ชื่อ-นามสกุล (ไทย)</span></li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">6.</span><span className="font-bold text-gray-700">ชื่อ-นามสกุล (อังกฤษ)</span></li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">7.</span><span className="font-bold text-gray-700">ชื่อเล่น</span></li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">8.</span>(ไม่ใช้)</li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">9.</span><span className="font-bold text-gray-700">แผนก</span></li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">10.</span><span className="font-bold text-gray-700">ระดับ (Job Grade)</span></li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">11.</span><span className="font-bold text-gray-700">ตำแหน่ง</span></li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">12.</span>(ไม่ใช้)</li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">13.</span><span className="font-bold text-gray-700">วันที่เริ่มงาน</span></li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">14.</span>(ไม่ใช้)</li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">15.</span><span className="font-bold text-gray-700">หัวหน้างาน (Line Manager)</span></li>
-                    <li><span className="font-mono text-gray-400 mr-1.5">16.</span><span className="font-bold text-gray-700">อีเมล</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">3.</span><span className="font-bold text-gray-700">Emp.ID</span> — รหัสพนักงาน</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">4.</span><span className="text-gray-400">Title</span> — ไม่ใช้</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">5.</span><span className="font-bold text-gray-700">Name-Surname (TH)</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">6.</span><span className="font-bold text-gray-700">Name-Surname (Eng)</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">7.</span><span className="font-bold text-gray-700">Nick name</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">8.</span><span className="text-gray-400">Tel.</span> — ไม่ใช้</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">9.</span><span className="font-bold text-gray-700">Department</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">10.</span><span className="font-bold text-gray-700">Rank</span> — ระดับ (Job Grade)</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">11.</span><span className="font-bold text-gray-700">Position</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">12.</span><span className="text-gray-400">Location</span> — ไม่ใช้</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">13.</span><span className="font-bold text-gray-700">Start Date</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">14.</span><span className="text-gray-400">Last Date</span> — ไม่ใช้</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">15.</span><span className="font-bold text-gray-700">Line Manager</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">16.</span><span className="font-bold text-gray-700">Company Email</span></li>
                   </ol>
                 </div>
 
