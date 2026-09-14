@@ -3476,36 +3476,6 @@ function withQuizLessons(topics: CourseTopic[], withPreTest: boolean): CourseTop
   return out.map((t) => ({ ...t, lessons: t.lessons.map((l, i) => ({ ...l, order: i })) }))
 }
 
-// A bucket-assessment lesson is system-managed the same way quiz lessons are:
-// one per course, pinned to the end, created and removed by its toggle rather
-// than hand-authored. It carries no assessmentId — the questions live in
-// lib/bucketAssessments and are scored by /api/personality/submit, not by the
-// Assessment grader (see types/bucketAssessment.ts for why).
-
-function withPersonalityLesson(topics: CourseTopic[], enabled: boolean): CourseTopic[] {
-  const stripped = topics.map((t) => ({
-    ...t,
-    lessons: t.lessons.filter((l) => l.type !== 'personality').map((l, i) => ({ ...l, order: i })),
-  }))
-  if (!enabled) return stripped
-
-  // Defaults to MBTI; the lesson editor lets an admin switch which
-  // questionnaire it runs.
-  const lesson: CourseLesson = {
-    id: `personality_${MBTI_DEFINITION.id}`,
-    title: MBTI_DEFINITION.title,
-    type: 'personality',
-    bucketAssessmentId: MBTI_DEFINITION.id,
-    order: 0,
-  }
-  if (stripped.length === 0) {
-    return [{ id: makeId(), title: 'แบบประเมินบุคลิกภาพ', order: 0, lessons: [{ ...lesson, order: 0 }] }]
-  }
-  const out = stripped.map((t) => ({ ...t, lessons: [...t.lessons] }))
-  out[out.length - 1].lessons.push(lesson)
-  return out.map((t) => ({ ...t, lessons: t.lessons.map((l, i) => ({ ...l, order: i })) }))
-}
-
 function QuizSettingsTab({ enabled, topics, onChangeTopics, assessments }: {
   enabled: boolean
   topics: CourseTopic[]
@@ -3915,14 +3885,8 @@ function QuizStripPreview({ lesson, role, assessments }: {
 function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments }: {
   topics: CourseTopic[]; onChange: (t: CourseTopic[]) => void; assessments: Assessment[]
 }) {
-  // Both quiz and personality lessons are system-managed — created, positioned
-  // and removed by their own sidebar switches, never hand-authored here — so
-  // neither belongs in the editable topic list.
   const topics = useMemo(
-    () => allTopics.map((t) => ({
-      ...t,
-      lessons: t.lessons.filter((l) => l.type !== 'quiz' && l.type !== 'personality'),
-    })),
+    () => allTopics.map((t) => ({ ...t, lessons: t.lessons.filter((l) => l.type !== 'quiz') })),
     [allTopics],
   )
   // Shown as read-only strips bracketing the topic list — quiz lessons are
@@ -3935,13 +3899,9 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
     const quizzes = allTopics.flatMap((t) => t.lessons).filter((l) => l.type === 'quiz')
     const pre = quizzes.find((l) => l.quizRole === 'pre_test')
     const post = quizzes.find((l) => l.quizRole !== 'pre_test')
-    // Filtered out of the editable list above, so it has to be put back or
-    // any topic edit would silently delete it.
-    const personality = allTopics.flatMap((t) => t.lessons).find((l) => l.type === 'personality')
-    if (next.length === 0 || (!pre && !post && !personality)) { onChangeAll(next); return }
+    if (next.length === 0 || (!pre && !post)) { onChangeAll(next); return }
     const out = next.map((t) => ({ ...t, lessons: [...t.lessons] }))
     if (pre) out[0].lessons = [pre, ...out[0].lessons]
-    if (personality) out[out.length - 1].lessons = [...out[out.length - 1].lessons, personality]
     if (post) out[out.length - 1].lessons = [...out[out.length - 1].lessons, post]
     onChangeAll(out.map((t) => ({ ...t, lessons: t.lessons.map((l, i) => ({ ...l, order: i })) })))
   }
@@ -4478,29 +4438,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     setTab('quiz')
   }
 
-  // Same contract as toggleQuizEnabled, for the MBTI questionnaire: the lesson
-  // is created and pinned to the end of the course by this switch, never hand
-  // authored, and turning the switch off removes it again. Derived from the
-  // topics rather than a stored flag, since one lesson is the whole state.
-  const personalityEnabled = form.topics.some((t) => t.lessons.some((l) => l.type === 'personality'))
-
-  async function togglePersonalityEnabled() {
-    if (personalityEnabled) {
-      const ok = await confirmAction({
-        title: 'ปิดใช้งานแบบประเมินบุคลิกภาพ?',
-        text: 'บทเรียนแบบประเมินบุคลิกภาพจะถูกลบออกจากหลักสูตรนี้ ผลที่ผู้เรียนเคยทำไว้จะยังคงอยู่ในโปรไฟล์ของแต่ละคน',
-        confirmText: 'ปิดใช้งาน',
-        cancelText: 'ยกเลิก',
-        danger: true,
-      })
-      if (!ok) return
-      setForm((p) => ({ ...p, topics: withPersonalityLesson(p.topics, false) }))
-      return
-    }
-    setForm((p) => ({ ...p, topics: withPersonalityLesson(p.topics, true) }))
-    setTab('lessons')
-  }
-
   function validate() {
     const e: Record<string, string> = {}
     if (!form.title.trim()) e.title = 'กรุณากรอกชื่อหลักสูตร'
@@ -4583,13 +4520,10 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     }
   }
 
-  // Counts what the Lessons tab actually lists — quiz and personality lessons
-  // are managed by their own switches and hidden there, so counting them would
-  // make the badge disagree with the list.
-  const lessonCount = form.topics.reduce(
-    (s, t) => s + t.lessons.filter((l) => l.type !== 'quiz' && l.type !== 'personality').length,
-    0,
-  )
+  // Counts what the Lessons tab actually lists — quiz lessons are managed by
+  // the แบบทดสอบ switch and hidden there, so counting them would make the
+  // badge disagree with the list.
+  const lessonCount = form.topics.reduce((s, t) => s + t.lessons.filter((l) => l.type !== 'quiz').length, 0)
   // "สรุปผลการเรียน" only makes sense once the course exists and can have real
   // training records — hide it while creating a brand-new course.
   const visibleTabs = isEdit ? BUILDER_TABS : BUILDER_TABS.filter((t) => t.id !== 'summary')
@@ -4721,16 +4655,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                       title={form.quizEnabled ? 'ปิดใช้งานแบบทดสอบทั้งคอร์ส' : 'เปิดใช้งานแบบทดสอบ'}
                       className={`shrink-0 mr-2.5 relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.quizEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
                       <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.quizEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-                    </button>
-                  )}
-                  {/* The MBTI questionnaire has no settings of its own, so its
-                      switch rides on the Lessons row — the lesson it creates is
-                      the only thing to see. */}
-                  {t.id === 'lessons' && (
-                    <button type="button" onClick={togglePersonalityEnabled}
-                      title={personalityEnabled ? 'ปิดใช้งานแบบประเมินบุคลิกภาพ' : 'เพิ่มแบบประเมินบุคลิกภาพ (MBTI)'}
-                      className={`shrink-0 mr-2.5 relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${personalityEnabled ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                      <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${personalityEnabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                     </button>
                   )}
                 </div>
