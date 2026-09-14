@@ -49,7 +49,7 @@ import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { alertError, confirmAction } from '@/lib/ui/alert'
 import { formatPersonName } from '@/lib/users/displayName'
-import { onlyActiveEmployees } from '@/lib/users/active'
+import { onlyActiveEmployees, isActiveEmployee } from '@/lib/users/active'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { BUCKET_ASSESSMENT_LIST, getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 const DEMO_MODE = getDemoMode()
@@ -4406,23 +4406,40 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     return { user: u, record, status }
   }), [summaryTargetUsers, allTrainingRecords, editCourse])
 
+  // Resigned learners stay in summaryRows on purpose (see summaryTargetUsers
+  // above — their training record must not silently disappear from the
+  // report), but a super_admin scanning "who still needs to finish this
+  // course" doesn't want them cluttering the view. Default ON: hidden until
+  // asked for, since the common case is looking at the active roster.
+  const [hideResigned, setHideResigned] = useState(true)
+  const visibleSummaryRows = useMemo(
+    () => hideResigned ? summaryRows.filter((r) => isActiveEmployee(r.user)) : summaryRows,
+    [summaryRows, hideResigned],
+  )
+  const resignedCount = useMemo(
+    () => summaryRows.filter((r) => !isActiveEmployee(r.user)).length,
+    [summaryRows],
+  )
+
   // Column sort for the summary table. 165 rows is far past what anyone can
   // scan unsorted, and this table had no sorting at all.
   const summarySort = useLearnerSort()
   const sortedSummaryRows = useMemo(
-    () => sortLearnerRows(summaryRows, summarySort.sortKey, summarySort.sortDir),
-    [summaryRows, summarySort.sortKey, summarySort.sortDir],
+    () => sortLearnerRows(visibleSummaryRows, summarySort.sortKey, summarySort.sortDir),
+    [visibleSummaryRows, summarySort.sortKey, summarySort.sortDir],
   )
 
+  // Stats reflect whatever the toggle currently shows, so the numbers above
+  // the table never disagree with the rows a super_admin is looking at.
   const summaryStats = useMemo(() => {
-    const total = summaryRows.length
-    const completed = summaryRows.filter((r) => r.status === 'completed').length
-    const inProgress = summaryRows.filter((r) => r.status === 'in_progress').length
-    const notStarted = summaryRows.filter((r) => r.status === 'not_started').length
-    const scored = summaryRows.filter((r) => r.record?.score != null)
+    const total = visibleSummaryRows.length
+    const completed = visibleSummaryRows.filter((r) => r.status === 'completed').length
+    const inProgress = visibleSummaryRows.filter((r) => r.status === 'in_progress').length
+    const notStarted = visibleSummaryRows.filter((r) => r.status === 'not_started').length
+    const scored = visibleSummaryRows.filter((r) => r.record?.score != null)
     const avgScore = scored.length > 0 ? Math.round(scored.reduce((s, r) => s + (r.record!.score ?? 0), 0) / scored.length) : null
     return { total, completed, inProgress, notStarted, avgScore }
-  }, [summaryRows])
+  }, [visibleSummaryRows])
 
   return (
     <div className="absolute inset-0 z-20 bg-white flex flex-col">
@@ -4847,7 +4864,20 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
               <div className="w-full px-6 py-8 space-y-4">
                 {/* Overview card */}
                 <div className="rounded-2xl border border-gray-100 bg-white p-5">
-                  <p className="text-sm font-bold text-gray-800 mb-4">ภาพรวมผู้เรียน</p>
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="text-sm font-bold text-gray-800">ภาพรวมผู้เรียน</p>
+                    {resignedCount > 0 && (
+                      <label className="inline-flex items-center gap-2 text-xs font-normal text-gray-500 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={hideResigned}
+                          onChange={(e) => setHideResigned(e.target.checked)}
+                          className="size-3.5 rounded border-gray-300 text-freshket-500 focus:ring-2 focus:ring-freshket-300 cursor-pointer"
+                        />
+                        ซ่อนพนักงานที่ลาออก ({resignedCount} คน)
+                      </label>
+                    )}
+                  </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <div className="rounded-xl bg-slate-50 border border-gray-100 p-3.5 text-center">
                       <p className="text-xl font-black text-gray-900">{summaryStats.total}</p>
@@ -4882,11 +4912,12 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                           {hasPreTest && <SortableTh label="Pre-Test" sortKey="preTest" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
                           {hasPostTest && <SortableTh label="Post-Test" sortKey="postTest" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
                           {!hasPreTest && !hasPostTest && <SortableTh label="คะแนน" sortKey="score" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
+                          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">สถานะพนักงาน</th>
                         </tr>
                       </thead>
                       <tbody>
                         {sortedSummaryRows.length === 0 ? (
-                          <tr><td colSpan={5 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0) + (!hasPreTest && !hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">ยังไม่มีผู้เรียนที่กำหนด</td></tr>
+                          <tr><td colSpan={6 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0) + (!hasPreTest && !hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">ยังไม่มีผู้เรียนที่กำหนด</td></tr>
                         ) : sortedSummaryRows.map(({ user: u, record, status }) => {
                           const pct = approxProgressPct(status, record)
                           return (
@@ -4923,6 +4954,15 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                                   {record?.score != null ? `${record.score}${record.passScore != null ? `/${record.passScore}` : ''}` : '—'}
                                 </td>
                               )}
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                {isActiveEmployee(u) ? (
+                                  <span className="text-xs text-gray-400">Active</span>
+                                ) : (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-600">
+                                    {u.employmentStatus}
+                                  </span>
+                                )}
+                              </td>
                             </tr>
                           )
                         })}
