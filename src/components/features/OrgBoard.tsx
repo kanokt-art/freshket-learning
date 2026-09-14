@@ -333,13 +333,12 @@ function MemberRow({
           {user.nickname && <span className="text-gray-400 font-normal ml-1">({user.nickname})</span>}
         </p>
         <div className="flex items-center gap-1 min-w-0 mt-0.5">
-          {showRoleBadges && (
-            <>
-              <RolePill role={isManager ? 'manager' : isTeamLead ? 'teamLead' : 'member'} />
-              {user.rank && (
-                <span className={`shrink-0 text-xs font-bold px-1.5 py-0.5 rounded-full ${rankColor(user.rank)}`}>{user.rank}</span>
-              )}
-            </>
+          {/* Team Lead / Manager pill only -- "Member" and the job-grade badge
+              (JG5 etc.) are noise on every single row of this list, so they
+              are dropped here specifically. The Manager/Team Lead columns
+              above the grid still show their own role + rank badges. */}
+          {showRoleBadges && (isManager || isTeamLead) && (
+            <RolePill role={isManager ? 'manager' : 'teamLead'} />
           )}
           {user.position && <p className="text-xs text-gray-400 truncate">{user.position}</p>}
         </div>
