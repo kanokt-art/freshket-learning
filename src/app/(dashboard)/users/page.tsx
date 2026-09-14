@@ -869,7 +869,6 @@ export default function UsersPage() {
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden md:table-cell">Department</th>
                   <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden md:table-cell">Position</th>
-                  <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden lg:table-cell">Rank</th>
                   <th className="text-left px-4 py-3 hidden lg:table-cell">
                     <button
                       onClick={() => handleSort('startDate')}
@@ -922,13 +921,6 @@ export default function UsersPage() {
                     {/* Position */}
                     <td className="px-4 py-3.5 text-xs text-gray-700 hidden md:table-cell max-w-40 truncate">
                       {u.position ?? <span className="text-gray-300">—</span>}
-                    </td>
-
-                    {/* Rank */}
-                    <td className="px-4 py-3.5 hidden lg:table-cell">
-                      {u.rank
-                        ? <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full whitespace-nowrap">{u.rank}</span>
-                        : <span className="text-gray-300 text-xs">—</span>}
                     </td>
 
                     {/* Start Date */}
