@@ -209,9 +209,13 @@ export async function POST(req: NextRequest) {
 
     if (!runId) runId = `run-${Date.now()}`
     const runRef = db.collection(RUNS_COLLECTION).doc(runId)
-    if (offset === 0) {
-      await runRef.set({ startedAt: Timestamp.now() })
-    }
+    // Always awaited (not only on the first chunk): this doubles as the
+    // Firestore connection warm-up. Letting the very first write of the
+    // request be one of the parallel batch commits below made every
+    // offset>0 call hang until the function timed out.
+    const tWarm = Date.now()
+    await runRef.set({ startedAt: Timestamp.now() }, { merge: true })
+    timing.warmup = Date.now() - tWarm
 
     const now = Timestamp.now()
     const chunkSkus = new Set<string>()
