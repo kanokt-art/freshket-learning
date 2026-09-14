@@ -1905,17 +1905,47 @@ function AddEmployeeModal({
           <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
             <input ref={fileRef} type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
             {!csvResult ? (
-              <div>
-                <button onClick={() => fileRef.current?.click()} className="w-full flex flex-col items-center gap-3 p-8 rounded-2xl border-2 border-dashed border-gray-200 hover:border-freshket-300 hover:bg-freshket-50/40 transition-all cursor-pointer">
-                  <svg className="size-10 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+              <div className="space-y-3">
+                {/* Rounded-rectangle card (not the old square dropzone) —
+                    horizontal layout reads faster and leaves room for the
+                    column reference below without the modal growing tall. */}
+                <button onClick={() => fileRef.current?.click()} className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 border-dashed border-gray-200 hover:border-freshket-300 hover:bg-freshket-50/40 transition-all cursor-pointer text-left">
+                  <svg className="size-8 text-gray-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12l-3-3m0 0l-3 3m3-3v6m-1.5-15H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                   </svg>
-                  <div className="text-center">
+                  <div className="min-w-0">
                     <p className="text-sm font-bold text-gray-700">คลิกเพื่อเลือกไฟล์ CSV</p>
-                    <p className="text-xs text-gray-400 mt-1">Employee Main Data Export จาก HR (16 คอลัมน์)</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Employee Main Data Export จาก HR (16 คอลัมน์)</p>
                   </div>
                 </button>
-                <p className="text-xs text-gray-400 mt-3 text-center">พนักงานที่ Status = &quot;Resigned&quot; / &quot;No show&quot; จะถูกบันทึกสถานะไว้ และซ่อนจากหน้ารายชื่อโดยอัตโนมัติ (ประวัติการอบรมยังอยู่ครบ)</p>
+
+                {/* Column reference — the parser reads columns by POSITION
+                    only (the header row is always discarded, its text is
+                    never matched), so what matters to whoever builds the file
+                    is column order, not header spelling. */}
+                <div className="rounded-2xl border border-gray-100 bg-gray-50/60 px-4 py-3.5">
+                  <p className="text-xs font-bold text-gray-600 mb-2">โครงสร้างไฟล์ CSV ที่ต้องใช้ (16 คอลัมน์ เรียงตามลำดับ — ไม่อ้างอิงชื่อหัวตาราง)</p>
+                  <ol className="text-xs text-gray-500 space-y-0.5 list-none">
+                    <li><span className="font-mono text-gray-400 mr-1.5">1.</span>(ไม่ใช้)</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">2.</span><span className="font-bold text-gray-700">Status</span> — เช่น Active / Resigned / No show</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">3.</span><span className="font-bold text-gray-700">รหัสพนักงาน</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">4.</span>(ไม่ใช้)</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">5.</span><span className="font-bold text-gray-700">ชื่อ-นามสกุล (ไทย)</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">6.</span><span className="font-bold text-gray-700">ชื่อ-นามสกุล (อังกฤษ)</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">7.</span><span className="font-bold text-gray-700">ชื่อเล่น</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">8.</span>(ไม่ใช้)</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">9.</span><span className="font-bold text-gray-700">แผนก</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">10.</span><span className="font-bold text-gray-700">ระดับ (Job Grade)</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">11.</span><span className="font-bold text-gray-700">ตำแหน่ง</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">12.</span>(ไม่ใช้)</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">13.</span><span className="font-bold text-gray-700">วันที่เริ่มงาน</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">14.</span>(ไม่ใช้)</li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">15.</span><span className="font-bold text-gray-700">หัวหน้างาน (Line Manager)</span></li>
+                    <li><span className="font-mono text-gray-400 mr-1.5">16.</span><span className="font-bold text-gray-700">อีเมล</span></li>
+                  </ol>
+                </div>
+
+                <p className="text-xs text-gray-400 text-center">พนักงานที่ Status = &quot;Resigned&quot; / &quot;No show&quot; จะถูกบันทึกสถานะไว้ และซ่อนจากหน้ารายชื่อโดยอัตโนมัติ (ประวัติการอบรมยังอยู่ครบ)</p>
               </div>
             ) : (
               <div className="space-y-4">
