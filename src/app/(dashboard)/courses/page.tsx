@@ -1410,7 +1410,20 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
   const [editingRow, setEditingRow] = useState<AssignedLearnerRow | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  const sorted = useMemo(() => sortLearnerRows(rows, sortKey, sortDir), [rows, sortKey, sortDir])
+  // Assigning a course to a department condition, or just an org
+  // reorganisation over time, both leave resigned learners sitting in this
+  // list — they're never pruned (see removeAssignedUser's comment: only a
+  // manual removal takes someone out). Default ON, matching the same toggle
+  // on the summary tab: the common case here is managing who's still active,
+  // not auditing history.
+  const [hideResigned, setHideResigned] = useState(true)
+  const resignedCount = useMemo(() => rows.filter((r) => !isActiveEmployee(r.user)).length, [rows])
+  const visibleRows = useMemo(
+    () => hideResigned ? rows.filter((r) => isActiveEmployee(r.user)) : rows,
+    [rows, hideResigned],
+  )
+
+  const sorted = useMemo(() => sortLearnerRows(visibleRows, sortKey, sortDir), [visibleRows, sortKey, sortDir])
 
   // A learner who already started the course can't be removed (the same rule
   // the per-row delete button enforces), so they are never selectable and
@@ -1468,6 +1481,21 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
 
   return (
     <>
+    {/* Hide-resigned toggle — only shown when there's actually someone
+        resigned to hide, matching the summary tab's convention. */}
+    {resignedCount > 0 && (
+      <div className="sticky top-0 z-20 flex items-center justify-end px-4 py-2 bg-white border-b border-gray-100">
+        <label className="inline-flex items-center gap-2 text-xs font-normal text-gray-500 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={hideResigned}
+            onChange={(e) => setHideResigned(e.target.checked)}
+            className="size-3.5 rounded border-gray-300 text-freshket-500 focus:ring-2 focus:ring-freshket-300 cursor-pointer"
+          />
+          ซ่อนพนักงานที่ลาออก ({resignedCount} คน)
+        </label>
+      </div>
+    )}
     {/* Bulk action bar — only occupies space once something is selected. */}
     {selected.size > 0 && (
       <div className="sticky top-0 z-20 flex items-center gap-3 px-4 py-2.5 bg-freshket-50 border-b border-freshket-200">
@@ -1515,7 +1543,14 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
       </thead>
       <tbody>
         {sorted.length === 0 ? (
-          <tr><td colSpan={8 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">{emptyText ?? 'ยังไม่มีผู้เรียนที่กำหนด'}</td></tr>
+          <tr><td colSpan={8 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">
+            {/* Distinguish "genuinely nobody assigned" from "everyone here
+                resigned and the toggle is hiding them" — otherwise this read
+                as the assignment being empty when it wasn't. */}
+            {rows.length > 0 && hideResigned
+              ? 'ผู้เรียนทั้งหมดในรายชื่อนี้ลาออกแล้ว — ปิดสวิตช์ด้านบนเพื่อดู'
+              : (emptyText ?? 'ยังไม่มีผู้เรียนที่กำหนด')}
+          </td></tr>
         ) : sorted.map((row) => {
           const { user: u, record, status, lastActivity } = row
           const pct = approxProgressPct(status, record)
