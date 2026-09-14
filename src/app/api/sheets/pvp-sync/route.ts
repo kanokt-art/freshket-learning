@@ -16,6 +16,13 @@ import { getAdminFirestore } from '@/lib/firebase/admin'
 // Auth: Apps Script cannot present a Firebase ID token, so this route is
 // gated by a shared secret (SHEETS_SYNC_SECRET) sent as `x-sync-secret`
 // instead of requireSuperAdmin.
+//
+// Scale note: the PVP tab runs ~25k rows, and this project is on Vercel's
+// Hobby plan (60s hard ceiling per function, not extendable). Batches are
+// dispatched concurrently (not awaited one-by-one) to fit that ceiling —
+// ~56 batches of 450 writes finishes well under 60s in parallel, whereas
+// sequential commits alone got close to timing out at this row count.
+export const maxDuration = 60
 
 const SPREADSHEET_ID = '1QPkrSSDREZazXBlw0ZiVsu5eCqJ-1ODcfk4U1Zzs3wQ'
 const SHEET_NAME = 'PVP'
@@ -114,23 +121,37 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const token = await getSheetsAccessToken()
+    const db = getAdminFirestore()
+
+    // Fetch the sheet and the current collection at the same time — at 25k
+    // rows, doing these sequentially alone cost a couple of seconds that
+    // matter against a 60s ceiling.
+    const [token, existingSnap] = await Promise.all([
+      getSheetsAccessToken(),
+      db.collection(COLLECTION).select().get(),
+    ])
+    const existingIds = new Set(existingSnap.docs.map(d => d.id))
     const rows = await fetchSheetRows(token)
 
-    const db = getAdminFirestore()
     const now = Timestamp.now()
-
     const seenSkus = new Set<string>()
     const problems: string[] = []
     let created = 0
     let updated = 0
     let skipped = 0
 
-    const existingSnap = await db.collection(COLLECTION).get()
-    const existingIds = new Set(existingSnap.docs.map(d => d.id))
-
+    // Build every write up front, then flush all batches concurrently
+    // instead of one commit-then-wait at a time — sequential commits at 25k
+    // rows (~56 batches) ran too close to Vercel's 60s Hobby-plan ceiling.
     let batch = db.batch()
     let batchCount = 0
+    const commits: Promise<unknown>[] = []
+    const flush = () => {
+      if (batchCount === 0) return
+      commits.push(batch.commit())
+      batch = db.batch()
+      batchCount = 0
+    }
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i]
@@ -171,28 +192,23 @@ export async function POST(req: NextRequest) {
       batchCount++
       isNew ? created++ : updated++
 
-      // Firestore batch hard cap is 500 writes. A committed batch can't be
-      // reused, so start a fresh one before continuing the loop.
-      if (batchCount === 450) {
-        await batch.commit()
-        batch = db.batch()
-        batchCount = 0
-      }
+      // Firestore batch hard cap is 500 writes.
+      if (batchCount === 450) flush()
     }
-    if (batchCount > 0) await batch.commit()
+    flush()
 
     // A SKU no longer present in the sheet is a delisted price — deleted
     // outright, since this collection mirrors a live price list.
-    let deleted = 0
     const toDelete = Array.from(existingIds).filter(id => !seenSkus.has(id))
     for (let i = 0; i < toDelete.length; i += 450) {
       const delBatch = db.batch()
       for (const id of toDelete.slice(i, i + 450)) delBatch.delete(db.collection(COLLECTION).doc(id))
-      await delBatch.commit()
-      deleted += Math.min(450, toDelete.length - i)
+      commits.push(delBatch.commit())
     }
 
-    return NextResponse.json({ created, updated, deleted, skipped, problems })
+    await Promise.all(commits)
+
+    return NextResponse.json({ created, updated, deleted: toDelete.length, skipped, problems })
   } catch (e) {
     console.error('POST /api/sheets/pvp-sync', e)
     return NextResponse.json({ error: String(e) }, { status: 500 })
