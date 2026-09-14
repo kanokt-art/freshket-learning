@@ -4992,11 +4992,32 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                           </div>
                           {condToggles[row.key] && (
                             isSaved ? (
-                              <div className="mt-2 flex items-center justify-between gap-2">
-                                <p className="text-xs text-gray-600 min-w-0 truncate">
-                                  <span className="text-gray-400">ตั้งไว้: </span>
-                                  {form.assignedDepartments.join(', ')}
-                                </p>
+                              <div className="mt-2 flex items-start justify-between gap-2">
+                                {/* One block per department (not a single
+                                    comma-joined line, which "truncate" was
+                                    cutting off silently whenever two names
+                                    didn't fit — Portfolio Management, Key
+                                    Account Management showed as just the
+                                    first). Team names underneath are what's
+                                    actually included, since a department
+                                    condition here is only ever a WHOLE
+                                    department (every team + unassigned) —
+                                    see assignedDepartments on the Course type. */}
+                                <div className="min-w-0 space-y-1.5">
+                                  {form.assignedDepartments.map((deptName) => {
+                                    const dept = deptTree.find((d) => d.name === deptName)
+                                    return (
+                                      <div key={deptName}>
+                                        <p className="text-xs font-bold text-gray-700 truncate">{deptName}</p>
+                                        {dept && dept.teams.length > 0 && (
+                                          <p className="text-xs text-gray-400 truncate">
+                                            {dept.teams.map((t) => t.name).join(', ')}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
                                 <button type="button" onClick={() => setOpenPanel(row.key)}
                                   title={`แก้ไข${row.label}`}
                                   className="shrink-0 size-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-freshket-500 hover:text-white hover:border-freshket-500 transition-all">
