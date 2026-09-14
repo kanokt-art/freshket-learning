@@ -1781,6 +1781,7 @@ function AddEmployeeModal({
 }) {
   const [tab, setTab] = useState<'manual' | 'csv'>('manual')
   const fileRef = useRef<HTMLInputElement>(null)
+  const missingCardRef = useRef<HTMLDivElement>(null)
   const [form, setForm] = useState({
     displayName: '', nickname: '', employeeId: '', email: '',
     department: '', position: '', role: 'sale' as UserRole, startDate: '',
@@ -1971,7 +1972,7 @@ function AddEmployeeModal({
                   </div>
                 )}
                 {csvResult.missing.length > 0 && (
-                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl">
+                  <div ref={missingCardRef} className="p-3 bg-rose-50 border border-rose-200 rounded-xl">
                     <p className="text-xs font-bold text-rose-700 mb-1.5">
                       พบพนักงานหายไป {csvResult.missing.length} คน (มีในระบบ แต่ไม่มีในไฟล์นี้)
                     </p>
@@ -2037,29 +2038,58 @@ function AddEmployeeModal({
           </div>
         )}
 
-        <div className="px-6 py-4 border-t border-gray-100 flex gap-2">
-          <button onClick={onClose} className="flex-1 px-4 py-2 text-sm font-bold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all">
-            ยกเลิก
-          </button>
-          {tab === 'manual' ? (
-            <button onClick={handleManualSubmit} disabled={!form.displayName.trim()} className="flex-1 px-4 py-2 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
-              เพิ่มพนักงาน
-            </button>
-          ) : (
+        <div className="px-6 py-4 border-t border-gray-100">
+          {/* Reason the import button is locked, shown right next to it. The
+              checkbox that unlocks it sits above the missing-employees table,
+              which can be scrolled out of view by the time someone reaches
+              the footer — so a disabled button with no visible explanation
+              here just looked broken ("ทำไมกดไม่ได้"). */}
+          {tab === 'csv' && csvResult && csvResult.missing.length > 0 && !confirmMissing && (
             <button
+              type="button"
               onClick={() => {
-                if (!csvResult?.valid.length) return
-                const toImport = csvResult.missing.length > 0 && confirmMissing
-                  ? [...csvResult.valid, ...csvResult.missing]
-                  : csvResult.valid
-                onImport(toImport, csvResult.updated.length, csvResult.duplicates.length, csvResult.hidden, csvResult.missing.length)
+                const el = missingCardRef.current
+                if (!el) return
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                // Brief highlight so it's obvious what the click jumped to,
+                // since the card itself (rose background) doesn't otherwise
+                // change when scrolled to.
+                el.classList.add('ring-2', 'ring-rose-400')
+                setTimeout(() => el.classList.remove('ring-2', 'ring-rose-400'), 1200)
               }}
-              disabled={!csvResult || csvResult.valid.length === 0 || (csvResult.missing.length > 0 && !confirmMissing)}
-              className="flex-1 px-4 py-2 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="w-full text-xs text-rose-600 font-bold mb-2 flex items-center gap-1.5 hover:text-rose-700 transition-colors text-left"
             >
-              นำเข้า {csvResult?.valid.length ?? 0} คน{csvResult && csvResult.missing.length > 0 ? ` + ปิดใช้งาน ${csvResult.missing.length} คน` : ''}
+              <svg className="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+              <span className="underline">เลื่อนขึ้นไปติ๊ก &quot;ยืนยันว่าพนักงานเหล่านี้ลาออก/พ้นสภาพแล้ว&quot; ก่อน จึงจะกดนำเข้าได้</span>
             </button>
           )}
+          <div className="flex gap-2">
+            <button onClick={onClose} className="flex-1 px-4 py-2 text-sm font-bold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all">
+              ยกเลิก
+            </button>
+            {tab === 'manual' ? (
+              <button onClick={handleManualSubmit} disabled={!form.displayName.trim()} className="flex-1 px-4 py-2 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                เพิ่มพนักงาน
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  if (!csvResult?.valid.length) return
+                  const toImport = csvResult.missing.length > 0 && confirmMissing
+                    ? [...csvResult.valid, ...csvResult.missing]
+                    : csvResult.valid
+                  onImport(toImport, csvResult.updated.length, csvResult.duplicates.length, csvResult.hidden, csvResult.missing.length)
+                }}
+                disabled={!csvResult || csvResult.valid.length === 0 || (csvResult.missing.length > 0 && !confirmMissing)}
+                title={csvResult && csvResult.missing.length > 0 && !confirmMissing ? 'ต้องติ๊กยืนยันพนักงานที่หายไปก่อน' : undefined}
+                className="flex-1 px-4 py-2 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                นำเข้า {csvResult?.valid.length ?? 0} คน{csvResult && csvResult.missing.length > 0 ? ` + ปิดใช้งาน ${csvResult.missing.length} คน` : ''}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
