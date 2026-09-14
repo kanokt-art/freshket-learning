@@ -49,6 +49,7 @@ import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { alertError, confirmAction } from '@/lib/ui/alert'
 import { formatPersonName } from '@/lib/users/displayName'
+import { onlyActiveEmployees } from '@/lib/users/active'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { BUCKET_ASSESSMENT_LIST, getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 const DEMO_MODE = getDemoMode()
@@ -1965,14 +1966,8 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
     setDraft((p) => { const n = new Set(p); n.has(uid) ? n.delete(uid) : n.add(uid); return n })
   }
 
-  // Same "only the literal 'Active' counts as inactive" rule as the Employees
-  // list (src/app/(dashboard)/users/page.tsx) — a resigned person shouldn't be
-  // assignable to a new course, but an undefined status predates the HR sync
-  // and is still treated as active.
-  const activeUsers = useMemo(
-    () => users.filter((u) => !u.employmentStatus || u.employmentStatus === 'Active'),
-    [users],
-  )
+  // Same rule as every other picker — see src/lib/users/active.ts.
+  const activeUsers = useMemo(() => onlyActiveEmployees(users), [users])
 
   const departments = useMemo(() => Array.from(new Set(activeUsers.map((u) => u.department).filter(Boolean))).sort() as string[], [activeUsers])
   const positions = useMemo(() => Array.from(new Set(activeUsers.map((u) => u.position).filter(Boolean))).sort() as string[], [activeUsers])
@@ -4156,30 +4151,42 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   }, [allTrainingRecords, editCourse?.id])
 
   // ── Learner assignment condition derivations ──
+  // Every picker below builds its groups from THIS list, not from allUsers.
+  // The department/team picker counted resigned staff: "ยังไม่มีทีม" under
+  // Sales Management showed 74 people when only 2 still worked here — the
+  // other 72 had left (Resigned / No show). Assigning a course to someone who
+  // has resigned is never intended, so they are excluded at the source rather
+  // than in each of the four pickers.
+  //
+  // Note this filters on employment status, NOT on whether someone has a team:
+  // 210 of the 285 active employees have no teamId, so requiring a team would
+  // hide most of the company from the picker.
+  const assignableUsers = useMemo(() => onlyActiveEmployees(allUsers), [allUsers])
+
   const deptTree: DeptTreeNode[] = useMemo(() => departments.map((dept) => ({
     id: dept.id, name: dept.name,
     teams: teams.filter((t) => t.departmentId === dept.id).map((t) => ({
-      id: t.id, name: t.name, memberIds: allUsers.filter((u) => u.teamId === t.id).map((u) => u.uid),
+      id: t.id, name: t.name, memberIds: assignableUsers.filter((u) => u.teamId === t.id).map((u) => u.uid),
     })),
-    unassignedIds: allUsers.filter((u) => u.department === dept.name && !u.teamId).map((u) => u.uid),
-  })), [departments, teams, allUsers])
+    unassignedIds: assignableUsers.filter((u) => u.department === dept.name && !u.teamId).map((u) => u.uid),
+  })), [departments, teams, assignableUsers])
 
   const rankGroups = useMemo(() => {
     const map = new Map<string, string[]>()
-    allUsers.forEach((u) => { if (u.rank) map.set(u.rank, [...(map.get(u.rank) ?? []), u.uid]) })
+    assignableUsers.forEach((u) => { if (u.rank) map.set(u.rank, [...(map.get(u.rank) ?? []), u.uid]) })
     return Array.from(map.entries()).map(([label, userIds]) => ({ key: label, label, userIds }))
-  }, [allUsers])
+  }, [assignableUsers])
 
   const positionGroups = useMemo(() => {
     const map = new Map<string, string[]>()
-    allUsers.forEach((u) => { if (u.position) map.set(u.position, [...(map.get(u.position) ?? []), u.uid]) })
+    assignableUsers.forEach((u) => { if (u.position) map.set(u.position, [...(map.get(u.position) ?? []), u.uid]) })
     return Array.from(map.entries()).map(([label, userIds]) => ({ key: label, label, userIds }))
-  }, [allUsers])
+  }, [assignableUsers])
 
   const tenureGroups = useMemo(() => TENURE_BUCKETS.map((b) => ({
     key: b.key, label: b.label,
-    userIds: allUsers.filter((u) => { const y = tenureYears(u.startDate); return y !== null && b.test(y) }).map((u) => u.uid),
-  })), [allUsers])
+    userIds: assignableUsers.filter((u) => { const y = tenureYears(u.startDate); return y !== null && b.test(y) }).map((u) => u.uid),
+  })), [assignableUsers])
 
   const [tab, setTab] = useState<BuilderTab>('details')
   const [form, setForm] = useState<FormState>(editCourse ? formFromCourse(editCourse) : {
@@ -4385,8 +4392,13 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
       const ids = new Set(form.assignedUserIds)
       return allUsers.filter((u) => ids.has(u.uid))
     }
-    return allUsers.filter((u) => form.targetRoles.includes(u.role))
-  }, [editCourse, form.assignedUserIds, form.targetRoles, allUsers])
+    // Only the role-based fallback is filtered. An explicitly assigned learner
+    // stays in the report even after they resign — they may have a training
+    // record, and dropping them would silently remove completed work from the
+    // summary. A role-derived audience, by contrast, is "whoever holds this
+    // role today", which should not include people who have left.
+    return assignableUsers.filter((u) => form.targetRoles.includes(u.role))
+  }, [editCourse, form.assignedUserIds, form.targetRoles, allUsers, assignableUsers])
 
   const summaryRows = useMemo(() => summaryTargetUsers.map((u) => {
     const record = editCourse ? allTrainingRecords.find((r) => r.courseId === editCourse.id && r.userId === u.uid) : undefined
