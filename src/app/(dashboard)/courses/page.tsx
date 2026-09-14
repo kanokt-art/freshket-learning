@@ -48,6 +48,7 @@ import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { alertError, confirmAction } from '@/lib/ui/alert'
+import { formatPersonName } from '@/lib/users/displayName'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { BUCKET_ASSESSMENT_LIST, getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 const DEMO_MODE = getDemoMode()
@@ -1263,19 +1264,77 @@ function computeAssignedRows(assignedUserIds: string[], allUsers: UserProfile[],
     })
 }
 
-type AssignedSortKey = 'name' | 'department' | 'startDate' | 'status'
+// Every column both learner tables can sort by. The assigned-learners table
+// and the 165-row summary table share this so a column added to one is
+// sortable in the other without a second comparator.
+type AssignedSortKey =
+  | 'name' | 'department' | 'startDate' | 'status'
+  | 'position' | 'tenure' | 'progress' | 'score' | 'lastActivity'
+  | 'preTest' | 'postTest'
 
-function sortAssignedRows(rows: AssignedLearnerRow[], sortKey: AssignedSortKey | null, sortDir: 'asc' | 'desc'): AssignedLearnerRow[] {
+/** Rows carry at least a user and a status; the record is optional. */
+type SortableLearnerRow = {
+  user: UserProfile
+  record?: TrainingRecord
+  status: TrainingStatus
+  lastActivity?: Date
+}
+
+function sortLearnerRows<T extends SortableLearnerRow>(
+  rows: T[],
+  sortKey: AssignedSortKey | null,
+  sortDir: 'asc' | 'desc',
+): T[] {
   if (!sortKey) return rows
-  const sorted = [...rows].sort((a, b) => {
-    let cmp = 0
-    if (sortKey === 'name') cmp = a.user.displayName.localeCompare(b.user.displayName)
-    else if (sortKey === 'department') cmp = (a.user.department ?? '').localeCompare(b.user.department ?? '')
-    else if (sortKey === 'startDate') cmp = (a.record?.startedAt?.getTime() ?? 0) - (b.record?.startedAt?.getTime() ?? 0)
-    else cmp = a.status.localeCompare(b.status)
+  // Blanks sort last in BOTH directions. A learner with no score is not
+  // "lower than zero" — pushing them to the end keeps the first screen full of
+  // the rows that actually carry data, which is what someone sorting a
+  // 165-row table is looking for.
+  const nullsLast = (cmp: number, aMissing: boolean, bMissing: boolean) => {
+    if (aMissing && bMissing) return 0
+    if (aMissing) return 1
+    if (bMissing) return -1
     return sortDir === 'asc' ? cmp : -cmp
+  }
+  const byNumber = (a?: number, b?: number) =>
+    nullsLast((a ?? 0) - (b ?? 0), a == null, b == null)
+  const byDate = (a?: Date, b?: Date) =>
+    nullsLast((a?.getTime() ?? 0) - (b?.getTime() ?? 0), a == null, b == null)
+  const byText = (a?: string, b?: string) =>
+    nullsLast((a ?? '').localeCompare(b ?? '', 'th'), !a, !b)
+
+  return [...rows].sort((a, b) => {
+    switch (sortKey) {
+      case 'name':         return byText(a.user.displayName, b.user.displayName)
+      case 'department':   return byText(a.user.department, b.user.department)
+      case 'position':     return byText(a.user.position, b.user.position)
+      case 'status':       return byText(a.status, b.status)
+      case 'startDate':    return byDate(a.record?.startedAt, b.record?.startedAt)
+      case 'lastActivity': return byDate(a.lastActivity, b.lastActivity)
+      // Longest tenure first when descending: an earlier start date means more
+      // time served, so this sorts on the date itself.
+      case 'tenure':       return byDate(a.user.startDate, b.user.startDate)
+      case 'progress':     return byNumber(
+        approxProgressPct(a.status, a.record),
+        approxProgressPct(b.status, b.record),
+      )
+      case 'score':        return byNumber(a.record?.score, b.record?.score)
+      case 'preTest':      return byNumber(a.record?.preTestScore, b.record?.preTestScore)
+      case 'postTest':     return byNumber(a.record?.postTestScore, b.record?.postTestScore)
+      default:             return 0
+    }
   })
-  return sorted
+}
+
+/** Column-sort state shared by both learner tables. */
+function useLearnerSort() {
+  const [sortKey, setSortKey] = useState<AssignedSortKey | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  function handleSort(key: AssignedSortKey) {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(key); setSortDir('asc') }
+  }
+  return { sortKey, sortDir, handleSort }
 }
 
 function SortableTh({ label, sortKey, activeSortKey, sortDir, onSort }: {
@@ -1297,20 +1356,68 @@ function SortableTh({ label, sortKey, activeSortKey, sortDir, onSort }: {
   )
 }
 
-function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, emptyText, courseId, courseTitle, hasPreTest, hasPostTest, isSuperAdmin }: {
-  rows: AssignedLearnerRow[]; enrolledUserIds: Set<string>; onRemove: (uid: string) => void; emptyText?: string
+function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, emptyText, courseId, courseTitle, hasPreTest, hasPostTest, isSuperAdmin }: {
+  rows: AssignedLearnerRow[]; enrolledUserIds: Set<string>; onRemove: (uid: string) => void
+  /** Bulk removal. Falls back to one onRemove per uid when not supplied. */
+  onRemoveMany?: (uids: string[]) => void
+  emptyText?: string
   courseId?: string; courseTitle?: string; hasPreTest?: boolean; hasPostTest?: boolean; isSuperAdmin?: boolean
 }) {
-  const [sortKey, setSortKey] = useState<AssignedSortKey | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const { sortKey, sortDir, handleSort } = useLearnerSort()
   const [editingRow, setEditingRow] = useState<AssignedLearnerRow | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  function handleSort(key: AssignedSortKey) {
-    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    else { setSortKey(key); setSortDir('asc') }
+  const sorted = useMemo(() => sortLearnerRows(rows, sortKey, sortDir), [rows, sortKey, sortDir])
+
+  // A learner who already started the course can't be removed (the same rule
+  // the per-row delete button enforces), so they are never selectable and
+  // never counted by "select all".
+  const selectableUids = useMemo(
+    () => sorted.filter((r) => !enrolledUserIds.has(r.user.uid)).map((r) => r.user.uid),
+    [sorted, enrolledUserIds],
+  )
+
+  // Drop selections whose row disappeared (removed, or filtered out upstream),
+  // otherwise the count could exceed what's on screen.
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev
+      const valid = new Set(selectableUids)
+      const next = new Set(Array.from(prev).filter((uid) => valid.has(uid)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [selectableUids])
+
+  const allSelected = selectableUids.length > 0 && selected.size === selectableUids.length
+  const someSelected = selected.size > 0 && !allSelected
+
+  function toggleOne(uid: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(uid)) next.delete(uid)
+      else next.add(uid)
+      return next
+    })
   }
 
-  const sorted = useMemo(() => sortAssignedRows(rows, sortKey, sortDir), [rows, sortKey, sortDir])
+  function toggleAll() {
+    setSelected((prev) => (prev.size === selectableUids.length ? new Set() : new Set(selectableUids)))
+  }
+
+  async function handleRemoveSelected() {
+    const uids = Array.from(selected)
+    if (uids.length === 0) return
+    const ok = await confirmAction({
+      title: `ลบผู้เรียน ${uids.length} คน?`,
+      text: 'ผู้เรียนที่เลือกจะถูกนำออกจากรายชื่อของหลักสูตรนี้',
+      confirmText: 'ลบออก',
+      danger: true,
+    })
+    if (!ok) return
+    if (onRemoveMany) onRemoveMany(uids)
+    else uids.forEach(onRemove)
+    setSelected(new Set())
+  }
   // Editing needs a real courseId to write trainingRecords/{uid}_{courseId} —
   // a brand-new, unsaved course has none yet, so the edit affordance is
   // simply unavailable until the course exists.
@@ -1318,30 +1425,72 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, emptyText, cou
 
   return (
     <>
+    {/* Bulk action bar — only occupies space once something is selected. */}
+    {selected.size > 0 && (
+      <div className="sticky top-0 z-20 flex items-center gap-3 px-4 py-2.5 bg-freshket-50 border-b border-freshket-200">
+        <span className="text-xs font-bold text-freshket-700">เลือกแล้ว {selected.size} คน</span>
+        <button type="button" onClick={() => setSelected(new Set())}
+          className="text-xs font-normal text-gray-500 hover:text-gray-700 transition-colors">
+          ล้างการเลือก
+        </button>
+        <button type="button" onClick={() => { void handleRemoveSelected() }}
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold transition-colors">
+          <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+          </svg>
+          ลบออก {selected.size} คน
+        </button>
+      </div>
+    )}
     <table className="w-full text-sm">
       <thead>
         <tr className="border-b border-gray-100 sticky top-0 bg-white">
+          <th className="px-4 py-3 w-10">
+            <input
+              type="checkbox"
+              aria-label="เลือกทั้งหมด"
+              checked={allSelected}
+              // Partial selection reads as a dash rather than a tick — a
+              // checked box here would claim every row is selected.
+              ref={(el) => { if (el) el.indeterminate = someSelected }}
+              onChange={toggleAll}
+              disabled={selectableUids.length === 0}
+              className="size-4 rounded border-gray-300 text-freshket-500 focus:ring-2 focus:ring-freshket-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+            />
+          </th>
           <SortableTh label="รายชื่อ" sortKey="name" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <SortableTh label="สังกัด" sortKey="department" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <SortableTh label="วันที่เริ่มเรียน" sortKey="startDate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">เรียนล่าสุด</th>
-          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ความคืบหน้า</th>
-          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ผลการทดสอบ</th>
-          {hasPreTest && <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Pre-Test</th>}
-          {hasPostTest && <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Post-Test</th>}
+          <SortableTh label="เรียนล่าสุด" sortKey="lastActivity" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <SortableTh label="ความคืบหน้า" sortKey="progress" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <SortableTh label="ผลการทดสอบ" sortKey="score" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          {hasPreTest && <SortableTh label="Pre-Test" sortKey="preTest" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />}
+          {hasPostTest && <SortableTh label="Post-Test" sortKey="postTest" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />}
           <SortableTh label="สถานะ" sortKey="status" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <th className="px-4 py-3" />
         </tr>
       </thead>
       <tbody>
         {sorted.length === 0 ? (
-          <tr><td colSpan={7 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">{emptyText ?? 'ยังไม่มีผู้เรียนที่กำหนด'}</td></tr>
+          <tr><td colSpan={8 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">{emptyText ?? 'ยังไม่มีผู้เรียนที่กำหนด'}</td></tr>
         ) : sorted.map((row) => {
           const { user: u, record, status, lastActivity } = row
           const pct = approxProgressPct(status, record)
           const isEnrolled = enrolledUserIds.has(u.uid)
+          const isSelected = selected.has(u.uid)
           return (
-            <tr key={u.uid} className="group border-b border-gray-50 last:border-0 hover:bg-gray-50/60 transition-colors">
+            <tr key={u.uid} className={`group border-b border-gray-50 last:border-0 transition-colors ${isSelected ? 'bg-freshket-50/60' : 'hover:bg-gray-50/60'}`}>
+              <td className="px-4 py-3">
+                <input
+                  type="checkbox"
+                  aria-label={`เลือก ${u.displayName}`}
+                  checked={isSelected}
+                  disabled={isEnrolled}
+                  title={isEnrolled ? 'ผู้เรียนที่เริ่มเรียนแล้วไม่สามารถลบออกได้' : undefined}
+                  onChange={() => toggleOne(u.uid)}
+                  className="size-4 rounded border-gray-300 text-freshket-500 focus:ring-2 focus:ring-freshket-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                />
+              </td>
               <td className="px-4 py-3">
                 <div className="flex items-center gap-2.5">
                   <div className="size-8 rounded-full bg-gray-100 shrink-0 overflow-hidden flex items-center justify-center">
@@ -1350,7 +1499,7 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, emptyText, cou
                       : <span className="text-xs font-bold text-gray-500">{u.displayName[0]}</span>}
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-bold text-gray-800 truncate">{u.displayName}</p>
+                    <p className="text-xs font-bold text-gray-800 truncate">{formatPersonName(u)}</p>
                     <p className="text-xs text-gray-400 truncate">{u.position ?? '—'}</p>
                   </div>
                 </div>
@@ -1419,10 +1568,10 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, emptyText, cou
   )
 }
 
-function AssignedLearnersTableModal({ assignedUserIds, allUsers, allTrainingRecords, enrolledUserIds, courseId, courseTitle, hasPreTest, hasPostTest, isSuperAdmin, onRemove, onClose }: {
+function AssignedLearnersTableModal({ assignedUserIds, allUsers, allTrainingRecords, enrolledUserIds, courseId, courseTitle, hasPreTest, hasPostTest, isSuperAdmin, onRemove, onRemoveMany, onClose }: {
   assignedUserIds: string[]; allUsers: UserProfile[]; allTrainingRecords: TrainingRecord[]; enrolledUserIds: Set<string>
   courseId?: string; courseTitle?: string; hasPreTest?: boolean; hasPostTest?: boolean; isSuperAdmin?: boolean
-  onRemove: (uid: string) => void; onClose: () => void
+  onRemove: (uid: string) => void; onRemoveMany?: (uids: string[]) => void; onClose: () => void
 }) {
   const rows = useMemo(() => computeAssignedRows(assignedUserIds, allUsers, allTrainingRecords, courseId), [assignedUserIds, allUsers, allTrainingRecords, courseId])
 
@@ -1442,7 +1591,7 @@ function AssignedLearnersTableModal({ assignedUserIds, allUsers, allTrainingReco
           </button>
         </div>
         <div className="flex-1 min-h-0 overflow-auto">
-          <AssignedLearnersTable rows={rows} enrolledUserIds={enrolledUserIds} onRemove={onRemove}
+          <AssignedLearnersTable rows={rows} enrolledUserIds={enrolledUserIds} onRemove={onRemove} onRemoveMany={onRemoveMany}
             courseId={courseId} courseTitle={courseTitle} hasPreTest={hasPreTest} hasPostTest={hasPostTest} isSuperAdmin={isSuperAdmin} />
         </div>
       </div>
@@ -1943,10 +2092,7 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
                           ? <img src={u.photoURL} alt={u.displayName} className="size-full object-cover" />
                           : <span className="text-xs font-bold text-gray-500">{u.displayName[0]}</span>}
                       </div>
-                      <p className="text-xs font-bold text-gray-800 truncate">
-                        {u.displayNameEN || u.displayName}
-                        {u.nickname && <span className="text-gray-400 font-normal"> ({u.nickname})</span>}
-                      </p>
+                      <p className="text-xs font-bold text-gray-800 truncate">{formatPersonName(u)}</p>
                     </div>
                   </td>
                   <td className="px-2 py-2.5 text-xs text-gray-500 whitespace-nowrap font-mono">{u.employeeId ?? '—'}</td>
@@ -2596,8 +2742,7 @@ function CourseAdminPicker({ users, selectedIds, onChange }: {
 // IndividualAssignmentPanel's roster, since Thai display names aren't useful
 // for matching against the HR system / English-language reporting.
 function formatInstructorName(u: UserProfile): string {
-  const full = (u.displayNameEN ?? '').trim() || u.displayName || u.email
-  return u.nickname ? `${full} (${u.nickname})` : full
+  return formatPersonName(u)
 }
 
 // Searchable single-select for "ผู้สอน" — a native <select> can't show the
@@ -4083,6 +4228,14 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     setForm((p) => ({ ...p, assignedUserIds: p.assignedUserIds.filter((id) => id !== uid) }))
   }
 
+  // One state update for the whole selection. Calling removeAssignedUser in a
+  // loop would queue N updates that each rebuild the array from the previous
+  // one — correct, but O(n²) over a 165-learner list.
+  function removeAssignedUsers(uids: string[]) {
+    const drop = new Set(uids)
+    setForm((p) => ({ ...p, assignedUserIds: p.assignedUserIds.filter((id) => !drop.has(id)) }))
+  }
+
   // Master switch for the course's quiz. Quiz lessons are system-managed: they
   // are not authored in the Lessons tab, they are created by this switch and
   // pinned to the ends of the course — the pre-test first, the post-test last
@@ -4240,6 +4393,14 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     const status: TrainingStatus = record?.status ?? 'not_started'
     return { user: u, record, status }
   }), [summaryTargetUsers, allTrainingRecords, editCourse])
+
+  // Column sort for the summary table. 165 rows is far past what anyone can
+  // scan unsorted, and this table had no sorting at all.
+  const summarySort = useLearnerSort()
+  const sortedSummaryRows = useMemo(
+    () => sortLearnerRows(summaryRows, summarySort.sortKey, summarySort.sortDir),
+    [summaryRows, summarySort.sortKey, summarySort.sortDir],
+  )
 
   const summaryStats = useMemo(() => {
     const total = summaryRows.length
@@ -4656,6 +4817,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                         rows={assignedRows}
                         enrolledUserIds={enrolledUserIds}
                         onRemove={removeAssignedUser}
+                        onRemoveMany={removeAssignedUsers}
                         courseId={editCourse?.id}
                         courseTitle={form.title}
                         hasPreTest={hasPreTest}
@@ -4700,20 +4862,20 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-gray-100 sticky top-0 bg-white">
-                          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ชื่อ</th>
-                          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ตำแหน่ง</th>
-                          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">แผนก</th>
-                          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">อายุงาน</th>
-                          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ความคืบหน้า</th>
-                          {hasPreTest && <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Pre-Test</th>}
-                          {hasPostTest && <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Post-Test</th>}
-                          {!hasPreTest && !hasPostTest && <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">คะแนน</th>}
+                          <SortableTh label="ชื่อ" sortKey="name" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
+                          <SortableTh label="ตำแหน่ง" sortKey="position" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
+                          <SortableTh label="แผนก" sortKey="department" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
+                          <SortableTh label="อายุงาน" sortKey="tenure" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
+                          <SortableTh label="ความคืบหน้า" sortKey="progress" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
+                          {hasPreTest && <SortableTh label="Pre-Test" sortKey="preTest" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
+                          {hasPostTest && <SortableTh label="Post-Test" sortKey="postTest" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
+                          {!hasPreTest && !hasPostTest && <SortableTh label="คะแนน" sortKey="score" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
                         </tr>
                       </thead>
                       <tbody>
-                        {summaryRows.length === 0 ? (
+                        {sortedSummaryRows.length === 0 ? (
                           <tr><td colSpan={5 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0) + (!hasPreTest && !hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">ยังไม่มีผู้เรียนที่กำหนด</td></tr>
-                        ) : summaryRows.map(({ user: u, record, status }) => {
+                        ) : sortedSummaryRows.map(({ user: u, record, status }) => {
                           const pct = approxProgressPct(status, record)
                           return (
                             <tr key={u.uid} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60 transition-colors">
@@ -4724,7 +4886,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                                       ? <img src={u.photoURL} alt={u.displayName} className="size-full object-cover" />
                                       : <span className="text-xs font-bold text-gray-500">{u.displayName[0]}</span>}
                                   </div>
-                                  <p className="text-xs font-bold text-gray-800 truncate">{u.displayName}</p>
+                                  <p className="text-xs font-bold text-gray-800 truncate">{formatPersonName(u)}</p>
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{u.position ?? '—'}</td>
@@ -4851,6 +5013,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
           hasPostTest={hasPostTest}
           isSuperAdmin={isSuperAdmin}
           onRemove={removeAssignedUser}
+          onRemoveMany={removeAssignedUsers}
           onClose={() => setShowAssignedTable(false)}
         />
       )}
