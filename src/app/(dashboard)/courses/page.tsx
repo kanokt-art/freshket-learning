@@ -1965,7 +1965,7 @@ function PanelFooter({ selectedCount, onCancel, onConfirm }: { selectedCount: nu
         </button>
         <button type="button" onClick={onConfirm}
           className="px-5 py-2 rounded-xl bg-freshket-500 text-white text-xs font-bold hover:bg-freshket-600 transition-all">
-          เพิ่ม
+          บันทึก
         </button>
       </div>
     </>
@@ -4280,8 +4280,23 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
 
   // ── Learner assignment UI state ──
   const [openPanel, setOpenPanel] = useState<'individual' | 'department' | 'rank' | 'position' | 'tenure' | null>(null)
-  const [condMasterOn, setCondMasterOn] = useState(false)
-  const [condToggles, setCondToggles] = useState({ department: false, rank: false, position: false, tenure: false })
+  // Both toggles used to always start at false, forgetting on every reopen
+  // that a course already had a condition configured (assignedDepartments was
+  // the only thing actually saved — the toggle itself had no memory). Seed
+  // from what's actually persisted so re-opening an existing course shows its
+  // real state instead of looking unconfigured.
+  const hasSavedDeptCondition = (editCourse?.assignedDepartments?.length ?? 0) > 0
+  const [condMasterOn, setCondMasterOn] = useState(hasSavedDeptCondition)
+  const [condToggles, setCondToggles] = useState({
+    department: hasSavedDeptCondition, rank: false, position: false, tenure: false,
+  })
+  // Only the department condition has a picker that reports back WHICH values
+  // were chosen (assignedDepartments) — rank/position/tenure still resolve
+  // straight to a uid snapshot with no persisted "what was picked" of their
+  // own, so they can't yet show a saved summary or an edit-vs-standby state.
+  // Tracks form.assignedDepartments (not the editCourse snapshot above) so it
+  // updates the moment a picker confirms, in the same render pass.
+  const deptConditionSaved = form.assignedDepartments.length > 0
   const [showConfirm, setShowConfirm] = useState(false)
   const [showAssignedTable, setShowAssignedTable] = useState(false)
   const [showLessonPreview, setShowLessonPreview] = useState(false)
@@ -4890,26 +4905,57 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                         { key: 'rank' as const, label: 'ระดับตำแหน่ง' },
                         { key: 'position' as const, label: 'ตำแหน่ง' },
                         { key: 'tenure' as const, label: 'อายุงาน' },
-                      ]).map((row) => (
+                      ]).map((row) => {
+                        // Only "สังกัด" has a saved-condition summary today — see
+                        // deptConditionSaved above for why rank/position/tenure
+                        // don't yet.
+                        const isSaved = row.key === 'department' && deptConditionSaved
+                        return (
                         <div key={row.key} className="px-4 py-3">
                           <div className="flex items-center justify-between">
-                            <span className="text-sm text-gray-700 font-normal">{row.label}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm text-gray-700 font-normal">{row.label}</span>
+                              {condToggles[row.key] && (
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                  isSaved ? 'bg-freshket-100 text-freshket-700' : 'bg-amber-100 text-amber-700'
+                                }`}>
+                                  {isSaved ? 'บันทึกแล้ว' : 'Standby — ยังไม่ได้ตั้งค่า'}
+                                </span>
+                              )}
+                            </div>
                             <button type="button" onClick={() => setCondToggles((p) => ({ ...p, [row.key]: !p[row.key] }))}
                               className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${condToggles[row.key] ? 'bg-freshket-500' : 'bg-gray-200'}`}>
                               <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${condToggles[row.key] ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                             </button>
                           </div>
                           {condToggles[row.key] && (
-                            <button type="button" onClick={() => setOpenPanel(row.key)}
-                              className="mt-2 flex items-center gap-1 text-xs font-bold text-freshket-600 hover:text-freshket-700 transition-colors">
-                              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                              </svg>
-                              เลือก{row.label}
-                            </button>
+                            isSaved ? (
+                              <div className="mt-2 flex items-center justify-between gap-2">
+                                <p className="text-xs text-gray-600 min-w-0 truncate">
+                                  <span className="text-gray-400">ตั้งไว้: </span>
+                                  {form.assignedDepartments.join(', ')}
+                                </p>
+                                <button type="button" onClick={() => setOpenPanel(row.key)}
+                                  title={`แก้ไข${row.label}`}
+                                  className="shrink-0 size-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-freshket-500 hover:text-white hover:border-freshket-500 transition-all">
+                                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                                  </svg>
+                                </button>
+                              </div>
+                            ) : (
+                              <button type="button" onClick={() => setOpenPanel(row.key)}
+                                className="mt-2 flex items-center gap-1 text-xs font-bold text-freshket-600 hover:text-freshket-700 transition-colors">
+                                <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                                </svg>
+                                เลือก{row.label}
+                              </button>
+                            )
                           )}
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>
