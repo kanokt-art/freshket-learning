@@ -995,10 +995,10 @@ export function usePvpPricesByCategory(category: string | null): UseResult<PvpPr
 // The category list + row count, written by the CSV importer. One document
 // read, versus the ~20k it would take to derive the same list from the price
 // rows themselves.
-export function usePvpSummary(): UseDocResult<PvpSummary> {
+export function usePvpSummary(enabled = true): UseDocResult<PvpSummary> {
   return useFirestoreDoc<PvpSummary>(
     `${PVP_SUMMARY_COLLECTION}/${PVP_SUMMARY_DOC}`,
-    !DEMO_MODE,
+    !DEMO_MODE && enabled,
   )
 }
 

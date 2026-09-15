@@ -4,6 +4,15 @@ import { useMemo, useState, useEffect } from 'react'
 import { usePvpPricesByCategory, usePvpSummary } from '@/hooks/useFirestore'
 import type { PvpPrice } from '@/types/pvpPrice'
 
+// Held back for now: the tab is hidden from both nav bars and this component
+// reads nothing from Firestore while it is false. Flip to true to release it.
+//
+// The gate exists as a constant rather than a deleted branch because the
+// reason is operational, not structural — the price data is still being
+// loaded and the project is on Firestore's free tier, so the reads this tab
+// makes are worth postponing rather than the code being wrong.
+export const PRODUCT_LIST_ENABLED = false
+
 const PAGE_SIZE = 50
 
 // Product List (Tools → #products). Reads the PVP price list a category at a
@@ -19,12 +28,17 @@ const PAGE_SIZE = 50
 // would only match from the start of the field, which is not what someone
 // typing part of a product name expects.
 export function ProductListTab() {
-  const { data: summary, loading: summaryLoading } = usePvpSummary()
   const [category, setCategory] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
 
-  const { data: products, loading } = usePvpPricesByCategory(category)
+  // Both hooks are still called — hooks cannot be skipped conditionally — but
+  // while the tab is held back they are told not to subscribe, so nothing is
+  // read even if someone reaches #products by typing the URL.
+  const { data: summary, loading: summaryLoading } = usePvpSummary(PRODUCT_LIST_ENABLED)
+  const { data: products, loading } = usePvpPricesByCategory(
+    PRODUCT_LIST_ENABLED ? category : null,
+  )
 
   const categories = summary?.categories ?? []
 
@@ -44,6 +58,18 @@ export function ProductListTab() {
     () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
     [filtered, page],
   )
+
+  // Reachable only by typing #products while the tab is hidden.
+  if (!PRODUCT_LIST_ENABLED) {
+    return (
+      <div className="flex-1 overflow-auto p-5">
+        <EmptyState
+          title="ยังไม่เปิดใช้งาน"
+          detail="รายการสินค้ากำลังเตรียมข้อมูลอยู่ จะเปิดให้ใช้งานเร็ว ๆ นี้"
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="flex-1 overflow-auto p-5">
