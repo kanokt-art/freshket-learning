@@ -3,9 +3,15 @@
  *
  * Sheet     : https://docs.google.com/spreadsheets/d/1QPkrSSDREZazXBlw0ZiVsu5eCqJ-1ODcfk4U1Zzs3wQ/edit
  * Tab       : PVP  (~25,000 rows)
+ * Script ID : 1_7asUTvU6KRF1BQjKbojxy6P2O527z4DSItJZkJXFs0RRH59yIHPqIVK
  *
- * Unlike ProductsSync.gs (which reads the sheet AND writes Firestore itself,
- * entirely inside Apps Script), this script does neither. It drives the
+ * This script project used to hold ProductsSync (the "Public-price" tab →
+ * Firestore `products`). The PVP tab carries the same products with both
+ * public and private prices, so this replaced it; docs/apps-script/
+ * ProductsSync.gs is retired and must not be pushed back here.
+ *
+ * Unlike that old script (which read the sheet AND wrote Firestore itself,
+ * entirely inside Apps Script), this one does neither. It drives the
  * Next.js backend (POST /api/sheets/pvp-sync) through a paginated sync —
  * no row data is ever attached to a request, only offset/limit — and the
  * backend reads the PVP tab itself via the Sheets API (service account) and
@@ -38,16 +44,23 @@
  * to take ~2 days; move the project to Blaze if that is too slow.
  *
  * ── SETUP ────────────────────────────────────────────────────────────────────
- * 1. Extensions → Apps Script (on this spreadsheet), paste this file.
- * 2. Share the spreadsheet (Viewer) with the Firebase service account email
+ * Already deployed to the script ID above. To update it from this repo:
+ *   clasp push   (with a .clasp.json pointing at that script ID)
+ * Pasting into the Apps Script editor by hand works too — just make sure it
+ * replaces the whole file, and that no ProductsSync code is left beside it:
+ * the two define same-named helpers (props_, doGet, str_, …) and would
+ * silently override each other.
+ *
+ * One-time setup, already done — redo only on a fresh script project:
+ * 1. Share the spreadsheet (Viewer) with the Firebase service account email
  *    (FIREBASE_CLIENT_EMAIL in the app's .env.local) — the backend reads the
  *    sheet using that identity, not this script.
- * 3. Project Settings → Script Properties, add:
+ * 2. Project Settings → Script Properties, add:
  *      SYNC_WEBHOOK_URL   https://<your-app-domain>/api/sheets/pvp-sync
  *      SYNC_SECRET        (same value as SHEETS_SYNC_SECRET in .env.local)
- * 4. Run `testSyncNow` once to confirm a full sync completes end-to-end.
- * 5. Run `createTriggers` once to wire up onEdit (marks dirty) + the
- *    5-minute drain trigger + a daily safety-net sync.
+ * 3. Run `testSyncNow` once to confirm a full sync completes end-to-end.
+ * 4. Run `createTriggers` once to wire up onEdit (marks dirty) + the hourly
+ *    drain trigger + a daily safety-net sync.
  *
  * ── HOW TO TELL IT ACTUALLY RAN ──────────────────────────────────────────────
  * - Apps Script → Executions log shows each chunk's HTTP status and counts.

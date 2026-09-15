@@ -146,9 +146,9 @@ service cloud.firestore {
     }
 
     // ── /products ──────────────────────────────────────────────────────────────
-    // Freshket product/price catalog, synced nightly from the "Public-price"
-    // Google Sheet via docs/apps-script/ProductsSync.gs (service-account writes
-    // bypass these rules entirely — this only governs writes from signed-in users).
+    // Legacy catalog from the "Public-price" sheet. Its sync (ProductsSync.gs)
+    // is retired — /pvpPrices covers the same products with private prices too
+    // — so this collection is now static leftover data that nothing reads.
     match /products/{productId} {
       allow read: if isStaff();
       allow write: if isSuperAdmin();

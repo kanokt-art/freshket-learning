@@ -1,5 +1,7 @@
-// Freshket product/price catalog, synced from the "Public-price" Google Sheet
-// via docs/apps-script/ProductsSync.gs into the `products` Firestore collection.
+// Legacy shape of the `products` Firestore collection, filled from the
+// "Public-price" Google Sheet by the now-retired ProductsSync.gs. The PVP tab
+// superseded it (same products, plus private prices) — see the pvpPrices
+// collection and docs/apps-script/PvpSync.gs. Nothing reads this today.
 // Field names mirror the sheet's own headers (Thai/English columns kept
 // separate, as the sheet has them) rather than being renamed to a house style,
 // so the sync script and this type stay trivially comparable column-by-column.

@@ -1,4 +1,12 @@
 /**
+ * RETIRED — not deployed anywhere. Kept only as the last copy of this script.
+ *
+ * The PVP tab carries the same products with both public and private prices,
+ * so PvpSync.gs replaced this one and now owns script ID
+ * 1_7asUTvU6KRF1BQjKbojxy6P2O527z4DSItJZkJXFs0RRH59yIHPqIVK (this script's
+ * former home — pushing this file back there would overwrite the PVP sync).
+ * Nothing in the app reads the `products` collection it wrote.
+ *
  * Freshket LMS — sync the "Public-price" product sheet into Firestore `products`.
  *
  * Sheet      : https://docs.google.com/spreadsheets/d/1QPkrSSDREZazXBlw0ZiVsu5eCqJ-1ODcfk4U1Zzs3wQ/edit
