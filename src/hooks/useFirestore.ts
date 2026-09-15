@@ -16,6 +16,12 @@ import type { Assessment } from '@/types/assessment'
 import type { ShadowRecord, ShadowAcknowledgment } from '@/types/shadow'
 import type { RoleplayAssessment } from '@/types/roleplay'
 import type { Announcement } from '@/types/announcement'
+import {
+  PVP_SUMMARY_COLLECTION,
+  PVP_SUMMARY_DOC,
+  type PvpPrice,
+  type PvpSummary,
+} from '@/types/pvpPrice'
 import { SEED_TOOLS, type SaleTool } from '@/lib/tools'
 import { DEMO_MANDATORY_ITEMS, type MandatoryItem } from '@/lib/mandatory'
 import { MOCK_CUISINE_GUIDES, type CuisineGuideItem } from '@/lib/cuisineGuide'
@@ -964,6 +970,36 @@ export function useCuisineGuides(): UseResult<CuisineGuideItem> {
   )
   if (DEMO_MODE) return { data: MOCK_CUISINE_GUIDES, loading: false, error: null }
   return fbResult
+}
+
+// ── PVP product prices ───────────────────────────────────────────────────────
+// The price list runs to ~20k documents, so it is NEVER read whole: the
+// Product List makes the user pick a category first and this subscribes to
+// just that category. An unscoped read would bill 20k reads per cold visit
+// per user — several times over, that is the entire daily free-tier read
+// allowance spent on one page.
+//
+// Each category gets its own listener cache key, so switching back to a
+// previously viewed category is answered from cache rather than re-read.
+export function usePvpPricesByCategory(category: string | null): UseResult<PvpPrice> {
+  return useFirestoreList<PvpPrice>(
+    'pvpPrices',
+    [
+      { type: 'where', field: 'category', op: '==', value: category ?? '' },
+      { type: 'orderBy', field: 'sku', direction: 'asc' },
+    ],
+    !DEMO_MODE && !!category,
+  )
+}
+
+// The category list + row count, written by the CSV importer. One document
+// read, versus the ~20k it would take to derive the same list from the price
+// rows themselves.
+export function usePvpSummary(): UseDocResult<PvpSummary> {
+  return useFirestoreDoc<PvpSummary>(
+    `${PVP_SUMMARY_COLLECTION}/${PVP_SUMMARY_DOC}`,
+    !DEMO_MODE,
+  )
 }
 
 // Department knowledge decks (Google Slides links) shown on Tools → Q&A.

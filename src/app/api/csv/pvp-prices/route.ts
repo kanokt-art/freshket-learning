@@ -21,6 +21,10 @@ import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
 export const maxDuration = 60
 
 const COLLECTION = 'pvpPrices'
+// The summary lives outside pvpPrices so it can never be mistaken for a price
+// row by a query over that collection.
+const SUMMARY_COLLECTION = 'appConfig'
+const SUMMARY_DOC = 'pvpSummary'
 const BATCH_SIZE = 450 // Firestore :batchWrite caps at 500 writes per call
 const MAX_ROWS_PER_REQUEST = 2000
 
@@ -142,19 +146,63 @@ async function fetchRowHashes(token: string, skus: string[]): Promise<Map<string
   return out
 }
 
+/**
+ * Writes the summary the Product List reads to populate its category filter.
+ * Sent once by the client at the end of an import, because deriving it
+ * server-side would mean reading every price document — the exact cost the
+ * summary exists to avoid.
+ */
+async function writeSummary(token: string, categories: string[], totalRows: number) {
+  const fields: Record<string, FsValue | { arrayValue: { values: FsValue[] } }> = {
+    categories: { arrayValue: { values: categories.map(fsString) } },
+    totalRows: { doubleValue: totalRows },
+    updatedAt: { timestampValue: new Date().toISOString() },
+  }
+  await fsRequest(token, `${DB_ROOT()}:batchWrite`, {
+    method: 'POST',
+    body: JSON.stringify({
+      writes: [{
+        update: { name: `${DB_ROOT()}/${SUMMARY_COLLECTION}/${SUMMARY_DOC}`, fields },
+        updateMask: { fieldPaths: Object.keys(fields) },
+      }],
+    }),
+  })
+}
+
 export async function POST(req: NextRequest) {
   const gate = await requireSuperAdmin(req)
   if (!gate.ok) return gate.response
 
   let rows: PvpImportRow[]
+  let summary: { categories?: unknown; totalRows?: unknown } | undefined
   try {
     const body = await req.json()
-    rows = body?.rows
+    rows = body?.rows ?? []
+    summary = body?.summary
     if (!Array.isArray(rows)) {
       return NextResponse.json({ error: 'ต้องส่ง rows เป็น array' }, { status: 400 })
     }
   } catch {
     return NextResponse.json({ error: 'body ไม่ใช่ JSON ที่ถูกต้อง' }, { status: 400 })
+  }
+
+  // Summary-only call: the final request of an import, after every row chunk.
+  if (summary && rows.length === 0) {
+    try {
+      const token = await getFirestoreToken()
+      const categories = Array.isArray(summary.categories)
+        ? summary.categories.filter((c): c is string => typeof c === 'string')
+        : []
+      const totalRows = typeof summary.totalRows === 'number' ? summary.totalRows : 0
+      await writeSummary(token, categories, totalRows)
+      return NextResponse.json({ written: 0, unchanged: 0, quotaExhausted: false, summaryWritten: true })
+    } catch (e) {
+      if (e instanceof QuotaExhaustedError) {
+        return NextResponse.json({ written: 0, unchanged: 0, quotaExhausted: true })
+      }
+      console.error('POST /api/csv/pvp-prices (summary)', e)
+      return NextResponse.json({ error: String(e) }, { status: 500 })
+    }
   }
 
   if (rows.length > MAX_ROWS_PER_REQUEST) {

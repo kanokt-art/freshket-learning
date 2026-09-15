@@ -26,7 +26,7 @@ export function AdministrationTabs() {
   // already on /tools — Next's <Link>/pushState doesn't fire `hashchange`, so
   // the page listener wouldn't flip instantly. From another page, let the Link
   // navigate normally (the page reads the hash on mount).
-  const switchHash = (e: React.MouseEvent, target: '' | 'merch' | 'qa') => {
+  const switchHash = (e: React.MouseEvent, target: '' | 'merch' | 'qa' | 'products') => {
     if (pathname !== '/tools') return
     e.preventDefault()
     if (target) {
@@ -55,6 +55,7 @@ export function AdministrationTabs() {
       {/* Tools group — clicking the tab goes to /tools; hover reveals the rest */}
       <Dropdown label="Tools" href="/tools" active={isTools}>
         <Link href="/tools" className={dropItemCls} onClick={(e) => switchHash(e, '')}>Tools</Link>
+        <Link href="/tools#products" className={dropItemCls} onClick={(e) => switchHash(e, 'products')}>Product List</Link>
         <Link href="/tools/cuisine-guide" className={dropItemCls}>Cuisine Guide</Link>
         <Link href="/tools#qa" className={dropItemCls} onClick={(e) => switchHash(e, 'qa')}>Q&amp;A</Link>
         <Link href="/tools/mandatory" className={dropItemCls}>Merchandise Mandatory</Link>

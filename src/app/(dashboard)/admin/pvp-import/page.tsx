@@ -91,6 +91,7 @@ export default function PvpImportPage() {
 
     let written = 0
     let unchanged = 0
+    let stoppedForQuota = false
     try {
       for (let i = 0; i < parsed.length; i += CHUNK_ROWS) {
         const slice = parsed.slice(i, i + CHUNK_ROWS)
@@ -110,7 +111,22 @@ export default function PvpImportPage() {
         // Out of daily Firestore quota — stop cleanly. What has been written
         // stays written, and re-running the same file tomorrow skips it via
         // the row hash, so it resumes rather than starting over.
-        if (json.quotaExhausted) { setQuotaStopped(true); break }
+        if (json.quotaExhausted) { stoppedForQuota = true; setQuotaStopped(true); break }
+      }
+
+      // Record the category list for the Product List's filter. Sent from here
+      // because the browser already knows every category in the file — working
+      // it out server-side would mean reading all ~20k price docs, which is the
+      // read cost this summary exists to avoid.
+      if (!stoppedForQuota) {
+        const categories = Array.from(
+          new Set(parsed.map((r) => r.category).filter(Boolean)),
+        ).sort((a, b) => a.localeCompare(b, 'th'))
+        await authedFetch('/api/csv/pvp-prices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: [], summary: { categories, totalRows: parsed.length } }),
+        })
       }
       setPhase('done')
     } catch (e) {

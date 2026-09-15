@@ -11,6 +11,7 @@ import { getDemoMode, FRESHKET_LOGO_URL } from '@/lib/demo/demoMode'
 import { SEED_TOOLS, isToolVisibleTo, type SaleTool } from '@/lib/tools'
 import { markToolSeen } from '@/hooks/useUnseenTools'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
+import { ProductListTab } from '@/components/features/ProductListTab'
 import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
 import { confirmAction, alertError } from '@/lib/ui/alert'
 
@@ -249,7 +250,7 @@ function getCategoryMeta(cat: string): CategoryMeta {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 type ViewMode = 'grid' | 'list'
-type Tab = 'tools' | 'merch' | 'qa'
+type Tab = 'tools' | 'merch' | 'qa' | 'products'
 
 export default function ToolsPage() {
   const { user } = useAuth()
@@ -262,7 +263,12 @@ export default function ToolsPage() {
   useEffect(() => {
     const sync = () => {
       const h = window.location.hash
-      setActiveTab(h === '#merch' ? 'merch' : h === '#qa' ? 'qa' : 'tools')
+      setActiveTab(
+        h === '#merch' ? 'merch'
+        : h === '#qa' ? 'qa'
+        : h === '#products' ? 'products'
+        : 'tools',
+      )
     }
     sync()
     window.addEventListener('hashchange', sync)
@@ -540,6 +546,9 @@ export default function ToolsPage() {
       <FreshketToolTabs />
 
       {/* Sale Tool / Merchandise Contact live in the top tab bar (#merch hash) */}
+
+      {/* ── Product List tab ── */}
+      {activeTab === 'products' && <ProductListTab />}
 
       {/* ── Merchandise Contact tab ── */}
       {activeTab === 'merch' && (

@@ -34,13 +34,14 @@ export function FreshketToolTabs() {
   const onTools = pathname === '/tools'
   const isMerch = onTools && hash === '#merch'
   const isQA = onTools && hash === '#qa'
+  const isProducts = onTools && hash === '#products'
 
   // When already on /tools, switch the Tools ↔ Merchandise ↔ Q&A sub-tabs by
   // setting the hash ourselves. Next's <Link> uses history.pushState, which does
   // NOT fire `hashchange`, so relying on it made the switch lag/feel stuck.
   // Assigning window.location.hash fires the event natively and the page flips
   // instantly.
-  const switchHash = (e: React.MouseEvent, target: '' | 'merch' | 'qa') => {
+  const switchHash = (e: React.MouseEvent, target: '' | 'merch' | 'qa' | 'products') => {
     if (!onTools) return // coming from another page — let <Link> navigate normally
     e.preventDefault()
     if (target) {
@@ -52,7 +53,8 @@ export function FreshketToolTabs() {
   }
 
   const tabs: { href: string; label: string; badge?: string; active: boolean; show: boolean; onClick?: (e: React.MouseEvent) => void }[] = [
-    { href: '/tools', label: 'Tools', active: onTools && !isMerch && !isQA, show: true, onClick: (e) => switchHash(e, '') },
+    { href: '/tools', label: 'Tools', active: onTools && !isMerch && !isQA && !isProducts, show: true, onClick: (e) => switchHash(e, '') },
+    { href: '/tools#products', label: 'Product List', active: isProducts, show: true, onClick: (e) => switchHash(e, 'products') },
     { href: '/tools/cuisine-guide', label: 'Cuisine Guide', active: pathname === '/tools/cuisine-guide', show: true },
     { href: '/tools#qa', label: 'Q&A', active: isQA, show: true, onClick: (e) => switchHash(e, 'qa') },
     { href: '/tools/mandatory', label: 'Merchandise Mandatory', active: pathname === '/tools/mandatory', show: true },
