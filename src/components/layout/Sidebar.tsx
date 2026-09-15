@@ -8,6 +8,7 @@ import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { canAccess, ROLE_HIERARCHY, type UserRole } from '@/types/user'
 import { FRESHKET_LOGO_URL } from '@/lib/demo/demoMode'
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
+import { MbtiBadge } from '@/components/features/MbtiBadge'
 import type { ModuleId } from '@/lib/modules'
 
 // ── Nav item definition ───────────────────────────────────────────────────────
@@ -297,7 +298,39 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
         </button>
       </div>
 
-      {/* Profile moved to the top-right of the page (top bar / page Header) */}
+      {/* ── 1b. Profile ─────────────────────────────────────────────────────── */}
+      {/* The page Header also shows an avatar; this block is the one that
+          carries the person's position and MBTI, and it stays visible while
+          navigating. Collapsed, only the avatar shows — everything else is
+          clipped by the rail's overflow-hidden, so nothing needs unmounting. */}
+      {user && (
+        <Link
+          href="/profile"
+          className={`flex items-center gap-3 border-b border-gray-100 px-4 py-3 hover:bg-gray-50 transition-colors ${
+            pathname === '/profile' ? 'bg-freshket-50' : ''
+          }`}
+        >
+          {user.photoURL ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={user.photoURL}
+              alt={user.displayName}
+              className="size-10 rounded-full object-cover ring-2 ring-freshket-100 shrink-0"
+            />
+          ) : (
+            <div className="size-10 rounded-full bg-freshket-500 flex items-center justify-center text-white text-sm font-black ring-2 ring-freshket-100 shrink-0">
+              {user.displayName.charAt(0).toUpperCase()}
+            </div>
+          )}
+          <SidebarLabel expanded={expanded} className="min-w-0 flex-1">
+            <span className="block text-sm font-bold text-gray-900 truncate">{user.displayName}</span>
+            {user.position && (
+              <span className="block text-xs font-normal text-gray-400 truncate">{user.position}</span>
+            )}
+            <span className="block mt-1"><MbtiBadge uid={user.uid} /></span>
+          </SidebarLabel>
+        </Link>
+      )}
 
       {/* ── 2. Main Navigation (flat — sub-nav lives in page tabs) ───────────── */}
       <nav className="py-4 px-3 space-y-1.5 border-b border-gray-50">
