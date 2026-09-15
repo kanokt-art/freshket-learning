@@ -71,6 +71,18 @@
  *   `resumeStuckRun` below to recover without re-syncing from offset 0).
  */
 
+// Master kill switch. While false, every trigger handler returns immediately
+// and the script touches nothing — no Sheets read, no backend call, no
+// Firestore write. Left OFF because the PVP price list is now loaded through
+// the admin CSV importer (/admin/pvp-import) instead of this sync.
+//
+// It exists because a trigger that is still installed keeps firing even after
+// the code it calls is abandoned, and the earlier version of this sync burned
+// a whole day of Firestore's free-tier quota — reads included — retrying work
+// that had in fact already succeeded. Flipping this to true is the deliberate
+// act of turning the sync back on; deleting the triggers is the other half.
+var SYNC_ENABLED = false
+
 var CHUNK_SIZE = 3000     // rows per backend call — keeps each request well under 60s
 var DIRTY_KEY = 'pvp_dirty'
 var RUN_KEY = 'pvp_active_run' // { runId, nextOffset } while a sync is in progress
@@ -181,6 +193,7 @@ function runFullSync_() {
 
 /** Bound to an onEdit trigger — just flags dirty, does NOT sync inline. */
 function onPvpSheetEdit(e) {
+  if (!SYNC_ENABLED) return
   var sheet = e && e.range ? e.range.getSheet() : null
   if (!sheet || sheet.getName() !== 'PVP') return
   PropertiesService.getScriptProperties().setProperty(DIRTY_KEY, '1')
@@ -194,6 +207,7 @@ function onPvpSheetEdit(e) {
  * and the free tier only allows 50k a day.
  */
 function drainIfDirty() {
+  if (!SYNC_ENABLED) return
   var props = PropertiesService.getScriptProperties()
 
   // Parked until the Firestore quota resets. Retrying before then just spends
@@ -211,6 +225,7 @@ function drainIfDirty() {
 
 /** Safety-net: forces a full sync once a day regardless of the dirty flag. */
 function scheduledFullSync() {
+  if (!SYNC_ENABLED) return
   var props = PropertiesService.getScriptProperties()
   var pausedUntil = Number(props.getProperty(PAUSED_UNTIL_KEY) || 0)
   if (pausedUntil && Date.now() < pausedUntil) return
@@ -252,6 +267,24 @@ function createTriggers() {
   ScriptApp.newTrigger('scheduledFullSync').timeBased().atHour(2).nearMinute(30).everyDays(1).create()
 
   Logger.log('ตั้ง trigger เรียบร้อย: onEdit (flag dirty) + drain ทุกชั่วโมง + daily 02:30 safety-net')
+}
+
+/**
+ * Removes every trigger this script installs, and clears its saved state.
+ * Run this to stop the sync for good — SYNC_ENABLED=false already makes the
+ * handlers do nothing, but an installed trigger still wakes the script on a
+ * schedule, and a leftover one calling a function that no longer exists shows
+ * up as a stream of failed executions. Safe to run any number of times.
+ */
+function stopSyncCompletely() {
+  var removed = []
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    removed.push(t.getHandlerFunction())
+    ScriptApp.deleteTrigger(t)
+  })
+  resetSyncState()
+  Logger.log('ลบ trigger แล้ว ' + removed.length + ' ตัว: ' + (removed.join(', ') || '(ไม่มี)'))
+  Logger.log('sync หยุดสนิทแล้ว — ใช้หน้า /admin/pvp-import แทน')
 }
 
 /**
