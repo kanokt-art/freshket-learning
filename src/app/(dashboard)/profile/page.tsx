@@ -7,6 +7,7 @@ import { Header } from '@/components/layout/Header'
 import { ROLE_LABELS } from '@/types/user'
 import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
 import { BucketResultCard } from '@/components/features/BucketResultCard'
+import { MbtiBadge } from '@/components/features/MbtiBadge'
 import { getDaysSince } from '@/lib/utils/newJoiner'
 
 // ── Tenure formatter ──────────────────────────────────────────────────────────
@@ -142,16 +143,22 @@ export default function ProfilePage() {
 
           {uploadError && <p className="text-xs text-rose-500">{uploadError}</p>}
 
-          {/* Name */}
+          {/* Name + position */}
           <div className="text-center lg:text-left lg:flex-1 min-w-0">
             <h2 className="text-xl font-black text-gray-900 leading-tight">{user.displayName}</h2>
             {user.nickname && <p className="text-sm font-normal text-gray-400 mt-0.5">({user.nickname})</p>}
+            {user.position && (
+              <p className="text-sm font-normal text-gray-500 mt-1 truncate">{user.position}</p>
+            )}
           </div>
 
-          {/* Role badge */}
-          <span className={`inline-flex items-center text-xs font-bold px-3 py-1 rounded-full border lg:ml-auto lg:shrink-0 ${ROLE_BADGE[user.role] ?? 'bg-gray-100 text-gray-700 border-gray-200'}`}>
-            {ROLE_LABELS[user.role]}
-          </span>
+          {/* Badges — MBTI sits beside the role so both read as one cluster */}
+          <div className="flex items-center justify-center gap-2 lg:ml-auto lg:shrink-0">
+            <MbtiBadge uid={user.uid} />
+            <span className={`inline-flex items-center text-xs font-bold px-3 py-1 rounded-full border ${ROLE_BADGE[user.role] ?? 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+              {ROLE_LABELS[user.role]}
+            </span>
+          </div>
         </div>
 
         <div className="px-4 sm:px-6 py-5 space-y-3 max-w-lg mx-auto lg:max-w-none lg:mx-0 lg:px-8 lg:py-6">
