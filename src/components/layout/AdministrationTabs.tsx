@@ -19,7 +19,8 @@ export function AdministrationTabs() {
 
   const isEmployees = pathname === '/users' || pathname.startsWith('/users/')
   const isTools = pathname === '/tools' || pathname.startsWith('/tools/')
-  const isSystem = pathname === '/log' || pathname === '/admin/settings' || pathname === '/admin/announcements'
+  const isSystem = pathname === '/log' || pathname === '/admin/settings'
+    || pathname === '/admin/announcements' || pathname === '/admin/pvp-import'
 
   // Switch the Tools ↔ Merchandise sub-views by setting the hash directly when
   // already on /tools — Next's <Link>/pushState doesn't fire `hashchange`, so
@@ -66,6 +67,7 @@ export function AdministrationTabs() {
       <Dropdown label="System" href="/admin/settings" active={isSystem}>
         <Link href="/admin/settings" className={dropItemCls}>Module Settings</Link>
         <Link href="/admin/announcements" className={dropItemCls}>ข่าวสาร (News Feed)</Link>
+        <Link href="/admin/pvp-import" className={dropItemCls}>นำเข้าราคาสินค้า (PVP)</Link>
         <Link href="/log" className={dropItemCls}>Activity Log</Link>
       </Dropdown>
     </nav>

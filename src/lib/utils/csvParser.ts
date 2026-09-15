@@ -295,6 +295,123 @@ export function parseRoleplayText(text: string): RoleplayParseResult {
   return { data: rows, skipped, errors }
 }
 
+// ── PVP price list import ───────────────────────────────────────────────────
+// Columns: SKU, NAME, Pack Size, Category, Picture, Public Price,
+// "Public Price Ex-Vat", Private Price, "Private Price Ex-Vat", Vat, Remark.
+// Two header pairs differ only by an "Ex-Vat" suffix and the sheet wraps that
+// suffix onto a second line, so headers arrive containing a newline — matched
+// explicitly rather than via resolveColumn, whose substring fallback would
+// resolve "public price" to the Ex-Vat column just as happily as the plain one.
+export interface ParsedPvpRow {
+  sku: string
+  name: string
+  packSize: string
+  category: string
+  pictureUrl: string
+  publicPrice: number | null
+  publicPriceExVat: number | null
+  privatePrice: number | null
+  privatePriceExVat: number | null
+  vat: number | null
+  remark: string
+}
+
+/** Collapses whitespace (incl. the header's embedded newline) and lowercases. */
+function normHeader(h: string): string {
+  return h.replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function findHeader(headers: string[], predicate: (norm: string) => boolean): string | null {
+  return headers.find((h) => predicate(normHeader(h))) ?? null
+}
+
+/** Blank → null (unknown), not 0. Strips thousands separators and ฿. */
+function parsePrice(raw: string | undefined): number | null {
+  const s = (raw ?? '').trim().replace(/[฿,\s]/g, '')
+  if (!s) return null
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
+}
+
+export function parsePvpPriceText(text: string): ParseResult<ParsedPvpRow> {
+  const { data, errors: parseErrors, meta } = Papa.parse<Record<string, string>>(text, {
+    header: true,
+    skipEmptyLines: true,
+  })
+
+  const csvErrors: CSVImportError[] = parseErrors.map((e) => ({
+    row: e.row ?? 0, field: 'parse', message: e.message, rawValue: '',
+  }))
+
+  const headers = meta.fields ?? (data[0] ? Object.keys(data[0]) : [])
+
+  const skuCol = findHeader(headers, (h) => h === 'sku')
+  const nameCol = findHeader(headers, (h) => h === 'name' || h.startsWith('name'))
+  const packCol = findHeader(headers, (h) => h.includes('pack'))
+  const categoryCol = findHeader(headers, (h) => h.includes('category'))
+  const pictureCol = findHeader(headers, (h) => h.includes('picture'))
+  // Ex-Vat variants first, so the plain-price match can exclude them.
+  const publicExCol = findHeader(headers, (h) => h.includes('public') && h.includes('ex-vat'))
+  const publicCol = findHeader(headers, (h) => h.includes('public') && !h.includes('ex-vat'))
+  const privateExCol = findHeader(headers, (h) => h.includes('private') && h.includes('ex-vat'))
+  const privateCol = findHeader(headers, (h) => h.includes('private') && !h.includes('ex-vat'))
+  const vatCol = findHeader(headers, (h) => h === 'vat')
+  const remarkCol = findHeader(headers, (h) => h.includes('remark'))
+
+  // SKU is the document id — without it nothing can be written, and one header
+  // error beats an identical per-row error on all 25,000 rows.
+  if (!skuCol) {
+    csvErrors.push({
+      row: 0,
+      field: 'header',
+      message: `ไม่พบคอลัมน์ SKU — คอลัมน์ที่พบจริง: ${headers.join(', ') || '(ไม่มี)'}`,
+      rawValue: '',
+    })
+    return { data: [], errors: csvErrors }
+  }
+
+  const rows: ParsedPvpRow[] = []
+  const seen = new Map<string, number>()
+
+  data.forEach((row, idx) => {
+    const rowNum = idx + 2 // 1-based + header row
+    const sku = (row[skuCol] ?? '').trim()
+    const name = nameCol ? (row[nameCol] ?? '').trim() : ''
+
+    if (!sku && !name) return // blank spacer row
+
+    if (!sku) {
+      csvErrors.push({ row: rowNum, field: 'sku', message: 'ไม่มี SKU', rawValue: name })
+      return
+    }
+    const prev = seen.get(sku)
+    if (prev !== undefined) {
+      csvErrors.push({
+        row: rowNum, field: 'sku',
+        message: `SKU ซ้ำกับแถว ${prev} — ใช้ค่าจากแถวหลังสุด`,
+        rawValue: sku,
+      })
+    }
+    seen.set(sku, rowNum)
+
+    rows.push({
+      sku,
+      name,
+      packSize: packCol ? (row[packCol] ?? '').trim() : '',
+      category: categoryCol ? (row[categoryCol] ?? '').trim() : '',
+      pictureUrl: pictureCol ? (row[pictureCol] ?? '').trim() : '',
+      publicPrice: parsePrice(publicCol ? row[publicCol] : undefined),
+      publicPriceExVat: parsePrice(publicExCol ? row[publicExCol] : undefined),
+      privatePrice: parsePrice(privateCol ? row[privateCol] : undefined),
+      privatePriceExVat: parsePrice(privateExCol ? row[privateExCol] : undefined),
+      vat: parsePrice(vatCol ? row[vatCol] : undefined),
+      remark: remarkCol ? (row[remarkCol] ?? '').trim() : '',
+    })
+  })
+
+  return { data: rows, errors: csvErrors }
+}
+
 const TRAINING_REQUIRED_FIELDS = ['employeeEmail', 'courseId', 'courseTitle', 'status']
 
 // ── Column resolution ──────────────────────────────────────────────────────
