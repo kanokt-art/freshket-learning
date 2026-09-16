@@ -21,14 +21,28 @@ export async function GET() {
     steps.getInstanceMs = Date.now() - t0
 
     const tRead = Date.now()
-    const read = db.collection('users').doc('__diag_nonexistent__').get()
+    const read = db.collection('users').doc('diag-nonexistent-probe').get()
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('read did not settle within 15s')), 15_000),
     )
 
     const snap = await Promise.race([read, timeout])
-    steps.readMs = Date.now() - tRead
+    steps.docReadMs = Date.now() - tRead
     steps.exists = snap.exists
+
+    // The whole-collection read GET /api/users performs — the heavier of the
+    // two, and the one whose 504s were actually in the logs.
+    const tList = Date.now()
+    const listTimeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('collection read did not settle within 25s')), 25_000),
+    )
+    const all = await Promise.race([
+      db.collection('users').orderBy('displayName').get(),
+      listTimeout,
+    ])
+    steps.collectionReadMs = Date.now() - tList
+    steps.docCount = all.size
+
     steps.totalMs = Date.now() - t0
     return NextResponse.json({ ok: true, ...steps })
   } catch (e) {
