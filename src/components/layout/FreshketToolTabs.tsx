@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
-import { PRODUCT_LIST_ENABLED } from '@/components/features/ProductListTab'
 
 // Regular-user sub-nav for the "Tools" area (Tools / Mandatory /
 // New Joiner Hub), replacing the old sidebar accordion. Self-gating: renders
@@ -55,9 +54,7 @@ export function FreshketToolTabs() {
 
   const tabs: { href: string; label: string; badge?: string; active: boolean; show: boolean; onClick?: (e: React.MouseEvent) => void }[] = [
     { href: '/tools', label: 'Tools', active: onTools && !isMerch && !isQA && !isProducts, show: true, onClick: (e) => switchHash(e, '') },
-    // Product List is built but held back — see PRODUCT_LIST_ENABLED in
-    // components/features/ProductListTab.
-    { href: '/tools#products', label: 'Product List', active: isProducts, show: PRODUCT_LIST_ENABLED, onClick: (e) => switchHash(e, 'products') },
+    { href: '/tools#products', label: 'Product List', active: isProducts, show: true, onClick: (e) => switchHash(e, 'products') },
     { href: '/tools/cuisine-guide', label: 'Cuisine Guide', active: pathname === '/tools/cuisine-guide', show: true },
     { href: '/tools#qa', label: 'Q&A', active: isQA, show: true, onClick: (e) => switchHash(e, 'qa') },
     { href: '/tools/mandatory', label: 'Merchandise Mandatory', active: pathname === '/tools/mandatory', show: true },

@@ -1,7 +1,8 @@
 // Freshket product price list, imported from the PVP sheet's CSV export via
-// /admin/pvp-import into the `pvpPrices` Firestore collection. Field names
-// mirror the sheet's own columns so the importer and this type stay
-// comparable column-by-column.
+// /admin/pvp-import into the `pvp_prices` table in Supabase Postgres (see
+// supabase/migrations/001_pvp_prices.sql). Field names mirror the sheet's own
+// columns so the importer and this type stay comparable column-by-column;
+// src/lib/supabase/pvpPrices.ts maps the snake_case row onto this shape.
 
 export interface PvpPrice {
   id: string                       // Firestore doc id — same as sku
@@ -18,21 +19,9 @@ export interface PvpPrice {
   privatePriceExVat: number | null // Private Price Ex-Vat
   vat: number | null               // Vat
   remark: string                   // Remark
-  rowHash: string                  // digest of the sheet values; how a re-import skips unchanged rows
-  updatedAt: Date
-}
-
-// Where the importer keeps its summary (appConfig/pvpSummary — outside the
-// price collection, so a query over pvpPrices can never pick it up as a row).
-// It exists so the Product List can populate its category filter, and show a
-// total, without reading all ~20k price documents just to learn which
-// categories exist — which would spend the entire daily free-tier read quota
-// on a handful of page loads.
-export const PVP_SUMMARY_COLLECTION = 'appConfig'
-export const PVP_SUMMARY_DOC = 'pvpSummary'
-
-export interface PvpSummary {
-  categories: string[]  // distinct, sorted
-  totalRows: number
+  // Vestigial: on Firestore this held a digest so a re-import could skip
+  // unchanged rows and stay inside the daily write quota. Postgres upserts the
+  // row outright, so nothing reads or writes it any more.
+  rowHash: string
   updatedAt: Date
 }

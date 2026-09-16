@@ -1,75 +1,81 @@
 'use client'
 
-import { useMemo, useState, useEffect } from 'react'
-import { usePvpPricesByCategory, usePvpSummary } from '@/hooks/useFirestore'
+import { useState, useEffect, useRef } from 'react'
+import {
+  fetchPvpPrices,
+  fetchPvpCategories,
+  fetchPvpCount,
+} from '@/lib/supabase/pvpPrices'
 import type { PvpPrice } from '@/types/pvpPrice'
 
-// Held back for now: the tab is hidden from both nav bars and this component
-// reads nothing from Firestore while it is false. Flip to true to release it.
-//
-// The gate exists as a constant rather than a deleted branch because the
-// reason is operational, not structural — the price data is still being
-// loaded and the project is on Firestore's free tier, so the reads this tab
-// makes are worth postponing rather than the code being wrong.
-export const PRODUCT_LIST_ENABLED = false
-
 const PAGE_SIZE = 50
+const SEARCH_DEBOUNCE_MS = 300
 
-// Product List (Tools → #products). Reads the PVP price list a category at a
-// time rather than whole: the collection runs to ~20k documents, and an
-// unscoped subscription would bill that many reads on every cold visit —
-// enough to exhaust the project's daily free-tier read allowance in a couple
-// of page loads. So a category must be chosen before anything is fetched, and
-// the category list itself comes from a one-document summary the CSV importer
-// maintains (appConfig/pvpSummary).
+// Product List (Tools → #products), backed by the pvp_prices table in Supabase
+// Postgres rather than Firestore — see supabase/migrations/001_pvp_prices.sql.
 //
-// Search then filters within the loaded category, client-side. Firestore
-// cannot do substring matching, and the alternative — a prefix range query —
-// would only match from the start of the field, which is not what someone
-// typing part of a product name expects.
+// Filtering, searching and paging all happen in the database. On Firestore
+// none of that was possible: reads were metered per document, so the ~20k-row
+// catalogue could not be queried without a category chosen up front, the
+// category list had to be denormalised into a summary document, and search
+// could only scan whatever the browser had already downloaded. Postgres bills
+// storage, so a query is just a query.
 export function ProductListTab() {
-  const [category, setCategory] = useState<string | null>(null)
+  const [category, setCategory] = useState<string>('')
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [page, setPage] = useState(1)
 
-  // Both hooks are still called — hooks cannot be skipped conditionally — but
-  // while the tab is held back they are told not to subscribe, so nothing is
-  // read even if someone reaches #products by typing the URL.
-  const { data: summary, loading: summaryLoading } = usePvpSummary(PRODUCT_LIST_ENABLED)
-  const { data: products, loading } = usePvpPricesByCategory(
-    PRODUCT_LIST_ENABLED ? category : null,
-  )
+  const [categories, setCategories] = useState<string[]>([])
+  const [totalRows, setTotalRows] = useState<number | null>(null)
+  const [rows, setRows] = useState<PvpPrice[]>([])
+  const [matchCount, setMatchCount] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const categories = summary?.categories ?? []
+  // Typing shouldn't fire a query per keystroke now that search hits the
+  // database instead of an in-memory array.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [search])
 
-  // A new category or search term invalidates the current page number.
-  useEffect(() => { setPage(1) }, [category, search])
+  useEffect(() => { setPage(1) }, [category, debouncedSearch])
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return products
-    return products.filter(
-      (p) => p.sku.toLowerCase().includes(q) || p.name.toLowerCase().includes(q),
-    )
-  }, [products, search])
+  // Filter options + the total, once.
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([fetchPvpCategories(), fetchPvpCount()])
+      .then(([cats, total]) => {
+        if (cancelled) return
+        setCategories(cats)
+        setTotalRows(total)
+      })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
+    return () => { cancelled = true }
+  }, [])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const paged = useMemo(
-    () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [filtered, page],
-  )
+  // Results. A request counter drops responses that arrive out of order, so a
+  // slow early query can't overwrite a newer one.
+  const reqRef = useRef(0)
+  useEffect(() => {
+    const req = ++reqRef.current
+    setLoading(true)
+    fetchPvpPrices({ category: category || null, search: debouncedSearch || null, page, pageSize: PAGE_SIZE })
+      .then(({ rows: r, total }) => {
+        if (req !== reqRef.current) return
+        setRows(r)
+        setMatchCount(total)
+        setError(null)
+      })
+      .catch((e) => {
+        if (req !== reqRef.current) return
+        setError(e instanceof Error ? e.message : String(e))
+      })
+      .finally(() => { if (req === reqRef.current) setLoading(false) })
+  }, [category, debouncedSearch, page])
 
-  // Reachable only by typing #products while the tab is hidden.
-  if (!PRODUCT_LIST_ENABLED) {
-    return (
-      <div className="flex-1 overflow-auto p-5">
-        <EmptyState
-          title="ยังไม่เปิดใช้งาน"
-          detail="รายการสินค้ากำลังเตรียมข้อมูลอยู่ จะเปิดให้ใช้งานเร็ว ๆ นี้"
-        />
-      </div>
-    )
-  }
+  const totalPages = Math.max(1, Math.ceil(matchCount / PAGE_SIZE))
 
   return (
     <div className="flex-1 overflow-auto p-5">
@@ -82,14 +88,13 @@ export function ProductListTab() {
             </svg>
           </span>
           <select
-            value={category ?? ''}
-            onChange={(e) => setCategory(e.target.value || null)}
-            disabled={summaryLoading || categories.length === 0}
-            className={`pl-9 pr-8 py-2.5 text-sm rounded-xl border bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 appearance-none cursor-pointer transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className={`pl-9 pr-8 py-2.5 text-sm rounded-xl border bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 appearance-none cursor-pointer transition-all ${
               category ? 'border-freshket-300 text-freshket-700 font-bold' : 'border-gray-200 text-gray-700'
             }`}
           >
-            <option value="">{summaryLoading ? 'กำลังโหลด…' : 'เลือกหมวดสินค้า'}</option>
+            <option value="">ทุกหมวด</option>
             {categories.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
           <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
@@ -110,45 +115,48 @@ export function ProductListTab() {
             placeholder="ค้นหาจากรหัสสินค้า หรือชื่อสินค้า..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            disabled={!category}
-            className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-400 disabled:bg-gray-50 disabled:cursor-not-allowed"
+            className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-400"
           />
         </div>
       </div>
 
       {/* ── Body ──────────────────────────────────────────────────────────── */}
-      {!category ? (
-        <EmptyState
-          title="เลือกหมวดสินค้าเพื่อดูรายการ"
-          detail={summary
-            ? `มีสินค้าทั้งหมด ${summary.totalRows.toLocaleString()} รายการ ใน ${categories.length} หมวด`
-            : 'ยังไม่มีข้อมูลสินค้า — ผู้ดูแลระบบนำเข้าได้จากหน้า นำเข้าราคาสินค้า (PVP)'}
-        />
+      {error ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          โหลดรายการสินค้าไม่สำเร็จ — {error}
+        </div>
       ) : loading ? (
         <div className="flex items-center justify-center py-16">
           <div className="size-6 border-2 border-gray-200 border-t-freshket-500 rounded-full animate-spin" />
         </div>
-      ) : filtered.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyState
-          title={search ? 'ไม่พบสินค้าที่ตรงกัน' : 'ไม่มีสินค้าในหมวดนี้'}
-          detail={search ? `ลองค้นหาด้วยคำอื่น หรือเปลี่ยนหมวด` : undefined}
+          title={
+            debouncedSearch || category ? 'ไม่พบสินค้าที่ตรงกัน'
+            : 'ยังไม่มีข้อมูลสินค้า'
+          }
+          detail={
+            debouncedSearch || category ? 'ลองค้นหาด้วยคำอื่น หรือเปลี่ยนหมวด'
+            : 'ผู้ดูแลระบบนำเข้าได้จากหน้า นำเข้าราคาสินค้า (PVP)'
+          }
         />
       ) : (
         <>
           <p className="text-xs text-gray-500 mb-3">
-            พบ <span className="font-bold text-gray-800">{filtered.length.toLocaleString()}</span> รายการ
-            {' · หมวด '}<span className="font-bold text-freshket-700">{category}</span>
-            {search && <> จากการค้นหา &ldquo;{search}&rdquo;</>}
+            พบ <span className="font-bold text-gray-800">{matchCount.toLocaleString()}</span> รายการ
+            {category && <> · หมวด <span className="font-bold text-freshket-700">{category}</span></>}
+            {debouncedSearch && <> จากการค้นหา &ldquo;{debouncedSearch}&rdquo;</>}
+            {!category && !debouncedSearch && totalRows !== null && <> (ทั้งหมด)</>}
           </p>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50 overflow-hidden">
-            {paged.map((p) => <ProductRow key={p.id} product={p} />)}
+            {rows.map((p) => <ProductRow key={p.id} product={p} />)}
           </div>
 
-          {filtered.length > PAGE_SIZE && (
+          {matchCount > PAGE_SIZE && (
             <div className="flex items-center justify-between px-1 mt-4">
               <p className="text-xs text-gray-400">
-                แสดง {((page - 1) * PAGE_SIZE + 1).toLocaleString()}–{Math.min(page * PAGE_SIZE, filtered.length).toLocaleString()} จาก {filtered.length.toLocaleString()} รายการ
+                แสดง {((page - 1) * PAGE_SIZE + 1).toLocaleString()}–{Math.min(page * PAGE_SIZE, matchCount).toLocaleString()} จาก {matchCount.toLocaleString()} รายการ
               </p>
               <div className="flex items-center gap-2">
                 <button

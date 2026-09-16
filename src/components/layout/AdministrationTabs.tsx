@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
-import { PRODUCT_LIST_ENABLED } from '@/components/features/ProductListTab'
 
 // Super-admin-only sub-nav for the Administration area. Self-gating: renders
 // nothing unless the current user is super_admin, so pages shared with regular
@@ -56,10 +55,7 @@ export function AdministrationTabs() {
       {/* Tools group — clicking the tab goes to /tools; hover reveals the rest */}
       <Dropdown label="Tools" href="/tools" active={isTools}>
         <Link href="/tools" className={dropItemCls} onClick={(e) => switchHash(e, '')}>Tools</Link>
-        {/* Product List is built but held back — see PRODUCT_LIST_ENABLED. */}
-        {PRODUCT_LIST_ENABLED && (
-          <Link href="/tools#products" className={dropItemCls} onClick={(e) => switchHash(e, 'products')}>Product List</Link>
-        )}
+        <Link href="/tools#products" className={dropItemCls} onClick={(e) => switchHash(e, 'products')}>Product List</Link>
         <Link href="/tools/cuisine-guide" className={dropItemCls}>Cuisine Guide</Link>
         <Link href="/tools#qa" className={dropItemCls} onClick={(e) => switchHash(e, 'qa')}>Q&amp;A</Link>
         <Link href="/tools/mandatory" className={dropItemCls}>Merchandise Mandatory</Link>

@@ -13,9 +13,12 @@ import type { CSVImportError } from '@/types/tracking'
 // takes ~13 sequential calls, each well inside the function time limit. This
 // is what makes a file this size importable at all — one request for the whole
 // thing cannot finish in 60s (see /api/sheets/pvp-sync for that story).
-const CHUNK_ROWS = 1500
+// Rows per request. Chunking is now only about keeping each request inside the
+// function time limit and showing progress — the old, much smaller chunks were
+// sized around Firestore's per-call write caps, which no longer apply.
+const CHUNK_ROWS = 3000
 
-interface ChunkResult { written: number; unchanged: number; quotaExhausted: boolean }
+interface ChunkResult { written: number }
 
 type Phase = 'idle' | 'parsing' | 'uploading' | 'done'
 
@@ -30,8 +33,7 @@ export default function PvpImportPage() {
   const [parsed, setParsed] = useState<ParsedPvpRow[] | null>(null)
   const [parseErrors, setParseErrors] = useState<CSVImportError[]>([])
   const [sentRows, setSentRows] = useState(0)
-  const [totals, setTotals] = useState({ written: 0, unchanged: 0 })
-  const [quotaStopped, setQuotaStopped] = useState(false)
+  const [totals, setTotals] = useState({ written: 0 })
   const [error, setError] = useState<string | null>(null)
 
   if (user && user.role !== 'super_admin') {
@@ -46,8 +48,8 @@ export default function PvpImportPage() {
 
   function reset() {
     setFile(null); setParsed(null); setParseErrors([])
-    setSentRows(0); setTotals({ written: 0, unchanged: 0 })
-    setQuotaStopped(false); setError(null); setPhase('idle')
+    setSentRows(0); setTotals({ written: 0 })
+    setError(null); setPhase('idle')
   }
 
   async function pickFile(f: File) {
@@ -87,11 +89,9 @@ export default function PvpImportPage() {
   async function handleImport() {
     if (!parsed || parsed.length === 0) return
     setError(null); setPhase('uploading')
-    setSentRows(0); setTotals({ written: 0, unchanged: 0 }); setQuotaStopped(false)
+    setSentRows(0); setTotals({ written: 0 })
 
     let written = 0
-    let unchanged = 0
-    let stoppedForQuota = false
     try {
       for (let i = 0; i < parsed.length; i += CHUNK_ROWS) {
         const slice = parsed.slice(i, i + CHUNK_ROWS)
@@ -104,29 +104,8 @@ export default function PvpImportPage() {
         if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
 
         written += json.written
-        unchanged += json.unchanged
-        setTotals({ written, unchanged })
+        setTotals({ written })
         setSentRows(Math.min(i + slice.length, parsed.length))
-
-        // Out of daily Firestore quota — stop cleanly. What has been written
-        // stays written, and re-running the same file tomorrow skips it via
-        // the row hash, so it resumes rather than starting over.
-        if (json.quotaExhausted) { stoppedForQuota = true; setQuotaStopped(true); break }
-      }
-
-      // Record the category list for the Product List's filter. Sent from here
-      // because the browser already knows every category in the file — working
-      // it out server-side would mean reading all ~20k price docs, which is the
-      // read cost this summary exists to avoid.
-      if (!stoppedForQuota) {
-        const categories = Array.from(
-          new Set(parsed.map((r) => r.category).filter(Boolean)),
-        ).sort((a, b) => a.localeCompare(b, 'th'))
-        await authedFetch('/api/csv/pvp-prices', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rows: [], summary: { categories, totalRows: parsed.length } }),
-        })
       }
       setPhase('done')
     } catch (e) {
@@ -176,10 +155,9 @@ export default function PvpImportPage() {
             {phase === 'parsing' && <p className="text-xs text-gray-500">กำลังอ่านไฟล์…</p>}
 
             {parsed && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <Stat label="แถวที่อ่านได้" value={parsed.length} cls="bg-freshket-100 text-freshket-700" />
-                <Stat label="เขียนแล้ว" value={totals.written} cls="bg-freshket-100 text-freshket-700" />
-                <Stat label="ไม่เปลี่ยนแปลง" value={totals.unchanged} cls="bg-gray-100 text-gray-600" />
+                <Stat label="บันทึกแล้ว" value={totals.written} cls="bg-freshket-100 text-freshket-700" />
               </div>
             )}
 
@@ -197,20 +175,9 @@ export default function PvpImportPage() {
               </div>
             )}
 
-            {quotaStopped && (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                <p className="font-bold">โควตา Firestore หมดแล้ววันนี้</p>
-                <p className="text-xs mt-1">
-                  ข้อมูลที่เขียนไปแล้วถูกบันทึกเรียบร้อย — อัปโหลดไฟล์เดิมซ้ำอีกครั้งหลังโควตารีเซ็ต
-                  (ประมาณ 15:00 น.) ระบบจะข้ามแถวที่เขียนไปแล้วและทำต่อจากจุดที่ค้าง
-                </p>
-              </div>
-            )}
-
-            {phase === 'done' && !quotaStopped && (
+            {phase === 'done' && (
               <div className="rounded-2xl border border-freshket-200 bg-freshket-100 px-4 py-3 text-sm text-freshket-700">
-                นำเข้าเสร็จสมบูรณ์ — เขียน {totals.written.toLocaleString()} รายการ,
-                ไม่เปลี่ยนแปลง {totals.unchanged.toLocaleString()} รายการ
+                นำเข้าเสร็จสมบูรณ์ — บันทึก {totals.written.toLocaleString()} รายการ
               </div>
             )}
 
@@ -258,7 +225,7 @@ export default function PvpImportPage() {
           </div>
 
           <p className="text-xs text-gray-400 px-1">
-            แถวที่ค่าไม่เปลี่ยนจากครั้งก่อนจะถูกข้าม ไม่เขียนซ้ำ — อัปโหลดไฟล์เดิมซ้ำได้โดยไม่เปลืองโควตา
+            อัปโหลดไฟล์เดิมซ้ำได้ — ระบบจะทับข้อมูลเดิมด้วย SKU และไม่มีโควตารายวัน
           </p>
         </div>
       </div>
