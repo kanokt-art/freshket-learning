@@ -9,7 +9,7 @@ import { alertError } from '@/lib/ui/alert'
 import { canAccess, getTeamManagerIds } from '@/types/user'
 import type { UserProfile } from '@/types/user'
 import type { ShadowRecord, ShadowSegment, ShadowPersona, ShadowAcknowledgment } from '@/types/shadow'
-import { pushNotification } from '@/lib/notifications/push'
+import { announce } from '@/lib/notifications/announce'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { getDemoMode } from '@/lib/demo/demoMode'
 
@@ -1489,29 +1489,18 @@ export default function ShadowPage() {
     setLocalCreated(prev => [rec, ...prev])
     setShowForm(false)
 
-    // Notify the team_lead / manager who manages this sale
-    if (user?.managerId) {
-      pushNotification(user.managerId, {
-        type: 'shadow_pending_ack',
-        title: `${user.displayName} ส่ง Shadow Visit ใหม่`,
-        body: `ร้าน ${data.storeName} · ${data.segment} · รอการ Acknowledge`,
-        refId: rec.id,
-        refPath: '/shadow',
-      })
-    } else {
-      // Fallback: notify all team_leads / managers visible in allUsers
-      allUsers
-        .filter(u => canAccess(u.role, 'team_lead'))
-        .forEach(lead => {
-          pushNotification(lead.uid, {
-            type: 'shadow_pending_ack',
-            title: `${user?.displayName ?? 'พนักงาน'} ส่ง Shadow Visit ใหม่`,
-            body: `ร้าน ${data.storeName} · ${data.segment} · รอการ Acknowledge`,
-            refId: rec.id,
-            refPath: '/shadow',
-          })
-        })
-    }
+    // Announced once to the channel. This used to notify the sale's manager
+    // by uid, or every team_lead when they had none — targeting a shared
+    // channel can't aim, so whoever picks it up picks it up, which is what
+    // the fallback branch was approximating anyway.
+    void announce({
+      kind: 'shadow_submitted',
+      observerName: user?.displayName ?? 'พนักงาน',
+      visitSummary: `ร้าน ${data.storeName} · ${data.segment} · รอการ Acknowledge`,
+      position: user?.position,
+      department: user?.department,
+      path: '/shadow',
+    })
   }
 
   async function handleSaveAck(recordId: string, rating: number, comment: string) {
@@ -1528,15 +1517,14 @@ export default function ShadowPage() {
       await saveShadowAcknowledgment(recordId, ack)
     }
 
-    // Notify the sale person whose record was acknowledged
     const rec = records.find(r => r.id === recordId)
     if (rec && rec.observerUid !== user?.uid) {
-      pushNotification(rec.observerUid, {
-        type: 'shadow_ack_received',
-        title: `${user?.displayName ?? 'Mentor'} ประเมิน Shadow Visit ของคุณ`,
-        body: `ร้าน ${rec.storeName} · ได้รับ ${rating}/5 ดาว`,
-        refId: recordId,
-        refPath: '/shadow',
+      void announce({
+        kind: 'shadow_acked',
+        reviewerName: user?.displayName ?? 'Mentor',
+        observerName: rec.observerName || 'พนักงาน',
+        rating,
+        path: '/shadow',
       })
     }
   }

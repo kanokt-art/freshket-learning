@@ -41,3 +41,17 @@ export function formatDateEN(date: DateLike): string {
   return `${day} ${mon} ${year}`
 }
 
+/**
+ * "เมื่อกี้" / "3 นาทีที่แล้ว" / "เมื่อวาน" / "12 ม.ค."
+ *
+ * Lived in the notification list until that feature was replaced by Slack;
+ * it is a plain date helper and nothing about it was notification-specific.
+ */
+export function relativeTime(date: Date): string {
+  const diff = (Date.now() - date.getTime()) / 1000
+  if (diff < 60) return 'เมื่อกี้'
+  if (diff < 3600) return `${Math.floor(diff / 60)} นาทีที่แล้ว`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} ชั่วโมงที่แล้ว`
+  if (diff < 172800) return 'เมื่อวาน'
+  return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })
+}

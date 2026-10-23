@@ -6,7 +6,6 @@ import { useAuth } from '@/hooks/useAuth'
 import { canAccess } from '@/types/user'
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
 import { useMemo } from 'react'
-import { NotificationBellButton } from '@/components/features/NotificationBellButton'
 
 // ── Icon pairs: filled (active) vs outlined (inactive) ───────────────────────
 
@@ -139,13 +138,6 @@ export function BottomBar() {
         }]
       : []),
     {
-      // Handled specially in the render below — opens a popover instead of navigating.
-      href: null,
-      label: 'แจ้งเตือน',
-      active: false,
-      icon: null,
-    },
-    {
       href: '/profile',
       label: 'ฉัน',
       active: profileActive,
@@ -156,11 +148,7 @@ export function BottomBar() {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-white/95 backdrop-blur-md border-t border-gray-100 shadow-[0_-4px_24px_rgba(0,0,0,0.06)]">
       <div className="flex items-center justify-around h-[62px] pb-safe px-1">
-        {items.map((item) =>
-          item.href === null ? (
-            // Notification bell — opens a popover in place instead of navigating.
-            <NotificationBellButton key="notifications" variant="nav" />
-          ) : (
+        {items.map((item) => (
             <Link
               key={item.href}
               href={item.href}

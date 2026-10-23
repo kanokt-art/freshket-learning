@@ -188,6 +188,139 @@ export async function postShadowSubmittedToSlack(ev: SlackShadowSubmittedEvent):
   })
 }
 
+export interface SlackCoursePublishedEvent {
+  courseTitle: string
+  /** How many people the course reached — the channel's cue for how big this is. */
+  recipientCount: number
+  /** True when the course was already live and people were added to it. */
+  isAddition: boolean
+  courseUrl?: string
+}
+
+/**
+ * A course was published, or people were added to a live one.
+ *
+ * ONE post per publish, not one per recipient. The in-app bell this replaced
+ * wrote a row per person, which is right for a personal feed and wrong for a
+ * shared channel — publishing to fifty people would have posted fifty times.
+ * The headcount carries the information the per-person messages used to.
+ */
+export async function postCoursePublishedToSlack(ev: SlackCoursePublishedEvent): Promise<boolean> {
+  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
+  if (!webhook) return false
+
+  const headline = ev.isAddition
+    ? `มีผู้เรียนใหม่ถูกเพิ่มเข้าหลักสูตร *${ev.courseTitle}*`
+    : `📚 หลักสูตรใหม่: *${ev.courseTitle}*`
+
+  return post(webhook, {
+    text: ev.isAddition
+      ? `มีผู้เรียนใหม่ถูกเพิ่มเข้าหลักสูตร "${ev.courseTitle}"`
+      : `หลักสูตรใหม่: ${ev.courseTitle}`,
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text: headline } },
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `ถึงผู้เรียน ${ev.recipientCount} คน` }],
+      },
+      ...(ev.courseUrl
+        ? [{
+            type: 'actions',
+            elements: [{
+              type: 'button',
+              text: { type: 'plain_text', text: 'ดูหลักสูตร' },
+              url: ev.courseUrl,
+            }],
+          }]
+        : []),
+    ],
+  })
+}
+
+export interface SlackMandatoryPublishedEvent {
+  title: string
+  /** Departments the item targets; empty means everyone. */
+  departments: string[]
+  recipientCount: number
+  url?: string
+}
+
+/** A new Mandatory Reading item went live. One post, same reasoning as above. */
+export async function postMandatoryPublishedToSlack(
+  ev: SlackMandatoryPublishedEvent,
+): Promise<boolean> {
+  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
+  if (!webhook) return false
+
+  const audience = ev.departments.length > 0 ? ev.departments.join(' · ') : 'ทุกแผนก'
+
+  return post(webhook, {
+    text: `Mandatory Reading ใหม่: ${ev.title}`,
+    blocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `📌 *Mandatory Reading ใหม่*\n*${ev.title}*` },
+      },
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `${audience} · ${ev.recipientCount} คน` }],
+      },
+      ...(ev.url
+        ? [{
+            type: 'actions',
+            elements: [{
+              type: 'button',
+              text: { type: 'plain_text', text: 'เปิดอ่าน' },
+              url: ev.url,
+            }],
+          }]
+        : []),
+    ],
+  })
+}
+
+export interface SlackShadowAckedEvent {
+  reviewerName: string
+  observerName: string
+  rating?: number
+  shadowUrl?: string
+}
+
+/**
+ * A shadow visit was assessed. In the bell this went to the observer alone;
+ * in a shared channel it doubles as the record that the review actually
+ * happened, which is the number the team tracks.
+ */
+export async function postShadowAckedToSlack(ev: SlackShadowAckedEvent): Promise<boolean> {
+  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
+  if (!webhook) return false
+
+  const score = typeof ev.rating === 'number' ? ` — ${ev.rating}/5` : ''
+
+  return post(webhook, {
+    text: `${ev.reviewerName} ประเมิน Shadow Visit ของ ${ev.observerName} แล้ว`,
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `✅ *${ev.reviewerName}* ประเมิน Shadow Visit ของ *${ev.observerName}* แล้ว${score}`,
+        },
+      },
+      ...(ev.shadowUrl
+        ? [{
+            type: 'actions',
+            elements: [{
+              type: 'button',
+              text: { type: 'plain_text', text: 'ดูผลประเมิน' },
+              url: ev.shadowUrl,
+            }],
+          }]
+        : []),
+    ],
+  })
+}
+
 export interface SlackTakeAwayEvent {
   learnerName: string
   position?: string

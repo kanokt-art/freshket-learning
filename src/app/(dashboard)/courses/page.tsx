@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { pushNotification } from '@/lib/notifications/push'
+import { announce } from '@/lib/notifications/announce'
 import dynamic from 'next/dynamic'
 
 // recharts is ~94 kB gzipped and this page only uses it for one admin-only,
@@ -145,17 +145,17 @@ function notifyCoursePublishChanges(
     const targets = DEMO_MODE
       ? demoStore.getUsers().filter(isNotifyTarget)
       : allUsers.filter(isNotifyTarget)
-    targets.forEach(u => {
-      if (u.uid !== currentUid) {
-        pushNotification(u.uid, {
-          type: 'new_course',
-          title: `หลักสูตรใหม่: ${c.title}`,
-          body: `มีหลักสูตรใหม่สำหรับคุณ — คลิกเพื่อดูรายละเอียด`,
-          refId: c.id,
-          refPath: `/courses/${c.id}`,
-        })
-      }
-    })
+    // One post carrying the headcount, not one per learner: the channel is
+     // shared, so fanning out would repeat the same announcement N times.
+    const recipients = targets.filter(u => u.uid !== currentUid)
+    if (recipients.length > 0) {
+      void announce({
+        kind: 'course_published',
+        courseTitle: c.title,
+        recipientCount: recipients.length,
+        path: `/courses/${c.id}`,
+      })
+    }
   } else if (c.isPublished && wasPublished && prevAssignedUserIds && (c.assignedUserIds?.length ?? 0) > 0) {
     // Already-published course updated — notify only users newly added to assignedUserIds
     const prevAssigned = new Set(prevAssignedUserIds)
@@ -163,17 +163,16 @@ function notifyCoursePublishChanges(
       id => !prevAssigned.has(id) && !alreadyEnrolled.has(id)
     )
     const targets = allUsers.filter(u => newlyAdded.includes(u.uid))
-    targets.forEach(u => {
-      if (u.uid !== currentUid) {
-        pushNotification(u.uid, {
-          type: 'new_course',
-          title: `หลักสูตร: ${c.title}`,
-          body: `คุณถูกเพิ่มเข้าหลักสูตร — คลิกเพื่อดูรายละเอียด`,
-          refId: c.id,
-          refPath: `/courses/${c.id}`,
-        })
-      }
-    })
+    const recipients = targets.filter(u => u.uid !== currentUid)
+    if (recipients.length > 0) {
+      void announce({
+        kind: 'course_published',
+        courseTitle: c.title,
+        recipientCount: recipients.length,
+        isAddition: true,
+        path: `/courses/${c.id}`,
+      })
+    }
   }
 }
 

@@ -4,9 +4,7 @@ import { useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers, useAllTrainingRecords, useUserStats, useMyTrainingRecords, useCourses, useAnnouncements, useTeams } from '@/hooks/useFirestore'
-import { useNotifications } from '@/hooks/useNotifications'
-import { relativeTime } from '@/components/features/NotificationList'
-import type { NotifType } from '@/types/notification'
+import { relativeTime } from '@/lib/utils/dateFormatter'
 import { isAnnouncementVisibleTo } from '@/types/announcement'
 import { canViewByLevel } from '@/lib/jobLevel'
 import { statsAvgScore, type UserStats } from '@/types/stats'
@@ -16,7 +14,7 @@ import { CalendarCard } from '@/components/features/CalendarCard'
 // Team-lead / manager home — 3-column dashboard:
 //   left   → calendar + team member scores
 //   center → news feed (announcements)
-//   right  → notifications + continue-learning
+//   right  → continue-learning
 export function TeamLeadHome() {
   const router = useRouter()
   const { user } = useAuth()
@@ -30,7 +28,6 @@ export function TeamLeadHome() {
   const { data: courses } = useCourses()
   const { data: announcements } = useAnnouncements()
   const { data: teams } = useTeams()
-  const { items: notifications } = useNotifications(user?.uid)
 
   const firstName = user?.nickname ?? user?.displayName?.split(' ')[0] ?? 'คุณ'
 
@@ -190,9 +187,8 @@ export function TeamLeadHome() {
           <AllCoursesCard courses={publishedCourses} onOpen={(id) => router.push(`/courses/${id}`)} />
         </div>
 
-        {/* ── RIGHT: notifications + continue learning ─────────── */}
+        {/* ── RIGHT: continue learning ─────────────────────────── */}
         <div className="lg:col-span-3 space-y-5">
-          <NotificationsCard notifications={notifications} onOpen={(p) => p && p !== '/' && router.push(p)} />
           <ContinueLearningCard items={pending} onOpen={(id) => router.push(`/courses/${id}`)} greeting={firstName} />
         </div>
       </div>
@@ -282,52 +278,6 @@ function TeamScoresCard({ scores, onOpenTeam }: {
               </span>
             </div>
           ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Notifications (labels) ────────────────────────────────────────────────────
-const NOTIF_LABEL: Record<NotifType, { text: string; cls: string }> = {
-  shadow_pending_ack:   { text: 'รอประเมิน', cls: 'bg-orange-100 text-orange-600' },
-  shadow_ack_received:  { text: 'รับรองแล้ว', cls: 'bg-freshket-100 text-freshket-700' },
-  new_course:           { text: 'คอร์สใหม่', cls: 'bg-blue-100 text-blue-600' },
-  heart_received:       { text: 'ได้รับใจ', cls: 'bg-rose-100 text-rose-600' },
-  assessment_completed: { text: 'เรียนจบ', cls: 'bg-freshket-100 text-freshket-700' },
-  new_mandatory:        { text: 'Mandatory ใหม่', cls: 'bg-amber-100 text-amber-700' },
-}
-
-function NotificationsCard({ notifications, onOpen }: {
-  notifications: { id: string; type: NotifType; title: string; body: string; read: boolean; refPath: string; createdAt: Date }[]
-  onOpen: (refPath: string) => void
-}) {
-  const unread = notifications.filter((n) => !n.read).length
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-      <div className="flex items-center gap-2 mb-3">
-        <h3 className="text-sm font-bold text-gray-900">การแจ้งเตือน</h3>
-        {unread > 0 && (
-          <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-freshket-500 text-white text-xs font-bold tabular-nums">{unread}</span>
-        )}
-      </div>
-      {notifications.length === 0 ? (
-        <p className="text-xs text-gray-400 py-4 text-center">ไม่มีการแจ้งเตือน</p>
-      ) : (
-        <div className="space-y-2">
-          {notifications.slice(0, 6).map((n) => {
-            const label = NOTIF_LABEL[n.type] ?? { text: 'ข่าว', cls: 'bg-gray-100 text-gray-500' }
-            return (
-              <button key={n.id} type="button" onClick={() => onOpen(n.refPath)}
-                className="w-full text-left flex items-start gap-2 rounded-xl p-2 hover:bg-gray-50 transition-colors">
-                <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${label.cls}`}>{label.text}</span>
-                <span className="flex-1 min-w-0">
-                  <span className={`block text-xs truncate ${n.read ? 'text-gray-400' : 'text-gray-700 font-bold'}`}>{n.title}</span>
-                  <span className="block text-xs text-gray-400">{relativeTime(n.createdAt)}</span>
-                </span>
-              </button>
-            )
-          })}
         </div>
       )}
     </div>

@@ -4,7 +4,6 @@ import type { ReactNode } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { ROLE_LABELS } from '@/types/user'
-import { NotificationBellButton } from '@/components/features/NotificationBellButton'
 
 // Pages where back button should NOT appear (they are top-level destinations)
 const ROOT_PATHS = new Set(['/sale', '/courses', '/tools', '/users', '/profile', '/notifications'])
@@ -50,8 +49,6 @@ export function Header({ title, subtitle, actions }: HeaderProps) {
       {/* ── Right: actions + user ── */}
       <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         {actions}
-        {/* Notification bell — desktop only, opens a popover in place */}
-        <NotificationBellButton variant="header" />
         {user && (
           <div className="flex items-center gap-2 sm:gap-3">
             <span className="hidden sm:inline-flex items-center rounded-full bg-white/20 lg:bg-brand-green-100 px-2.5 py-1 text-xs font-normal text-white lg:text-brand-green">
