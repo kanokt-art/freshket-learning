@@ -15,6 +15,7 @@ import type { UserProfile, Team, Department } from '@/types/user'
 import { YouTubeGatedPlayer, youtubeVideoId } from '@/components/features/YouTubeGatedPlayer'
 import { syncTrainingRecord, countCourseLessons } from '@/lib/progress'
 import { progKey, statusKey, takeawayKey, readScoped } from '@/lib/courseProgressKeys'
+import { save } from '@/lib/data/collection'
 
 // ── Progress tracking via localStorage (mirrored to Firestore, see persist()) ──
 // preDone/postDone/preScore/postScore were dropped along with the course-level
@@ -59,13 +60,11 @@ function saveTakeAway(courseId: string, text: string, uid?: string, courseTitle?
   try { localStorage.setItem(takeawayKey(uid, courseId), text) } catch { /* ignore */ }
   ;(async () => {
     try {
-      const { getClientFirestore } = await import('@/lib/firebase/client')
-      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore')
-      await setDoc(
-        doc(getClientFirestore(), 'takeaways', `${uid}_${courseId}`),
-        { uid, courseId, courseTitle: courseTitle ?? '', text, updatedAt: serverTimestamp() },
-        { merge: true },
-      )
+      await save('takeaways', {
+        id: `${uid}_${courseId}`,
+        uid, courseId, courseTitle: courseTitle ?? '', text,
+        updatedAt: new Date(),
+      })
       // Mirror to Slack after the write lands — the route re-reads the saved
       // document, so calling it earlier would find nothing to quote. Server-side
       // because the webhook URL must not reach the browser. Fire-and-forget: the

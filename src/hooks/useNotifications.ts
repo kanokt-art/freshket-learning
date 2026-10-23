@@ -5,6 +5,7 @@ import { getDemoMode } from '@/lib/demo/demoMode'
 import { demoStore } from '@/lib/demo/demoStore'
 import type { AppNotification } from '@/types/notification'
 import { useFirestoreList } from '@/hooks/useFirestore'
+import { patch, saveMany } from '@/lib/data/collection'
 
 const DEMO_MODE = getDemoMode()
 
@@ -55,11 +56,8 @@ export function useNotifications(uid: string | undefined) {
       return
     }
     ;(async () => {
-      const { getClientFirestore } = await import('@/lib/firebase/client')
-      const { doc, updateDoc } = await import('firebase/firestore')
       if (!uid) return
-      const db = getClientFirestore()
-      await updateDoc(doc(db, 'notifications', uid, 'items', id), { read: true })
+      await patch(`notifications/${uid}/items`, id, { read: true })
     })()
   }
 
@@ -69,15 +67,11 @@ export function useNotifications(uid: string | undefined) {
       return
     }
     ;(async () => {
-      const { getClientFirestore } = await import('@/lib/firebase/client')
-      const { doc, writeBatch } = await import('firebase/firestore')
       if (!uid) return
-      const db = getClientFirestore()
-      const batch = writeBatch(db)
-      items.filter(n => !n.read).forEach(n => {
-        batch.update(doc(db, 'notifications', uid, 'items', n.id), { read: true })
-      })
-      await batch.commit()
+      await saveMany(
+        `notifications/${uid}/items`,
+        items.filter(n => !n.read).map(n => ({ id: n.id, read: true })),
+      )
     })()
   }
 

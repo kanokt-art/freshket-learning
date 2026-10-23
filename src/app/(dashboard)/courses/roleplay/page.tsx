@@ -1274,8 +1274,8 @@ export default function RoleplayPage() {
 
     try {
       // `rp-<timestamp>` ids are client-side placeholders — saveRoleplayAssessment
-      // only reuses an id that came back from Firestore, otherwise it lets
-      // addDoc mint one.
+      // only reuses an id that came back from the store, otherwise it passes
+      // no id and lets the store mint one.
       const savedId = await saveRoleplayAssessment(
         isEdit ? record : { ...record, id: '' }
       )

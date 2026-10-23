@@ -1465,10 +1465,10 @@ export default function ShadowPage() {
       observerName: user?.displayName ?? 'Demo User',
       ...data,
     }
-    // In demo mode there's no Firestore write path — keep the id scheme that
-    // was already there. In live mode, addDoc's real id is what
-    // shadowAcknowledgments will key off of, so it must come from Firestore,
-    // not be invented client-side before the write happens.
+    // In demo mode nothing is persisted — keep the id scheme that was already
+    // there. In live mode the stored id is what shadowAcknowledgments keys off
+    // of, so it must come back from the write, not be invented client-side
+    // before the write happens.
     let rec: ShadowRecord
     try {
       rec = DEMO_MODE

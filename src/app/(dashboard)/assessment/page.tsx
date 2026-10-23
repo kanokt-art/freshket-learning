@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { addDoc, collection, Timestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
@@ -16,7 +15,7 @@ import {
   type Choice,
   type DragPair,
 } from '@/types/assessment'
-import { getClientFirestore } from '@/lib/firebase/client'
+import { save, remove, patch } from '@/lib/data/collection'
 import { alertError } from '@/lib/ui/alert'
 import { parseFormJson, type ImportResult } from '@/lib/assessment/importFormJson'
 import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
@@ -76,20 +75,14 @@ export default function AssessmentPage() {
 
   async function togglePublish(assessment: Assessment) {
     const next = !assessment.isPublished
-    if (!DEMO_MODE) {
-      const db = getClientFirestore()
-      await updateDoc(doc(db, 'assessments', assessment.id), { isPublished: next })
-    }
+    await patch('assessments', assessment.id, { isPublished: next })
     setLocalUpdated((prev) => ({ ...prev, [assessment.id]: { isPublished: next } }))
   }
 
   async function handleDelete(a: Assessment) {
     setDeleting(true)
     try {
-      if (!DEMO_MODE) {
-        const db = getClientFirestore()
-        await deleteDoc(doc(db, 'assessments', a.id))
-      }
+      await remove('assessments', a.id)
       setLocalDeleted((p) => { const s = new Set(p); s.add(a.id); return s })
       setConfirmDelete(null)
     } catch (e) {
@@ -541,14 +534,11 @@ function AssessmentEditor({
           updatedAt: now,
         })
       } else {
-        const db = getClientFirestore()
         if (initial?.id) {
-          await updateDoc(doc(db, 'assessments', initial.id), { ...payload, updatedAt: Timestamp.fromDate(now) })
+          await save('assessments', { ...payload, id: initial.id, updatedAt: now })
           onSave({ ...initial, ...payload, updatedAt: now })
         } else {
-          await addDoc(collection(db, 'assessments'), {
-            ...payload, createdAt: Timestamp.fromDate(now), updatedAt: Timestamp.fromDate(now),
-          })
+          await save('assessments', { ...payload, id: '', createdAt: now, updatedAt: now })
           onSave()
         }
       }

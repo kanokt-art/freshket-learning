@@ -15,6 +15,7 @@ import type { Course } from '@/types/course'
 import type { TrainingStatus } from '@/types/tracking'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { recomputeMyStats } from '@/lib/stats'
+import { get, save } from '@/lib/data/collection'
 
 const DEMO_MODE = getDemoMode()
 
@@ -37,9 +38,6 @@ export async function syncTrainingRecord(
 ): Promise<void> {
   if (DEMO_MODE || !uid) return
   try {
-    const { getClientFirestore } = await import('@/lib/firebase/client')
-    const { doc, getDoc, setDoc, serverTimestamp, Timestamp } = await import('firebase/firestore')
-    const db = getClientFirestore()
 
     // Rules require userId == request.auth.uid on both create and update, and the
     // doc id is deterministic so repeated saves update rather than duplicate.
@@ -58,27 +56,27 @@ export async function syncTrainingRecord(
       completedLessonIds: snap.completedLessonIds,
       totalLessons: snap.totalLessons,
       source: 'manual',
-      updatedAt: serverTimestamp(),
+      updatedAt: new Date(),
     }
-    if (course.endDate) payload.dueDate = Timestamp.fromDate(new Date(course.endDate))
+    if (course.endDate) payload.dueDate = new Date(course.endDate)
 
-    const ref = doc(db, 'trainingRecords', `${uid}_${course.id}`)
+    const recordId = `${uid}_${course.id}`
 
     // startedAt / completedAt are FIRST-TIME stamps, not "last activity". They used
     // to be written on every sync, so `startedAt` silently became the last-touch
     // time and `completedAt` crept forward every time a finished course was
     // reopened — which is the date HR reports on. Only set each one if it isn't
     // already stored.
-    const existing = await getDoc(ref)
-    const prev = existing.exists() ? existing.data() : undefined
+    const prev = await get<Record<string, unknown>>('trainingRecords', recordId)
+    const now = new Date()
     if (snap.status !== 'not_started' && !prev?.startedAt) {
-      payload.startedAt = serverTimestamp()
+      payload.startedAt = now
     }
     if (snap.status === 'completed' && !prev?.completedAt) {
-      payload.completedAt = serverTimestamp()
+      payload.completedAt = now
     }
 
-    await setDoc(ref, payload, { merge: true })
+    await save('trainingRecords', { ...payload, id: recordId })
 
     // Keep this learner's aggregate summary (userStats/{uid}) in step so the
     // dashboards/leaderboard don't need to scan the whole trainingRecords
@@ -92,7 +90,7 @@ export async function syncTrainingRecord(
     // Score changes no longer originate here (the submit route recomputes the
     // rollup itself after grading), so only a new record or a status change can
     // invalidate the summary from this path.
-    const isNewRecord = !existing.exists()
+    const isNewRecord = prev === null
     const statusChanged = prev?.status !== snap.status
     if (isNewRecord || statusChanged) {
       await recomputeMyStats(uid)

@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react'
 import { parseAssessmentCSV, type ParsedAssessmentScore } from '@/lib/utils/csvParser'
 import type { UserProfile } from '@/types/user'
 import type { CSVImportError } from '@/types/tracking'
+import { saveMany } from '@/lib/data/collection'
 
 // Super-admin tool: import a Google-Forms assessment CSV (Pre/Post scores),
 // map each row to an employee by email, preview the match, then write the
@@ -66,36 +67,30 @@ export function ImportAssessmentModal({ users, onClose, onDone }: {
     setSaving(true)
     setError(null)
     try {
-      const { getClientFirestore, writeBatch, doc, collection } = await import('@/lib/firebase/client')
-      const db = getClientFirestore()
       const now = new Date()
       const subj = subject.trim() || 'Assessment'
-      // Firestore caps a batch at 500 writes — chunk to be safe.
-      for (let i = 0; i < matched.length; i += 450) {
-        const batch = writeBatch(db)
-        for (const r of matched.slice(i, i + 450)) {
-          const takenAt = new Date(r.takenAt)
-          const ms = isNaN(takenAt.getTime()) ? now.getTime() : takenAt.getTime()
+      await saveMany('assessmentScores', matched.map((r) => {
+        const takenAt = new Date(r.takenAt)
+        const valid = !isNaN(takenAt.getTime())
+        const ms = valid ? takenAt.getTime() : now.getTime()
+        return {
           // Deterministic id → re-importing the same file updates, never duplicates.
-          const id = `${r.uid}_${slug(subj)}_${r.type}_${ms}`
-          batch.set(doc(collection(db, 'assessmentScores'), id), {
-            uid: r.uid,
-            email: r.email,
-            subject: subj,
-            type: r.type,
-            score: r.score,
-            total: r.total,
-            pct: r.pct,
-            takenAt: isNaN(takenAt.getTime()) ? now : takenAt,
-            createdAt: now,
-          })
+          id: `${r.uid}_${slug(subj)}_${r.type}_${ms}`,
+          uid: r.uid,
+          email: r.email,
+          subject: subj,
+          type: r.type,
+          score: r.score,
+          total: r.total,
+          pct: r.pct,
+          takenAt: valid ? takenAt : now,
+          createdAt: now,
         }
-        await batch.commit()
-      }
+      }))
       onDone({ imported: matched.length, matched: matched.length, unmatchedEmails })
     } catch (e) {
       console.error(e)
-      setError('บันทึกลง Firestore ไม่สำเร็จ — กรุณาลองใหม่')
+      setError('บันทึกไม่สำเร็จ — กรุณาลองใหม่')
     } finally {
       setSaving(false)
     }

@@ -104,8 +104,8 @@ export function parseFormJson(raw: string, genId: () => string): ImportResult {
     if (points < 1) points = 1
 
     // `description` is omitted entirely when empty rather than set to
-    // undefined: these questions are written straight into Firestore by the
-    // assessment editor, and addDoc() rejects an undefined field value.
+    // undefined: an absent field and an explicitly-undefined one read the same
+    // here, and omitting it keeps the stored question free of empty keys.
     const desc = str(q.description)
     const base = {
       id: genId(),

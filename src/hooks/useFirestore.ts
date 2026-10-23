@@ -22,6 +22,7 @@ import { MOCK_CUISINE_GUIDES, type CuisineGuideItem } from '@/lib/cuisineGuide'
 import type { AssessmentScore } from '@/types/assessmentScore'
 import type { UserBucketResult } from '@/types/bucketAssessment'
 import { computeUserStats, type UserStats } from '@/types/stats'
+import { save, patch as patchDoc, remove, removeMany, saveMany } from '@/lib/data/collection'
 
 // ── Local imported-user overlay (persists CSV-imported users in localStorage) ──
 /**
@@ -104,31 +105,24 @@ export function saveLocalImportedUsers(users: UserProfile[]): void {
 
   // Batch-write to Firestore (upsert: overwrite csv docs with latest data)
   if (!DEMO_MODE && toWrite.length > 0) {
-    import('@/lib/firebase/client').then(({ getClientFirestore, writeBatch, doc: fbDoc }) => {
-      const db = getClientFirestore()
-      const batch = writeBatch(db)
-      for (const u of toWrite) {
-        const data: Record<string, unknown> = {
-          uid: u.uid, email: u.email, displayName: u.displayName,
-          role: u.role, photoURL: u.photoURL ?? null,
-          ...(u.displayNameEN && { displayNameEN: u.displayNameEN }),
-          ...(u.nickname      && { nickname:      u.nickname }),
-          ...(u.employeeId    && { employeeId:    u.employeeId }),
-          ...(u.department    && { department:    u.department }),
-          ...(u.position      && { position:      u.position }),
-          ...(u.lineManager   && { lineManager:   u.lineManager }),
-          ...(u.rank          && { rank:          u.rank }),
-          ...(u.startDate     && { startDate:     u.startDate }),
-          ...(u.employmentStatus && { employmentStatus: u.employmentStatus }),
-          createdAt: u.createdAt, updatedAt: u.updatedAt,
-        }
-        batch.set(fbDoc(db, 'users', u.uid), data, { merge: true })
-      }
-      batch.commit().catch(reportWriteFailure(
-        'นำเข้าข้อมูลพนักงานไม่สำเร็จ',
-        'ข้อมูลที่นำเข้ายังไม่ถูกบันทึกขึ้นระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
-      ))
-    })
+    void saveMany('users', toWrite.map((u) => ({
+      id: u.uid,
+      uid: u.uid, email: u.email, displayName: u.displayName,
+      role: u.role, photoURL: u.photoURL ?? null,
+      ...(u.displayNameEN && { displayNameEN: u.displayNameEN }),
+      ...(u.nickname      && { nickname:      u.nickname }),
+      ...(u.employeeId    && { employeeId:    u.employeeId }),
+      ...(u.department    && { department:    u.department }),
+      ...(u.position      && { position:      u.position }),
+      ...(u.lineManager   && { lineManager:   u.lineManager }),
+      ...(u.rank          && { rank:          u.rank }),
+      ...(u.startDate     && { startDate:     u.startDate }),
+      ...(u.employmentStatus && { employmentStatus: u.employmentStatus }),
+      createdAt: u.createdAt, updatedAt: u.updatedAt,
+    })), { merge: true }).catch(reportWriteFailure(
+      'นำเข้าข้อมูลพนักงานไม่สำเร็จ',
+      'ข้อมูลที่นำเข้ายังไม่ถูกบันทึกขึ้นระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
+    ))
   }
 }
 
@@ -176,13 +170,12 @@ export function saveLocalTeam(team: Team): void {
   }
   window.dispatchEvent(new Event(LOCAL_TEAM_EVT))
   if (!DEMO_MODE) {
-    import('@/lib/firebase/client').then(({ getClientFirestore, setDoc, doc: fbDoc }) => {
-      const data = Object.fromEntries(Object.entries(team).filter(([, v]) => v !== undefined))
-      setDoc(fbDoc(getClientFirestore(), 'teams', team.id), data).catch(reportWriteFailure(
-        'บันทึกทีมไม่สำเร็จ',
-        'การเปลี่ยนแปลงยังไม่ถูกบันทึกขึ้นระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
-      ))
-    })
+    // replace: a team is stored whole — a member dropped from the array has to
+    // actually disappear, which a merge would leave behind.
+    void save('teams', { ...team }, { replace: true }).catch(reportWriteFailure(
+      'บันทึกทีมไม่สำเร็จ',
+      'การเปลี่ยนแปลงยังไม่ถูกบันทึกขึ้นระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
+    ))
   }
 }
 
@@ -195,12 +188,10 @@ export function deleteLocalTeam(id: string): void {
   localStorage.setItem(LOCAL_DELETED_TEAM_IDS_KEY, JSON.stringify(Array.from(deleted)))
   window.dispatchEvent(new Event(LOCAL_TEAM_EVT))
   if (!DEMO_MODE) {
-    import('@/lib/firebase/client').then(({ getClientFirestore, deleteDoc, doc: fbDoc }) => {
-      deleteDoc(fbDoc(getClientFirestore(), 'teams', id)).catch(reportWriteFailure(
-        'ลบทีมไม่สำเร็จ',
-        'ทีมนี้อาจยังอยู่ในระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
-      ))
-    })
+    void remove('teams', id).catch(reportWriteFailure(
+      'ลบทีมไม่สำเร็จ',
+      'ทีมนี้อาจยังอยู่ในระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
+    ))
   }
 }
 
@@ -213,15 +204,10 @@ export function deleteLocalTeams(ids: string[]): void {
   localStorage.setItem(LOCAL_DELETED_TEAM_IDS_KEY, JSON.stringify(Array.from(deleted)))
   window.dispatchEvent(new Event(LOCAL_TEAM_EVT))
   if (!DEMO_MODE) {
-    import('@/lib/firebase/client').then(({ getClientFirestore, writeBatch, doc: fbDoc }) => {
-      const db = getClientFirestore()
-      const batch = writeBatch(db)
-      for (const id of ids) batch.delete(fbDoc(db, 'teams', id))
-      batch.commit().catch(reportWriteFailure(
-        'ลบทีมไม่สำเร็จ',
-        'บางทีมอาจยังอยู่ในระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
-      ))
-    })
+    void removeMany('teams', ids).catch(reportWriteFailure(
+      'ลบทีมไม่สำเร็จ',
+      'บางทีมอาจยังอยู่ในระบบ กรุณารีเฟรชหน้าเว็บแล้วลองใหม่',
+    ))
   }
 }
 
@@ -257,15 +243,15 @@ export function applyLocalUserPatch(uid: string, patch: UserPatch): void {
   // csv- users are managed via server API (/api/users/save-assignments) to avoid
   // Firestore permission issues and snapshot rollback loops.
   if (!DEMO_MODE && !uid.startsWith('csv-')) {
-    import('@/lib/firebase/client').then(({ getClientFirestore, updateDoc, doc: fbDoc }) => {
-      // Use normalized (undefined→null) so Firestore actually writes the value
-      // instead of silently ignoring it.
-      // updateDoc (not setDoc+merge): setDoc+merge silently CREATES a doc if `uid`
-      // no longer exists (e.g. merged away by dedup, or a stale client-side id) —
-      // that produced empty ghost docs. updateDoc rejects instead, so a stale
-      // write surfaces as a visible error rather than phantom data.
-      updateDoc(fbDoc(getClientFirestore(), 'users', uid), normalized)
-        .catch((err) => {
+    // Use normalized (undefined→null) so the store actually writes the value
+    // instead of silently ignoring it.
+    //
+    // mustExist: a plain upsert silently CREATES a doc when `uid` no longer
+    // exists (merged away by dedup, or a stale client-side id) — that produced
+    // empty ghost docs. This rejects instead, so a stale write surfaces as a
+    // visible error rather than phantom data.
+    void patchDoc('users', uid, normalized, { mustExist: true })
+      .catch((err) => {
           // A rejected write here previously failed silently: the optimistic
           // localStorage patch kept the UI looking correct until the next
           // Firestore snapshot rolled it back, which read as "member vanished".
@@ -273,13 +259,12 @@ export function applyLocalUserPatch(uid: string, patch: UserPatch): void {
           // Imported lazily: this module is pulled in by nearly every page, so a
           // static import would put SweetAlert2 in the shared first-load bundle
           // for a dialog that only ever appears when a write fails.
-          void import('@/lib/ui/alert').then(({ alertError }) =>
-            alertError(
-              'บันทึกการย้ายพนักงานไม่สำเร็จ',
-              `${err?.message ?? err} — พนักงานคนนี้อาจถูกรวม/ลบไปแล้ว กรุณารีเฟรชหน้าเว็บ`,
-            ))
-        })
-    })
+        void import('@/lib/ui/alert').then(({ alertError }) =>
+          alertError(
+            'บันทึกการย้ายพนักงานไม่สำเร็จ',
+            `${err?.message ?? err} — พนักงานคนนี้อาจถูกรวม/ลบไปแล้ว กรุณารีเฟรชหน้าเว็บ`,
+          ))
+      })
   }
 }
 
@@ -1168,25 +1153,14 @@ export function useAllShadowAcknowledgments(enabled = true): UseResult<ShadowAck
 }
 
 export async function saveShadowRecord(record: Omit<ShadowRecord, 'id'>): Promise<string> {
-  const { getClientFirestore } = await import('@/lib/firebase/client')
-  const { addDoc, collection, Timestamp } = await import('firebase/firestore')
-  const db = getClientFirestore()
-  const ref = await addDoc(collection(db, 'shadowRecords'), {
-    ...record,
-    createdAt: Timestamp.fromDate(record.createdAt),
-    updatedAt: Timestamp.fromDate(record.updatedAt),
-  })
-  return ref.id
+  // No id → the seam mints one, so two assessors saving at the same moment
+  // can't collide.
+  const { id } = await save('shadowRecords', { ...record, id: '' })
+  return id
 }
 
 export async function saveShadowAcknowledgment(recordId: string, ack: ShadowAcknowledgment): Promise<void> {
-  const { getClientFirestore } = await import('@/lib/firebase/client')
-  const { doc, setDoc, Timestamp } = await import('firebase/firestore')
-  const db = getClientFirestore()
-  await setDoc(doc(db, 'shadowAcknowledgments', recordId), {
-    ...ack,
-    reviewedAt: Timestamp.fromDate(ack.reviewedAt),
-  })
+  await save('shadowAcknowledgments', { ...ack, id: recordId }, { replace: true })
 }
 
 // ── Roleplay assessments ──────────────────────────────────────────────────────
@@ -1197,26 +1171,20 @@ export async function saveShadowAcknowledgment(recordId: string, ack: ShadowAckn
 // attributable to whoever scored it.
 
 export async function saveRoleplayAssessment(assessment: RoleplayAssessment): Promise<string> {
-  const { getClientFirestore } = await import('@/lib/firebase/client')
-  const { doc, setDoc, collection, addDoc, Timestamp } = await import('firebase/firestore')
-  const db = getClientFirestore()
-  const { id, createdAt, ...rest } = assessment
-  const payload = { ...rest, createdAt: Timestamp.fromDate(createdAt) }
+  const { id, ...rest } = assessment
 
-  // An edit keeps its id; a new evaluation lets Firestore mint one so two
-  // assessors filling in the same member at once can't collide on a local id.
-  if (id && !id.startsWith('local-')) {
-    await setDoc(doc(db, 'roleplayAssessments', id), payload, { merge: true })
-    return id
-  }
-  const ref = await addDoc(collection(db, 'roleplayAssessments'), payload)
-  return ref.id
+  // An edit keeps its id; a new evaluation passes none so the seam mints one,
+  // so two assessors filling in the same member at once can't collide on a
+  // local id.
+  const written = await save('roleplayAssessments', {
+    ...rest,
+    id: id && !id.startsWith('local-') ? id : '',
+  })
+  return written.id
 }
 
 export async function deleteRoleplayAssessment(id: string): Promise<void> {
-  const { getClientFirestore } = await import('@/lib/firebase/client')
-  const { doc, deleteDoc } = await import('firebase/firestore')
-  await deleteDoc(doc(getClientFirestore(), 'roleplayAssessments', id))
+  await remove('roleplayAssessments', id)
 }
 
 // ── Bucket assessment results (one doc per uid per questionnaire) ─────────────
@@ -1315,13 +1283,11 @@ export async function saveNewJoinerList<T>(
   docId: 'newJoinerTeams' | 'newJoinerProblems',
   items: T[],
 ): Promise<void> {
-  const { getClientFirestore } = await import('@/lib/firebase/client')
-  const { doc, setDoc, serverTimestamp } = await import('firebase/firestore')
-  // merge:true so we only touch these two fields, matching the convention the
-  // moduleAccess save in /admin/settings uses.
-  await setDoc(
-    doc(getClientFirestore(), 'appConfig', docId),
-    { items, updatedAt: serverTimestamp() },
-    { merge: true },
-  )
+  // patch, not a whole-document write, so we only touch these two fields —
+  // matching the convention the moduleAccess save in /admin/settings uses.
+  //
+  // The stamp is the client's clock rather than the server's: this is an admin
+  // editing a config list, with no concurrent writer to order against, and the
+  // field is only ever read back as "last edited around then".
+  await patchDoc('appConfig', docId, { items, updatedAt: new Date() })
 }

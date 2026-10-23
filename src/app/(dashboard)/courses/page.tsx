@@ -2,7 +2,6 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { addDoc, updateDoc, deleteDoc, doc, collection, Timestamp } from 'firebase/firestore'
 import { pushNotification } from '@/lib/notifications/push'
 import dynamic from 'next/dynamic'
 
@@ -35,7 +34,7 @@ import { STATUS_LABELS, STATUS_COLORS, recordProgressPercent, type TrainingStatu
 import { QUESTION_TYPE_LABELS, QUESTION_TYPE_COLORS, type Assessment } from '@/types/assessment'
 import type { UserProfile, UserRole, Department, Team } from '@/types/user'
 import { getTeamLeadIds, getTeamManagerIds } from '@/types/user'
-import { getClientFirestore } from '@/lib/firebase/client'
+import { save, remove, patch } from '@/lib/data/collection'
 import { formatDateEN } from '@/lib/utils/dateFormatter'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
@@ -294,9 +293,9 @@ export default function CoursesPage() {
     if (DEMO_MODE) {
       demoStore.updateCourse(course.id, updated)
     } else {
-      await updateDoc(doc(getClientFirestore(), 'courses', course.id), {
+      await patch('courses', course.id, {
         isPublished: updated.isPublished,
-        updatedAt: Timestamp.fromDate(now),
+        updatedAt: now,
       })
       setLocalUpdated((p) => ({ ...p, [course.id]: updated }))
     }
@@ -310,8 +309,7 @@ export default function CoursesPage() {
       if (DEMO_MODE) {
         demoStore.deleteCourse(course.id)
       } else {
-        const db = getClientFirestore()
-        await deleteDoc(doc(db, 'courses', course.id))
+        await remove('courses', course.id)
         setLocalDeleted((p) => { const s = new Set(p); s.add(course.id); return s })
       }
       setConfirmDelete(null)
@@ -3612,17 +3610,15 @@ function QuizLessonSettingsCard({
     }
     setSaving(true)
     try {
-      if (!DEMO_MODE) {
-        // passingScore is intentionally absent: it is owned by the assessment
-        // editor. Writing it from here would push this screen's stale copy over
-        // a value the quiz author may have just changed.
-        await updateDoc(doc(getClientFirestore(), 'assessments', currentAssessment.id), {
-          title: title.trim(),
-          timeLimitMinutes: Number(timeLimitMinutes) || 0,
-          antiCheatEnabled,
-          description: description.trim(),
-        })
-      }
+      // passingScore is intentionally absent: it is owned by the assessment
+      // editor. Writing it from here would push this screen's stale copy over
+      // a value the quiz author may have just changed.
+      await patch('assessments', currentAssessment.id, {
+        title: title.trim(),
+        timeLimitMinutes: Number(timeLimitMinutes) || 0,
+        antiCheatEnabled,
+        description: description.trim(),
+      })
     } catch (e) {
       void alertError('บันทึกการตั้งค่าไม่สำเร็จ', e instanceof Error ? e.message : String(e))
     } finally {
@@ -4472,11 +4468,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     setSaveError(null)
     try {
       const now = new Date()
-      const toTs = (s: string) => s ? Timestamp.fromDate(new Date(s)) : undefined
       const toDate = (s: string) => s ? new Date(s) : undefined
-      // Firestore rejects undefined values — strip them before writing
-      const omitUndef = <T extends object>(o: T) =>
-        Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T
       const payload = {
         title: form.title.trim(), description: form.description.trim(),
         category: form.category, level: form.level,
@@ -4511,13 +4503,15 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
         else onDone({ id: `local-${Date.now()}`, ...payload, createdBy: userId, createdAt: now, updatedAt: now } as Course)
         return
       }
-      const db = getClientFirestore()
+      const dates = { startDate: toDate(form.startDate), endDate: toDate(form.endDate) }
       if (isEdit && editCourse) {
-        await updateDoc(doc(db, 'courses', editCourse.id), omitUndef({ ...payload, startDate: toTs(form.startDate), endDate: toTs(form.endDate), updatedAt: Timestamp.fromDate(now) }))
+        await save('courses', { ...payload, ...dates, id: editCourse.id, updatedAt: now })
         onDone({ ...editCourse, ...payload, updatedAt: now })
       } else {
-        const ref = await addDoc(collection(db, 'courses'), omitUndef({ ...payload, startDate: toTs(form.startDate), endDate: toTs(form.endDate), createdBy: userId, createdAt: Timestamp.fromDate(now), updatedAt: Timestamp.fromDate(now) }))
-        onDone({ id: ref.id, ...payload, createdBy: userId, createdAt: now, updatedAt: now } as Course)
+        const { id } = await save('courses', {
+          ...payload, ...dates, id: '', createdBy: userId, createdAt: now, updatedAt: now,
+        })
+        onDone({ id, ...payload, createdBy: userId, createdAt: now, updatedAt: now } as Course)
       }
     } catch (e) {
       console.error('performSave:', e)

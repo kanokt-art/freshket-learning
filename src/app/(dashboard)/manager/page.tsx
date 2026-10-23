@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
-import { getClientFirestore } from '@/lib/firebase/client'
+import { save } from '@/lib/data/collection'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
 import { useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList } from '@/hooks/useFirestore'
@@ -554,13 +554,12 @@ function EmployeeSidebar({
     const next = { comment, score, leadName: viewer?.displayName }
     setFeedbackOverlay((prev) => ({ ...prev, [courseId]: next }))
     try {
-      const db = getClientFirestore()
-      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore')
-      await setDoc(doc(db, 'courseFeedback', `${user.uid}_${courseId}`), {
+      await save('courseFeedback', {
+        id: `${user.uid}_${courseId}`,
         memberUid: user.uid, courseId, comment, score,
         leadUid: viewer?.uid ?? '', leadName: viewer?.displayName ?? '',
-        updatedAt: serverTimestamp(),
-      }, { merge: true })
+        updatedAt: new Date(),
+      })
     } catch (e) {
       console.error('saveFeedback', e)
       void alertError('บันทึกความคิดเห็นไม่สำเร็จ', 'กรุณาลองอีกครั้ง')

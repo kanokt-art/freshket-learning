@@ -9,6 +9,7 @@
 
 import { computeUserStats } from '@/types/stats'
 import { getDemoMode } from '@/lib/demo/demoMode'
+import { findBy, patch } from '@/lib/data/collection'
 
 const DEMO_MODE = getDemoMode()
 
@@ -17,15 +18,13 @@ const DEMO_MODE = getDemoMode()
 export async function recomputeMyStats(uid: string | undefined): Promise<void> {
   if (DEMO_MODE || !uid) return
   try {
-    const { getClientFirestore, collection, query, where, getDocs, doc, setDoc } = await import('@/lib/firebase/client')
-    const db = getClientFirestore()
-    const snap = await getDocs(query(collection(db, 'trainingRecords'), where('userId', '==', uid)))
-    const records = snap.docs.map((d) => {
-      const data = d.data()
-      return { status: String(data.status ?? 'not_started'), score: (data.score as number | undefined) ?? null }
-    })
+    const rows = await findBy<{ status?: unknown; score?: number }>('trainingRecords', 'userId', uid)
+    const records = rows.map((r) => ({
+      status: String(r.status ?? 'not_started'),
+      score: r.score ?? null,
+    }))
     const stats = computeUserStats(uid, records)
-    await setDoc(doc(db, 'userStats', uid), { ...stats, updatedAt: new Date() }, { merge: true })
+    await patch('userStats', uid, { ...stats, updatedAt: new Date() })
   } catch (e) {
     console.error('recomputeMyStats failed', e)
   }
