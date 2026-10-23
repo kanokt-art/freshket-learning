@@ -53,6 +53,7 @@ import { formatPersonName } from '@/lib/users/displayName'
 import { onlyActiveEmployees, isActiveEmployee } from '@/lib/users/active'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { BUCKET_ASSESSMENT_LIST, getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
+import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 const DEMO_MODE = getDemoMode()
 const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS) as CourseCategory[]
 
@@ -4264,7 +4265,13 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     return map
   }, [teams])
 
-  const deptTree: DeptTreeNode[] = useMemo(() => departments.map((dept) => ({
+  // Phase 1 departments only. The picker listed every department in the
+  // roster — including ones with nobody in them — so an admin assigning
+  // learners scrolled past a dozen teams that cannot use the platform yet to
+  // reach the four that can.
+  const deptTree: DeptTreeNode[] = useMemo(() => departments
+    .filter((dept) => PHASE1_DEPARTMENTS.has(dept.name))
+    .map((dept) => ({
     id: dept.id, name: dept.name,
     teams: teams.filter((t) => t.departmentId === dept.id).map((t) => ({
       id: t.id, name: t.name,
@@ -4279,7 +4286,8 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
         !leadOrManagerTeamId.has(u.uid),
       )
       .map((u) => u.uid),
-  })), [departments, teams, assignableUsers, validTeamIds, leadOrManagerTeamId])
+  })),
+  [departments, teams, assignableUsers, validTeamIds, leadOrManagerTeamId])
 
   const rankGroups = useMemo(() => {
     const map = new Map<string, string[]>()

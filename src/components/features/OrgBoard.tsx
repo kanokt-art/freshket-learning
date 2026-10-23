@@ -4,6 +4,7 @@ import { useState, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Department, Team, UserProfile } from '@/types/user'
 import { ROLE_LABELS, canAccess, getTeamManagerIds, getTeamLeadIds } from '@/types/user'
+import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -50,19 +51,9 @@ const DEPT_MERGES: Array<{ sourceNames: string[]; displayName: string }> = [
   },
 ]
 
-// Phase 1 rollout — only these departments are onboarded onto the platform so
-// far; the rest exist in the roster but are hidden here to keep admin focus on
-// the active departments. Remove this allowlist once other departments go live.
-// Exported so the Employees list-view department filter (users/page.tsx) can
-// apply the same restriction consistently.
-export const PHASE1_DEPARTMENTS = new Set([
-  'Sales Management',
-  'Key Account Management',
-  'Portfolio Management',
-  'People Experience',
-  'Commercial Operations',
-  'Commercial',
-])
+// Re-exported so existing importers keep working; the list itself lives in
+// lib/modules alongside the module registry it gates.
+export { PHASE1_DEPARTMENTS }
 
 function deptId(name: string) {
   return `dept-${name.toLowerCase().replace(/[^a-z0-9ก-๙]/g, '-')}`
@@ -738,12 +729,18 @@ function TeamCard({
         </div>
       )}
 
-      {/* Horizontal body — Manager | Team Lead | Members side by side so the
-          whole team reads as one wide row instead of a stack of sections. */}
+      {/* Horizontal body — leadership | Members side by side so the whole team
+          reads as one wide row instead of a stack of sections.
+          Manager and Team Lead share ONE narrow column, stacked: each holds a
+          person or two, so giving them a column each spent ~220px of width on
+          whitespace and squeezed the Members grid that actually needs it. */}
       <div className="flex flex-col lg:flex-row lg:items-stretch gap-4">
 
+      {/* Leadership — Manager above Team Lead */}
+      <div className="lg:w-56 lg:shrink-0 lg:border-r lg:border-gray-100 lg:pr-4 flex flex-col gap-3">
+
       {/* Manager */}
-      <div className="lg:w-56 lg:shrink-0 lg:border-r lg:border-gray-100 lg:pr-4">
+      <div>
       <div
         className={`h-full rounded-xl p-2 transition-all ${
           dragOverManager ? 'bg-purple-50 border-2 border-dashed border-purple-300' : 'border-2 border-dashed border-transparent'
@@ -889,8 +886,8 @@ function TeamCard({
       </div>
       </div>
 
-      {/* Team Lead */}
-      <div className="lg:w-56 lg:shrink-0 lg:border-r lg:border-gray-100 lg:pr-4">
+      {/* Team Lead — sits under Manager in the same column */}
+      <div className="lg:border-t lg:border-gray-100 lg:pt-3">
       <div
         className={`h-full rounded-xl p-2 transition-all ${
           dragOverTL ? 'bg-blue-50 border-2 border-dashed border-blue-300' : 'border-2 border-dashed border-transparent'
@@ -1044,6 +1041,7 @@ function TeamCard({
         )}
       </div>
       </div>
+      </div>{/* end leadership column */}
 
       {/* Members list */}
       <div className="flex-1 min-w-0">
