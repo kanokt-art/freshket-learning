@@ -18,6 +18,7 @@ import {
   type MandatoryItem, type MandatoryDeptAccess,
 } from '@/lib/mandatory'
 import { confirmAction, alertError } from '@/lib/ui/alert'
+import { save, remove, patch } from '@/lib/data/collection'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 
 const DEMO_MODE = getDemoMode()
@@ -107,22 +108,15 @@ export default function MandatoryPage() {
   // per-viewer localStorage convenience would not follow the admin between
   // devices, and this preference is meant to persist like any other setting.
   const rememberDepartments = useCallback(async (depts: string[]) => {
-    if (DEMO_MODE || !user?.uid) return
-    const { getClientFirestore, doc, setDoc } = await import('@/lib/firebase/client')
-    await setDoc(doc(getClientFirestore(), 'users', user.uid), { mandatoryLastDepartments: depts }, { merge: true })
+    if (!user?.uid) return
+    await patch('users', user.uid, { mandatoryLastDepartments: depts })
   }, [user?.uid])
 
   const saveItem = useCallback(async (form: FormState, existing?: MandatoryItem) => {
-    if (DEMO_MODE) return
-    const { getClientFirestore, doc, setDoc, collection } = await import('@/lib/firebase/client')
-    const { Timestamp } = await import('firebase/firestore')
-    const db = getClientFirestore()
-    const isNew = !existing
-    const id = isNew ? doc(collection(db, 'mandatoryItems')).id : existing.id
     const now = new Date()
     const wasPublished = existing?.isPublished ?? false
-    const item: MandatoryItem = {
-      id,
+    const draft = {
+      id: existing?.id ?? '',
       title: form.title,
       description: form.description,
       slidesUrl: form.slidesUrl,
@@ -133,13 +127,11 @@ export default function MandatoryPage() {
       createdAt: existing?.createdAt ?? now,
       createdBy: existing?.createdBy ?? user?.uid,
     }
-    rememberDepartments(mandatoryDepartments(item))
-    await setDoc(doc(db, 'mandatoryItems', id), {
-      ...item,
-      publishedAt: Timestamp.fromDate(item.publishedAt),
-      createdAt: Timestamp.fromDate(item.createdAt),
-    })
-    if (item.isPublished && !wasPublished) notifyPublish(item)
+    rememberDepartments(mandatoryDepartments(draft as MandatoryItem))
+    // replace, not merge: dropping a department from the access list has to
+    // remove it, not leave the previous entry behind.
+    const { id } = await save('mandatoryItems', draft, { replace: true })
+    if (draft.isPublished && !wasPublished) notifyPublish({ ...draft, id } as MandatoryItem)
   }, [user?.uid, notifyPublish, rememberDepartments])
 
   // Both await the write before closing. Previously saveItem() was called
@@ -177,16 +169,12 @@ export default function MandatoryPage() {
       danger: true,
     })
     if (!ok) return
-    if (DEMO_MODE) return
-    const { getClientFirestore, doc, deleteDoc } = await import('@/lib/firebase/client')
-    await deleteDoc(doc(getClientFirestore(), 'mandatoryItems', id))
+    await remove('mandatoryItems', id)
   }
 
   async function handleTogglePublish(item: MandatoryItem) {
-    if (DEMO_MODE) return
     const wasPublished = item.isPublished
-    const { getClientFirestore, doc, setDoc } = await import('@/lib/firebase/client')
-    await setDoc(doc(getClientFirestore(), 'mandatoryItems', item.id), { isPublished: !wasPublished }, { merge: true })
+    await patch('mandatoryItems', item.id, { isPublished: !wasPublished })
     if (!wasPublished) notifyPublish({ ...item, isPublished: true })
   }
 

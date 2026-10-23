@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { doc, setDoc } from 'firebase/firestore'
-import { getClientFirestore } from '@/lib/firebase/client'
+import { patch } from '@/lib/data/collection'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers } from '@/hooks/useFirestore'
@@ -105,10 +104,8 @@ export default function ModuleSettingsPage() {
     setSaving(true)
     setLoadError(false)
     try {
-      const db = getClientFirestore()
-      // merge:true so we only touch `departments` and never clobber other fields
-      // that may exist on the doc.
-      await setDoc(doc(db, 'appConfig', 'moduleAccess'), { departments: config }, { merge: true })
+      // Patches only `departments`, never clobbering other fields on the doc.
+      await patch('appConfig', 'moduleAccess', { departments: config })
       setSaved(true)
       setDirty(false)
     } catch {

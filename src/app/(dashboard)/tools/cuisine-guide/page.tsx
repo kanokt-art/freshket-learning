@@ -9,6 +9,7 @@ import { canAccess } from '@/types/user'
 import { useCuisineGuides } from '@/hooks/useFirestore'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { confirmAction } from '@/lib/ui/alert'
+import { save, remove, patch, saveMany } from '@/lib/data/collection'
 import {
   MOCK_CUISINE_GUIDES, formatBaht,
   type CuisineGuideItem, type CuisineSku,
@@ -69,23 +70,20 @@ export default function CuisineGuidePage() {
   const [seeding, setSeeding] = useState(false)
 
   const saveGuide = useCallback(async (form: FormState, existing?: CuisineGuideItem) => {
-    if (DEMO_MODE) return
-    const { getClientFirestore, doc, setDoc, collection } = await import('@/lib/firebase/client')
-    const { Timestamp } = await import('firebase/firestore')
-    const db = getClientFirestore()
-    const isNew = !existing
-    const id = isNew ? doc(collection(db, 'cuisineGuides')).id : existing.id
     const now = new Date()
-    await setDoc(doc(db, 'cuisineGuides', id), {
+    // replace, not merge: clearing every SKU row has to actually empty the
+    // list rather than leave the previous one in place.
+    await save('cuisineGuides', {
+      id: existing?.id ?? '',
       name: form.name,
       description: form.description,
       coverUrl: form.coverUrl,
       isPublished: form.isPublished,
       skus: form.skus.filter((s) => s.fktId.trim() || s.itemName.trim()),
-      createdAt: Timestamp.fromDate(existing?.createdAt ?? now),
-      updatedAt: Timestamp.fromDate(now),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
       createdBy: existing?.createdBy ?? user?.uid,
-    })
+    }, { replace: true })
   }, [user?.uid])
 
   async function handleDelete(id: string) {
@@ -96,36 +94,23 @@ export default function CuisineGuidePage() {
       danger: true,
     })
     if (!ok) return
-    if (DEMO_MODE) return
-    const { getClientFirestore, doc, deleteDoc } = await import('@/lib/firebase/client')
-    await deleteDoc(doc(getClientFirestore(), 'cuisineGuides', id))
+    await remove('cuisineGuides', id)
   }
 
   async function handleTogglePublish(item: CuisineGuideItem) {
-    if (DEMO_MODE) return
-    const { getClientFirestore, doc, setDoc } = await import('@/lib/firebase/client')
-    await setDoc(doc(getClientFirestore(), 'cuisineGuides', item.id), { isPublished: !item.isPublished }, { merge: true })
+    await patch('cuisineGuides', item.id, { isPublished: !item.isPublished })
   }
 
-  // Copies the built-in mock cuisines into Firestore so they become real,
+  // Copies the built-in mock cuisines into storage so they become real,
   // editable docs — same "import defaults" action /tools uses for SEED_TOOLS.
   const importMockGuides = useCallback(async () => {
-    if (DEMO_MODE) return
     setSeeding(true)
     try {
-      const { getClientFirestore, doc, writeBatch } = await import('@/lib/firebase/client')
-      const { Timestamp } = await import('firebase/firestore')
-      const db = getClientFirestore()
-      const batch = writeBatch(db)
-      MOCK_CUISINE_GUIDES.forEach((g, i) => {
-        const { id, ...fields } = g
-        batch.set(doc(db, 'cuisineGuides', id), {
-          ...fields,
-          createdAt: Timestamp.fromDate(new Date(g.createdAt.getTime() + i)),
-          updatedAt: Timestamp.fromDate(g.updatedAt),
-        })
-      })
-      await batch.commit()
+      await saveMany('cuisineGuides', MOCK_CUISINE_GUIDES.map((g, i) => ({
+        ...g,
+        // Nudge each createdAt apart so the seeded order is stable.
+        createdAt: new Date(g.createdAt.getTime() + i),
+      })))
     } finally {
       setSeeding(false)
     }

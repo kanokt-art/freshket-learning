@@ -1,8 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { addDoc, updateDoc, deleteDoc, doc, collection, Timestamp } from 'firebase/firestore'
-import { getClientFirestore } from '@/lib/firebase/client'
+import { save, remove } from '@/lib/data/collection'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
 import { useAnnouncements, useDepartments } from '@/hooks/useFirestore'
@@ -63,7 +62,6 @@ export default function AnnouncementsAdminPage() {
     setActionError(null)
     // Demo mode has no live Firestore — mock list is read-only.
     if (isDemo) { setShowForm(false); setEditing(null); return true }
-    const db = getClientFirestore()
     const shared = {
       title: payload.title,
       body: payload.body,
@@ -73,20 +71,17 @@ export default function AnnouncementsAdminPage() {
       targetDepartments: payload.targetDepartments,
     }
     try {
-      if (id) {
-        await updateDoc(doc(db, 'announcements', id), {
-          ...shared,
-          updatedAt: Timestamp.now(),
-          updatedBy: user?.uid ?? '',
-        })
-      } else {
-        await addDoc(collection(db, 'announcements'), {
-          ...shared,
-          createdAt: Timestamp.now(),
-          createdBy: user?.uid ?? '',
-          authorName: user?.displayName ?? '',
-        })
-      }
+      // An edit stamps who revised it; a new post records its author. Both
+      // merge, so an edit never clears the creation fields.
+      await save('announcements', id
+        ? { ...shared, id, updatedAt: new Date(), updatedBy: user?.uid ?? '' }
+        : {
+            ...shared,
+            id: '',
+            createdAt: new Date(),
+            createdBy: user?.uid ?? '',
+            authorName: user?.displayName ?? '',
+          })
       setShowForm(false)
       setEditing(null)
       return true
@@ -101,7 +96,7 @@ export default function AnnouncementsAdminPage() {
     setActionError(null)
     if (isDemo) { setConfirmDelete(null); return }
     try {
-      await deleteDoc(doc(getClientFirestore(), 'announcements', a.id))
+      await remove('announcements', a.id)
       setConfirmDelete(null)
     } catch (e) {
       console.error('delete announcement', e)

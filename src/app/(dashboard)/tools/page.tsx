@@ -13,6 +13,7 @@ import { markToolSeen } from '@/hooks/useUnseenTools'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
 import { confirmAction, alertError } from '@/lib/ui/alert'
+import { save, remove, patch, saveMany } from '@/lib/data/collection'
 
 const DEMO_MODE = getDemoMode()
 
@@ -314,16 +315,12 @@ export default function ToolsPage() {
 
   // Same close-before-write bug as saveTool above — see that comment.
   const saveDeck = useCallback(async (deck: KnowledgeDeck, isNew: boolean) => {
-    if (DEMO_MODE) { setDeckEditTarget(null); return }
     try {
-      const { getClientFirestore, doc, setDoc, collection } = await import('@/lib/firebase/client')
-      const db = getClientFirestore()
-      const id = isNew ? doc(collection(db, 'knowledgeDecks')).id : deck.id
-      const { id: _omit, ...fields } = deck
-      await setDoc(doc(db, 'knowledgeDecks', id), {
-        ...fields,
+      await save('knowledgeDecks', {
+        ...deck,
+        id: isNew ? '' : deck.id,
         createdAt: deck.createdAt ?? new Date(),
-      }, { merge: true })
+      })
     } catch (err) {
       console.error('saveDeck failed', err)
       await alertError('บันทึก Deck ไม่สำเร็จ', 'ข้อมูลยังอยู่ในฟอร์ม กรุณาลองใหม่อีกครั้ง')
@@ -333,26 +330,19 @@ export default function ToolsPage() {
   }, [])
 
   const deleteDeck = useCallback(async (id: string) => {
-    if (DEMO_MODE) return
     const okDeck = await confirmAction({ title: 'ลบสไลด์นี้?', text: 'การลบไม่สามารถย้อนกลับได้', confirmText: 'ลบ', danger: true })
     if (!okDeck) return
-    const { getClientFirestore, doc, deleteDoc } = await import('@/lib/firebase/client')
-    await deleteDoc(doc(getClientFirestore(), 'knowledgeDecks', id))
+    await remove('knowledgeDecks', id)
   }, [])
 
-  // Copy the built-in default decks into Firestore so they become editable docs.
+  // Copy the built-in default decks into storage so they become editable docs.
   const importSeedDecks = useCallback(async () => {
-    if (DEMO_MODE) return
     setDeckSeeding(true)
     try {
-      const { getClientFirestore, doc, writeBatch } = await import('@/lib/firebase/client')
-      const db = getClientFirestore()
-      const batch = writeBatch(db)
-      DEFAULT_KNOWLEDGE_DECKS.forEach((d, i) => {
-        const { id, ...fields } = d
-        batch.set(doc(db, 'knowledgeDecks', id), { ...fields, createdAt: new Date(Date.now() + i) })
-      })
-      await batch.commit()
+      await saveMany('knowledgeDecks', DEFAULT_KNOWLEDGE_DECKS.map((d, i) => ({
+        ...d,
+        createdAt: new Date(Date.now() + i),
+      })))
     } finally {
       setDeckSeeding(false)
     }
@@ -376,16 +366,12 @@ export default function ToolsPage() {
   // tool simply never appeared. Close only once the write has landed; on
   // failure keep the modal open with the draft intact so it can be retried.
   const saveTool = useCallback(async (tool: SaleTool, isNew: boolean) => {
-    if (DEMO_MODE) { setEditTarget(null); return }
     try {
-      const { getClientFirestore, doc, setDoc, collection } = await import('@/lib/firebase/client')
-      const db = getClientFirestore()
-      const id = isNew ? doc(collection(db, 'tools')).id : tool.id
-      const { id: _omit, ...fields } = tool
-      await setDoc(doc(db, 'tools', id), {
-        ...fields,
+      await save('tools', {
+        ...tool,
+        id: isNew ? '' : tool.id,
         createdAt: tool.createdAt ?? new Date(),
-      }, { merge: true })
+      })
     } catch (err) {
       console.error('saveTool failed', err)
       await alertError('บันทึก Tool ไม่สำเร็จ', 'ข้อมูลยังอยู่ในฟอร์ม กรุณาลองใหม่อีกครั้ง')
@@ -395,32 +381,23 @@ export default function ToolsPage() {
   }, [])
 
   const deleteTool = useCallback(async (id: string) => {
-    if (DEMO_MODE) return
     const okTool = await confirmAction({ title: 'ลบ Tool นี้?', text: 'การลบไม่สามารถย้อนกลับได้', confirmText: 'ลบ', danger: true })
     if (!okTool) return
-    const { getClientFirestore, doc, deleteDoc } = await import('@/lib/firebase/client')
-    await deleteDoc(doc(getClientFirestore(), 'tools', id))
+    await remove('tools', id)
   }, [])
 
   const togglePublish = useCallback(async (tool: SaleTool) => {
-    if (DEMO_MODE) return
-    const { getClientFirestore, doc, setDoc } = await import('@/lib/firebase/client')
-    await setDoc(doc(getClientFirestore(), 'tools', tool.id), { isPublished: !tool.isPublished }, { merge: true })
+    await patch('tools', tool.id, { isPublished: !tool.isPublished })
   }, [])
 
   // Copy the built-in defaults into Firestore so they become real, editable docs.
   const importSeedTools = useCallback(async () => {
-    if (DEMO_MODE) return
     setSeeding(true)
     try {
-      const { getClientFirestore, doc, writeBatch } = await import('@/lib/firebase/client')
-      const db = getClientFirestore()
-      const batch = writeBatch(db)
-      SEED_TOOLS.forEach((t, i) => {
-        const { id, ...fields } = t
-        batch.set(doc(db, 'tools', id), { ...fields, createdAt: new Date(Date.now() + i) })
-      })
-      await batch.commit()
+      await saveMany('tools', SEED_TOOLS.map((t, i) => ({
+        ...t,
+        createdAt: new Date(Date.now() + i),
+      })))
     } finally {
       setSeeding(false)
     }
