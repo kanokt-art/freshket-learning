@@ -281,13 +281,19 @@ service cloud.firestore {
                     || (isTeamLeadOrAbove() && resource.data.assessorUid == uid());
     }
 
-    // ── /notifications — RETIRED ───────────────────────────────────────────────
-    // The in-app bell was replaced by Slack (POST /api/notifications/announce),
-    // which posts to a shared channel and stores nothing. Nothing reads or
-    // writes this collection any more; denied outright so leftover documents
-    // stay unreachable until they are deleted.
+    // ── /notifications (subcollection per user) ────────────────────────────────
+    // Creates are SERVER-ONLY, via POST /api/notifications/push (Admin SDK, which
+    // bypasses these rules). This used to be `allow create: if isStaff()`, i.e.
+    // any signed-in employee could write into any other employee's feed with
+    // arbitrary title/body/link — a ready-made internal phishing channel. The API
+    // route now derives the sender from the verified ID token, restricts `type` to
+    // the known enum, and requires `refPath` to be an internal path.
+    //
+    // Recipients keep read + update (mark read) + delete on their own feed.
     match /notifications/{userId}/items/{itemId} {
-      allow read, write: if false;
+      allow read:           if isStaff() && (request.auth.uid == userId || isSuperAdmin());
+      allow create:         if false;
+      allow update, delete: if isStaff() && (request.auth.uid == userId || isSuperAdmin());
     }
 
     // ── /takeaways (learner "key take away" reflections, readable by leads) ──────

@@ -10,6 +10,7 @@ import { canAccess, getTeamManagerIds } from '@/types/user'
 import type { UserProfile } from '@/types/user'
 import type { ShadowRecord, ShadowSegment, ShadowPersona, ShadowAcknowledgment } from '@/types/shadow'
 import { announce } from '@/lib/notifications/announce'
+import { pushNotification } from '@/lib/notifications/push'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { getDemoMode } from '@/lib/demo/demoMode'
 
@@ -1489,16 +1490,33 @@ export default function ShadowPage() {
     setLocalCreated(prev => [rec, ...prev])
     setShowForm(false)
 
-    // Announced once to the channel. This used to notify the sale's manager
-    // by uid, or every team_lead when they had none — targeting a shared
-    // channel can't aim, so whoever picks it up picks it up, which is what
-    // the fallback branch was approximating anyway.
+    // The bell can aim: it goes to the sale's own manager, or to every
+    // team_lead when they have none. Slack can't, so it gets one post and
+    // whoever picks it up picks it up.
+    if (user?.managerId) {
+      pushNotification(user.managerId, {
+        type: 'shadow_pending_ack',
+        title: `${user.displayName} ส่ง Shadow Visit ใหม่`,
+        body: `ร้าน ${data.storeName} · ${data.segment} · รอการ Acknowledge`,
+        refId: rec.id,
+        refPath: '/shadow',
+      })
+    } else {
+      allUsers
+        .filter(u => canAccess(u.role, 'team_lead'))
+        .forEach(lead => {
+          pushNotification(lead.uid, {
+            type: 'shadow_pending_ack',
+            title: `${user?.displayName ?? 'พนักงาน'} ส่ง Shadow Visit ใหม่`,
+            body: `ร้าน ${data.storeName} · ${data.segment} · รอการ Acknowledge`,
+            refId: rec.id,
+            refPath: '/shadow',
+          })
+        })
+    }
     void announce({
       kind: 'shadow_submitted',
-      observerName: user?.displayName ?? 'พนักงาน',
       visitSummary: `ร้าน ${data.storeName} · ${data.segment} · รอการ Acknowledge`,
-      position: user?.position,
-      department: user?.department,
       path: '/shadow',
     })
   }
@@ -1519,6 +1537,13 @@ export default function ShadowPage() {
 
     const rec = records.find(r => r.id === recordId)
     if (rec && rec.observerUid !== user?.uid) {
+      pushNotification(rec.observerUid, {
+        type: 'shadow_ack_received',
+        title: `${user?.displayName ?? 'Mentor'} ประเมิน Shadow Visit ของคุณ`,
+        body: `ร้าน ${rec.storeName} · ได้รับ ${rating}/5 ดาว`,
+        refId: recordId,
+        refPath: '/shadow',
+      })
       void announce({
         kind: 'shadow_acked',
         reviewerName: user?.displayName ?? 'Mentor',

@@ -520,6 +520,36 @@ create table if not exists public.resources (
 create index if not exists resources_published_idx on public.resources (is_published, created_at desc);
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- Notifications
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- The in-app bell's per-user feed. Firestore nested these under
+-- notifications/{uid}/items; a subcollection is just a foreign key here, so
+-- `uid` becomes a column and the per-user list is an indexed filter.
+--
+-- This feed coexists with the Slack channel rather than being replaced by it:
+-- the bell is personal (one row per recipient, with a read flag), Slack is
+-- shared (one post per event). See /api/notifications/push and
+-- /api/notifications/announce.
+create table if not exists public.notifications (
+  id         text primary key,
+  uid        text not null,
+  "type"     text not null,
+  title      text not null default '',
+  body       text not null default '',
+  read       boolean not null default false,
+  ref_id     text,
+  ref_path   text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists notifications_uid_created_idx
+  on public.notifications (uid, created_at desc);
+-- The unread badge counts only unread rows.
+create index if not exists notifications_unread_idx
+  on public.notifications (uid) where not read;
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- Config & operations
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -598,7 +628,7 @@ begin
     'user_bucket_results','course_feedback','shadow_records',
     'shadow_acknowledgments','roleplay_assessments','tools','knowledge_decks',
     'cuisine_guides','mandatory_items','announcements','resources',
-    'app_config','csv_imports','slack_posts','app_meta'
+    'notifications','app_config','csv_imports','slack_posts','app_meta'
   ]
   loop
     execute format('alter table public.%I enable row level security', t);

@@ -8,6 +8,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { canAccess } from '@/types/user'
 import { useMandatoryItems, useAllUsers, useDepartments } from '@/hooks/useFirestore'
 import { announce } from '@/lib/notifications/announce'
+import { pushNotification } from '@/lib/notifications/push'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { MandatorySlideViewer } from '@/components/features/MandatorySlideViewer'
 import { SlidePreviewArea } from '@/components/features/MandatoryPreview'
@@ -92,6 +93,15 @@ export default function MandatoryPage() {
       u.uid !== user?.uid
       && (depts.length === 0 || (u.department && depts.includes(u.department))),
     )
+    targets.forEach(u => {
+      pushNotification(u.uid, {
+        type: 'new_mandatory',
+        title: `Mandatory Reading ใหม่: ${item.title}`,
+        body: `${item.weekLabel} — คลิกเพื่อเปิดอ่าน`,
+        refId: item.id,
+        refPath: '/courses/mandatory',
+      })
+    })
     void announce({
       kind: 'mandatory_published',
       title: item.title,

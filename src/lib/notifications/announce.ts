@@ -36,11 +36,13 @@ export type AnnounceEvent =
       path?: string
     }
   | {
+      /**
+       * The sender's name, position and department are NOT passed: the server
+       * reads them from the caller's own HR record, which it can do because
+       * the token already identifies them.
+       */
       kind: 'shadow_submitted'
-      observerName: string
       visitSummary: string
-      position?: string
-      department?: string
       path?: string
     }
   | {

@@ -6,6 +6,7 @@
 import { MOCK_USERS, MOCK_COURSES, MOCK_RESOURCES, MOCK_TEAMS, MOCK_DEPARTMENTS } from '@/lib/utils/mockData'
 import type { UserProfile, Team, Department } from '@/types/user'
 import type { Course, Resource } from '@/types/course'
+import type { AppNotification } from '@/types/notification'
 
 // ── Storage key & event name ──────────────────────────────────────────────────
 const STORE_KEY = 'fk_demo_v2'
@@ -106,6 +107,8 @@ function saveState(s: LiveState) {
 let _state: LiveState = defaultState()
 let _hydrated = false
 
+// Notifications are session-only (not persisted to localStorage)
+const _notifications = new Map<string, AppNotification[]>()
 
 function ensureHydrated() {
   if (!_hydrated && typeof window !== 'undefined') {
@@ -231,10 +234,31 @@ export const demoStore = {
     demoStore.updateUser(uid, { teamId })
   },
 
+  // ── Notifications ─────────────────────────────────────────────────────────
+  getNotifications(uid: string): AppNotification[] {
+    return (_notifications.get(uid) ?? []).slice().sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+  },
+  pushNotification(targetUid: string, notif: AppNotification) {
+    const existing = _notifications.get(targetUid) ?? []
+    _notifications.set(targetUid, [notif, ...existing])
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event(EVT))
+  },
+  markNotificationRead(uid: string, notifId: string) {
+    const existing = _notifications.get(uid) ?? []
+    _notifications.set(uid, existing.map(n => n.id === notifId ? { ...n, read: true } : n))
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event(EVT))
+  },
+  markAllNotificationsRead(uid: string) {
+    const existing = _notifications.get(uid) ?? []
+    _notifications.set(uid, existing.map(n => ({ ...n, read: true })))
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event(EVT))
+  },
+
   // ── Reset ─────────────────────────────────────────────────────────────────
   reset() {
     _state = defaultState()
     _hydrated = true
+    _notifications.clear()
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORE_KEY)
       window.dispatchEvent(new Event(EVT))

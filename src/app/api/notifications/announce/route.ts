@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAdminFirestore } from '@/lib/firebase/admin'
 import { requireStaff } from '@/lib/firebase/requireStaff'
+import type { UserProfile } from '@/types/user'
 import {
   postCoursePublishedToSlack,
   postMandatoryPublishedToSlack,
   postShadowSubmittedToSlack,
   postShadowAckedToSlack,
+  isSalesDepartment,
 } from '@/lib/notifications/slack'
 
 // Announce a training event to the Slack channel.
@@ -111,13 +114,30 @@ export async function POST(req: NextRequest) {
       }
 
       case 'shadow_submitted': {
-        const observerName = text(body.observerName, 120)
         const visitSummary = text(body.visitSummary)
-        if (!observerName || !visitSummary) return bad('Invalid observerName or visitSummary')
+        if (!visitSummary) return bad('Invalid visitSummary')
+
+        // Name, position and department are read from the sender's own HR
+        // record rather than taken from the request: the caller is already
+        // identified by the verified token, so there is no reason to let it
+        // describe itself, and this keeps the channel's wording consistent
+        // with the rest of the app (English name plus nickname).
+        const db = getAdminFirestore()
+        const snap = await db.collection('users').doc(gate.uid).get()
+        const sender = snap.exists ? (snap.data() as Partial<UserProfile>) : {}
+
+        // Only sales visits go to the channel — the same gate the old push
+        // route applied, kept so this change does not quietly widen who the
+        // channel hears about.
+        if (!isSalesDepartment(sender.department)) {
+          return NextResponse.json({ ok: true, posted: false })
+        }
+
         posted = await postShadowSubmittedToSlack({
-          observerName,
-          position: text(body.position, 120) ?? undefined,
-          department: text(body.department, 120) ?? undefined,
+          observerName: (sender.displayNameEN?.trim() || sender.displayName || 'พนักงาน')
+            + (sender.nickname ? ` (${sender.nickname})` : ''),
+          position: sender.position,
+          department: sender.department,
           visitSummary,
           shadowUrl: appUrl(body.path),
         })
