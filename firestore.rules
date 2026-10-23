@@ -145,36 +145,6 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
-    // ── /products ──────────────────────────────────────────────────────────────
-    // Legacy catalog from the "Public-price" sheet. Its sync (ProductsSync.gs)
-    // is retired — /pvpPrices covers the same products with private prices too
-    // — so this collection is now static leftover data that nothing reads.
-    match /products/{productId} {
-      allow read: if isStaff();
-      allow write: if isSuperAdmin();
-    }
-
-    // ── /pvpPrices ─────────────────────────────────────────────────────────────
-    // PVP price list, synced from the "PVP" tab via docs/apps-script/PvpSync.gs
-    // (a thin webhook ping) + POST /api/sheets/pvp-sync (the actual Sheets→
-    // Firestore pull, Admin SDK, bypasses these rules). Same shape as /products.
-    match /pvpPrices/{sku} {
-      allow read: if isStaff();
-      allow write: if isSuperAdmin();
-    }
-
-    // ── /pvpSyncRuns ───────────────────────────────────────────────────────────
-    // Scratch progress state for the chunked PVP sync (POST /api/sheets/pvp-sync),
-    // tracking which SKUs each chunk has seen so the final ?finalize=1 call knows
-    // what to delete. Server-side only (Admin SDK) — never read or written by a
-    // client, same as /_meta and /slackPosts.
-    match /pvpSyncRuns/{runId} {
-      allow read, write: if false;
-      match /chunks/{chunkId} {
-        allow read, write: if false;
-      }
-    }
-
     // ── /resources ─────────────────────────────────────────────────────────────
     match /resources/{resourceId} {
       allow read: if isStaff();

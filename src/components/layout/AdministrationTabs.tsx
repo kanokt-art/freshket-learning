@@ -20,13 +20,13 @@ export function AdministrationTabs() {
   const isEmployees = pathname === '/users' || pathname.startsWith('/users/')
   const isTools = pathname === '/tools' || pathname.startsWith('/tools/')
   const isSystem = pathname === '/log' || pathname === '/admin/settings'
-    || pathname === '/admin/announcements' || pathname === '/admin/pvp-import'
+    || pathname === '/admin/announcements'
 
   // Switch the Tools ↔ Merchandise sub-views by setting the hash directly when
   // already on /tools — Next's <Link>/pushState doesn't fire `hashchange`, so
   // the page listener wouldn't flip instantly. From another page, let the Link
   // navigate normally (the page reads the hash on mount).
-  const switchHash = (e: React.MouseEvent, target: '' | 'merch' | 'qa' | 'products') => {
+  const switchHash = (e: React.MouseEvent, target: '' | 'merch' | 'qa') => {
     if (pathname !== '/tools') return
     e.preventDefault()
     if (target) {
@@ -55,7 +55,6 @@ export function AdministrationTabs() {
       {/* Tools group — clicking the tab goes to /tools; hover reveals the rest */}
       <Dropdown label="Tools" href="/tools" active={isTools}>
         <Link href="/tools" className={dropItemCls} onClick={(e) => switchHash(e, '')}>Tools</Link>
-        <Link href="/tools#products" className={dropItemCls} onClick={(e) => switchHash(e, 'products')}>Product List</Link>
         <Link href="/tools/cuisine-guide" className={dropItemCls}>Cuisine Guide</Link>
         <Link href="/tools#qa" className={dropItemCls} onClick={(e) => switchHash(e, 'qa')}>Q&amp;A</Link>
         <Link href="/tools/mandatory" className={dropItemCls}>Merchandise Mandatory</Link>
@@ -68,7 +67,6 @@ export function AdministrationTabs() {
       <Dropdown label="System" href="/admin/settings" active={isSystem}>
         <Link href="/admin/settings" className={dropItemCls}>Module Settings</Link>
         <Link href="/admin/announcements" className={dropItemCls}>ข่าวสาร (News Feed)</Link>
-        <Link href="/admin/pvp-import" className={dropItemCls}>นำเข้าราคาสินค้า (PVP)</Link>
         <Link href="/log" className={dropItemCls}>Activity Log</Link>
       </Dropdown>
     </nav>
