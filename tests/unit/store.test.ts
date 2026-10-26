@@ -1,0 +1,542 @@
+import { describe, it, expect } from 'vitest'
+import { createStore, buildParams, deepMerge, StoreError } from '@/lib/server/store'
+import { USERS, COURSES, NOTIFICATIONS, APP_CONFIG } from '@/lib/server/docMap'
+
+// The store talks to Postgres through its REST layer. These tests stand in a
+// small in-memory server that behaves the way that layer does where it matters
+// — filters, ordering, a cap on rows per response, an upsert that fills
+// unmentioned columns with their defaults — so each test can say what the
+// DATABASE ends up holding, not just what URL was built.
+//
+// The failure modes this guards are quiet ones. A read that stops at the
+// server's row cap returns the first thousand employees and no error. A merge
+// that sends an unmentioned column wipes it. A replace that does not name every
+// column leaves stale fields behind. None of them throws; the data is just
+// wrong, later.
+
+type Row = Record<string, unknown>
+
+interface Recorded {
+  method: string
+  path: string
+  params: Record<string, string>
+  body?: unknown
+}
+
+// What a column holds when an insert or upsert does not mention it.
+const DEFAULTS: Record<string, Row> = {
+  users: { display_name: '', role: 'sale', nickname: null, department: null, extra: {} },
+  courses: { description: '', assigned_user_ids: [], extra: {} },
+  notifications: { title: '', body: '', read: false, extra: {} },
+  app_config: { value: {} },
+}
+
+function parseList(s: string): string[] {
+  // in.("a","b,c") — items are quoted, and a backslash escapes a quote or backslash.
+  const out: string[] = []
+  let i = 0
+  while (i < s.length) {
+    if (s[i] === '"') {
+      let item = ''
+      i++
+      while (i < s.length && s[i] !== '"') {
+        if (s[i] === '\\') i++
+        item += s[i++]
+      }
+      i++
+      out.push(item)
+    } else i++
+  }
+  return out
+}
+
+function makeServer(opts: { maxRows?: number; failReadsOnce?: number } = {}) {
+  const tables: Record<string, Row[]> = {}
+  const requests: Recorded[] = []
+  let readFailures = opts.failReadsOnce ?? 0
+
+  const matches = (row: Row, col: string, expr: string) => {
+    const v = row[col]
+    if (expr.startsWith('eq.')) return v != null && String(v) === expr.slice(3)
+    if (expr.startsWith('in.(')) return v != null && parseList(expr.slice(4, -1)).includes(String(v))
+    return true
+  }
+
+  const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input))
+    const method = init?.method ?? 'GET'
+    const path = url.pathname.replace('/rest/v1/', '')
+    const params = Object.fromEntries(url.searchParams.entries())
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined
+    const headers = (init?.headers ?? {}) as Record<string, string>
+    requests.push({ method, path, params, body })
+
+    // A 204 may not carry a body — the Response constructor rejects one, as the
+    // real layer never sends one for a delete with return=minimal.
+    const reply = (data: unknown, status = 200, extra: Record<string, string> = {}) =>
+      new Response(status === 204 ? null : JSON.stringify(data), {
+        status, headers: { 'content-type': 'application/json', ...extra },
+      })
+
+    if (path.startsWith('rpc/')) {
+      const courses = (tables.courses ??= [])
+      const c = courses.find((r) => r.id === (body as Row).p_course_id)
+      if (!c) return reply(0)
+      const cur = (c.assigned_user_ids as string[]) ?? []
+      const fresh = Array.from(new Set(((body as Row).p_uids as string[]).filter((u) => !cur.includes(u))))
+      c.assigned_user_ids = [...cur, ...fresh]
+      return reply(fresh.length)
+    }
+
+    const rows = (tables[path.split('?')[0]] ??= [])
+    const filters = Object.entries(params).filter(([k]) =>
+      !['select', 'order', 'limit', 'offset', 'on_conflict', 'columns'].includes(k))
+    const selected = () => rows.filter((r) => filters.every(([k, v]) => matches(r, k, v)))
+
+    if (method === 'GET') {
+      if (readFailures > 0) { readFailures--; return reply({ message: 'boom' }, 503) }
+      let out = selected()
+      for (const spec of (params.order ?? '').split(',').filter(Boolean).reverse()) {
+        const [col, dir] = spec.split('.')
+        out = [...out].sort((a, b) => {
+          const x = a[col], y = b[col]
+          if (x == null && y == null) return 0
+          if (x == null) return 1            // nulls last, in either direction
+          if (y == null) return -1
+          const cmp = x < y ? -1 : x > y ? 1 : 0
+          return dir === 'desc' ? -cmp : cmp
+        })
+      }
+      const total = out.length
+      const offset = Number(params.offset ?? 0)
+      const limit = Math.min(Number(params.limit ?? Infinity), opts.maxRows ?? Infinity)
+      const page = out.slice(offset, offset + limit)
+      const range = page.length === 0 ? `*/${total}` : `${offset}-${offset + page.length - 1}/${total}`
+      return reply(page, 200, headers.Prefer?.includes('count=exact') ? { 'content-range': range } : {})
+    }
+
+    if (method === 'POST') {
+      const columns = (params.columns ?? '').split(',').filter(Boolean)
+      const conflict = (params.on_conflict ?? '').split(',').filter(Boolean)
+      for (const row of body as Row[]) {
+        const existing = rows.find((r) => conflict.every((c) => r[c] === row[c]))
+        const filled: Row = {}
+        for (const c of columns) filled[c] = c in row ? row[c] : (DEFAULTS[path]?.[c] ?? null)
+        if (existing) Object.assign(existing, filled)
+        else rows.push({ ...(DEFAULTS[path] ?? {}), ...filled })
+      }
+      return reply(null, 201)
+    }
+
+    if (method === 'PATCH') {
+      const hit = selected()
+      for (const r of hit) Object.assign(r, body)
+      return reply(hit)
+    }
+
+    if (method === 'DELETE') {
+      const hit = new Set(selected())
+      tables[path] = rows.filter((r) => !hit.has(r))
+      return reply(null, 204)
+    }
+    return reply({}, 400)
+  }) as unknown as typeof fetch
+
+  return { tables, requests, fetchImpl }
+}
+
+const make = (opts?: Parameters<typeof makeServer>[0]) => {
+  const server = makeServer(opts)
+  const store = createStore({ url: 'https://x.supabase.co', serviceKey: 'k', fetch: server.fetchImpl, timeoutMs: 1000 })
+  return { ...server, store }
+}
+
+// ── buildParams ─────────────────────────────────────────────────────────────
+
+describe('buildParams', () => {
+  const asObject = (p: Array<[string, string]>) => Object.fromEntries(p)
+
+  it('translates equality and `in` filters onto the stored columns', () => {
+    const p = asObject(buildParams(COURSES, { where: [
+      { field: 'createdBy', op: '==', value: 'u1' },
+    ] }))
+    expect(p.created_by).toBe('eq.u1')
+  })
+
+  it('quotes `in` items so commas, quotes and spaces survive', () => {
+    const p = asObject(buildParams(USERS, { where: [
+      { field: 'email', op: 'in', value: ['a,b@x', 'say "hi"', 'plain'] },
+    ] }))
+    expect(p.email).toBe('in.("a,b@x","say \\"hi\\"","plain")')
+  })
+
+  it('writes an empty `in` list as one that matches nothing', () => {
+    const p = asObject(buildParams(USERS, { where: [{ field: 'email', op: 'in', value: [] }] }))
+    expect(p.email).toBe('in.()')
+  })
+
+  it('always orders by the key last, so paging never repeats or skips a row', () => {
+    expect(asObject(buildParams(COURSES, {})).order).toBe('id.asc')
+    expect(asObject(buildParams(COURSES, { orderBy: [{ field: 'createdAt', direction: 'desc' }] })).order)
+      .toBe('created_at.desc.nullslast,id.asc')
+  })
+
+  it('does not add the key twice when it is already ordered by', () => {
+    expect(asObject(buildParams(COURSES, { orderBy: [{ field: 'id', direction: 'desc' }] })).order)
+      .toBe('id.desc.nullslast')
+  })
+
+  it('sorts nulls last in both directions', () => {
+    // Postgres would lead with them on a descending sort; Firestore dropped them.
+    for (const direction of ['asc', 'desc'] as const) {
+      expect(asObject(buildParams(COURSES, { orderBy: [{ field: 'startDate', direction }] })).order)
+        .toContain('nullslast')
+    }
+  })
+
+  it('scopes a notification query to its owner', () => {
+    const p = asObject(buildParams(NOTIFICATIONS, {}, 'u1'))
+    expect(p.uid).toBe('eq.u1')
+  })
+
+  it('maps users.uid and id to the same key column', () => {
+    expect(asObject(buildParams(USERS, { where: [{ field: 'uid', op: '==', value: 'u1' }] })).uid).toBe('eq.u1')
+    expect(asObject(buildParams(USERS, { where: [{ field: 'id', op: '==', value: 'u1' }] })).uid).toBe('eq.u1')
+  })
+
+  describe('refuses what it cannot map', () => {
+    it.each([
+      ['an unknown field', { where: [{ field: 'passwordHash', op: '==' as const, value: 'x' }] }],
+      ['a column name used as a field', { where: [{ field: 'auth_uid', op: '==' as const, value: 'x' }] }],
+      ['an unsupported operator', { where: [{ field: 'role', op: '>' as never, value: 'x' }] }],
+      ['an `in` that is not a list', { where: [{ field: 'role', op: 'in' as const, value: 'x' }] }],
+      ['an object value', { where: [{ field: 'role', op: '==' as const, value: { a: 1 } }] }],
+      ['an unknown order field', { orderBy: [{ field: 'nope' }] }],
+    ])('%s', (_name, q) => {
+      expect(() => buildParams(USERS, q)).toThrow(StoreError)
+    })
+
+    it('an `in` with too many values', () => {
+      expect(() => buildParams(USERS, { where: [{ field: 'role', op: 'in', value: Array(501).fill('x') }] }))
+        .toThrow(/limited to 500/)
+    })
+  })
+})
+
+// ── reads ───────────────────────────────────────────────────────────────────
+
+describe('query', () => {
+  const seed = (n: number) => Array.from({ length: n }, (_, i) => ({
+    uid: `u${String(i).padStart(4, '0')}`, email: `e${i}@x`, display_name: `n${i}`,
+  }))
+
+  it('returns EVERY row even when the server caps each response', () => {
+    // The real failure: users has 1,642 rows and the REST layer answers with at
+    // most 1,000, with no error. Here the cap is 10 and there are 25.
+    const { tables, store, requests } = make({ maxRows: 10 })
+    tables.users = seed(25)
+    return store.query('users').then((docs) => {
+      expect(docs).toHaveLength(25)
+      expect(new Set(docs.map((d) => d.id)).size).toBe(25)        // no repeats
+      expect(docs.map((d) => d.id)).toEqual([...docs.map((d) => d.id)].sort())
+      expect(requests.length).toBeGreaterThanOrEqual(3)
+    })
+  })
+
+  it('stops at an explicit limit', async () => {
+    const { tables, store } = make({ maxRows: 10 })
+    tables.users = seed(25)
+    expect(await store.query('users', { limit: 12 })).toHaveLength(12)
+  })
+
+  it('applies filters and ordering', async () => {
+    const { tables, store } = make()
+    tables.courses = [
+      { id: 'a', title: 'A', created_by: 'u1', created_at: '2026-01-01T00:00:00.000Z' },
+      { id: 'b', title: 'B', created_by: 'u1', created_at: '2026-03-01T00:00:00.000Z' },
+      { id: 'c', title: 'C', created_by: 'u2', created_at: '2026-02-01T00:00:00.000Z' },
+    ]
+    const docs = await store.query('courses', {
+      where: [{ field: 'createdBy', op: '==', value: 'u1' }],
+      orderBy: [{ field: 'createdAt', direction: 'desc' }],
+    })
+    expect(docs.map((d) => d.id)).toEqual(['b', 'a'])
+  })
+
+  it('answers with documents, not rows', async () => {
+    const { tables, store } = make()
+    tables.users = [{ uid: 'u1', email: 'a@x', display_name: 'A', team_id: null, created_at: '2026-01-01T00:00:00.000Z' }]
+    const [doc] = await store.query('users')
+    expect(doc).toEqual({ id: 'u1', uid: 'u1', email: 'a@x', displayName: 'A', createdAt: '2026-01-01T00:00:00.000Z' })
+  })
+
+  it('returns nothing for an empty `in` list', async () => {
+    const { tables, store } = make()
+    tables.users = seed(3)
+    expect(await store.query('users', { where: [{ field: 'email', op: 'in', value: [] }] })).toEqual([])
+  })
+
+  it('only returns the owner\'s own notifications', async () => {
+    const { tables, store } = make()
+    tables.notifications = [
+      { uid: 'u1', id: 'n1', type: 'x' }, { uid: 'u2', id: 'n1', type: 'x' }, { uid: 'u1', id: 'n2', type: 'x' },
+    ]
+    const docs = await store.query('notifications/u1/items')
+    expect(docs.map((d) => d.id).sort()).toEqual(['n1', 'n2'])
+  })
+
+  it('refuses a collection it does not know', async () => {
+    const { store } = make()
+    await expect(store.query('_meta')).rejects.toMatchObject({ code: 'invalid-query' })
+    await expect(store.query('users/x')).rejects.toMatchObject({ code: 'invalid-query' })
+  })
+
+  describe('when the database misbehaves', () => {
+    it('retries a read that hits a 5xx', async () => {
+      const { tables, store, requests } = make({ failReadsOnce: 1 })
+      tables.users = seed(2)
+      expect(await store.query('users')).toHaveLength(2)
+      expect(requests.filter((r) => r.method === 'GET').length).toBe(2)
+    })
+
+    it('gives up as "unavailable" after repeated failures, not as a hang', async () => {
+      const { store } = make({ failReadsOnce: 99 })
+      await expect(store.query('users')).rejects.toMatchObject({ code: 'unavailable' })
+    })
+
+    it('reports an unreachable database as unavailable', async () => {
+      const store = createStore({
+        url: 'https://x.supabase.co', serviceKey: 'k', timeoutMs: 1000,
+        fetch: (async () => { throw new Error('ECONNRESET') }) as unknown as typeof fetch,
+      })
+      await expect(store.query('users')).rejects.toMatchObject({ code: 'unavailable' })
+    })
+
+    it('does not put the database\'s message in the error — it can quote a row', async () => {
+      const store = createStore({
+        url: 'https://x.supabase.co', serviceKey: 'k',
+        fetch: (async () => new Response('{"message":"duplicate key (email)=(somebody@freshket.co)"}', { status: 409 })) as unknown as typeof fetch,
+      })
+      const err = await store.set('users', 'u1', { email: 'a@x' }).catch((e) => e)
+      expect(err).toBeInstanceOf(StoreError)
+      expect(err.code).toBe('rejected')
+      expect(String(err.message)).not.toContain('somebody@freshket.co')
+    })
+  })
+})
+
+describe('get / getMany', () => {
+  it('get returns null for a document that does not exist', async () => {
+    const { store } = make()
+    expect(await store.get('courses', 'nope')).toBeNull()
+  })
+
+  it('get finds one document by id', async () => {
+    const { tables, store } = make()
+    tables.courses = [{ id: 'c1', title: 'T' }, { id: 'c2', title: 'U' }]
+    expect((await store.get('courses', 'c2'))?.title).toBe('U')
+  })
+
+  it('getMany reads ids in chunks so the URL stays short', async () => {
+    const { tables, store, requests } = make()
+    tables.courses = Array.from({ length: 250 }, (_, i) => ({ id: `c${i}`, title: 'T' }))
+    const docs = await store.getMany('courses', tables.courses.map((c) => String(c.id)))
+    expect(docs).toHaveLength(250)
+    expect(requests.filter((r) => r.method === 'GET')).toHaveLength(3)
+  })
+})
+
+// ── writes ──────────────────────────────────────────────────────────────────
+
+describe('set', () => {
+  it('a merge writes only the fields it was given and leaves the rest', async () => {
+    const { tables, store, requests } = make()
+    tables.users = [{ uid: 'u1', email: 'a@x', nickname: 'Nick', department: 'Sales', display_name: 'A' }]
+    await store.set('users', 'u1', { displayName: 'Renamed' }, { merge: true })
+
+    expect(tables.users[0]).toMatchObject({ display_name: 'Renamed', nickname: 'Nick', department: 'Sales' })
+    expect(requests[0].params.columns.split(',').sort()).toEqual(['display_name', 'uid'])
+  })
+
+  it('a replace reverts every field it does not mention to its default', async () => {
+    // Mandatory slides and cuisine guides rely on this: a removed field must go.
+    const { tables, store } = make()
+    tables.courses = [{ id: 'c1', title: 'Old', description: 'was here', category: 'product', created_by: 'u' }]
+    await store.set('courses', 'c1', { title: 'New', category: 'product', createdBy: 'u' }, { merge: false })
+    expect(tables.courses[0]).toMatchObject({ title: 'New', description: '' })
+  })
+
+  it('creates the document when it does not exist', async () => {
+    const { tables, store } = make()
+    await store.set('courses', 'c1', { title: 'T', category: 'product', createdBy: 'u' })
+    expect(tables.courses[0]).toMatchObject({ id: 'c1', title: 'T' })
+  })
+
+  it('folds fields kept in `extra` into what is already there', async () => {
+    const { tables, store } = make()
+    tables.courses = [{ id: 'c1', title: 'T', extra: { hasPreAssessment: true } }]
+    await store.set('courses', 'c1', { title: 'T', legacyField: 'x' }, { merge: true })
+    expect(tables.courses[0].extra).toEqual({ hasPreAssessment: true, legacyField: 'x' })
+  })
+
+  it('merges a config document deeply, as Firestore\'s merge did', async () => {
+    const { tables, store } = make()
+    tables.app_config = [{ id: 'moduleAccess', value: { departments: { Sales: { lms: true }, People: { lms: true } } } }]
+    await store.set('appConfig', 'moduleAccess', { departments: { Sales: { shadow: true } } }, { merge: true })
+    expect(tables.app_config[0].value).toEqual({
+      departments: { Sales: { lms: true, shadow: true }, People: { lms: true } },
+    })
+  })
+
+  it('addresses a notification by owner AND id', async () => {
+    const { tables, store, requests } = make()
+    await store.set('notifications/u1/items', 'new_course_c1', { type: 'new_course', title: 'x' })
+    await store.set('notifications/u2/items', 'new_course_c1', { type: 'new_course', title: 'x' })
+    expect(requests[0].params.on_conflict).toBe('uid,id')
+    // The same notification id for two people is two rows, not one overwritten.
+    expect(tables.notifications).toHaveLength(2)
+    expect(tables.notifications.map((n) => n.uid).sort()).toEqual(['u1', 'u2'])
+  })
+})
+
+describe('update', () => {
+  it('changes only the named fields', async () => {
+    const { tables, store } = make()
+    tables.users = [{ uid: 'u1', email: 'a@x', team_id: 't1', display_name: 'A' }]
+    await store.update('users', 'u1', { teamId: 't2' })
+    expect(tables.users[0]).toMatchObject({ team_id: 't2', display_name: 'A' })
+  })
+
+  it('refuses to create a document that is not there', async () => {
+    // This is what stops a stale uid becoming an empty "ghost" user.
+    const { tables, store } = make()
+    tables.users = []
+    await expect(store.update('users', 'ghost', { teamId: 't1' })).rejects.toMatchObject({ code: 'not-found' })
+    expect(tables.users).toHaveLength(0)
+  })
+
+  it('does not send the key as a column to change', async () => {
+    const { tables, store, requests } = make()
+    tables.users = [{ uid: 'u1', email: 'a@x' }]
+    await store.update('users', 'u1', { teamId: 't2' })
+    const patch = requests.find((r) => r.method === 'PATCH')!
+    expect(Object.keys(patch.body as Row)).toEqual(['team_id'])
+  })
+
+  it('refuses to create a missing config document too', async () => {
+    const { store } = make()
+    await expect(store.update('appConfig', 'nope', { a: 1 })).rejects.toMatchObject({ code: 'not-found' })
+  })
+})
+
+describe('remove / removeMany', () => {
+  it('deletes one document', async () => {
+    const { tables, store } = make()
+    tables.courses = [{ id: 'c1' }, { id: 'c2' }]
+    await store.remove('courses', 'c1')
+    expect(tables.courses.map((c) => c.id)).toEqual(['c2'])
+  })
+
+  it('deletes many, in chunks, leaving the rest', async () => {
+    const { tables, store, requests } = make()
+    tables.courses = Array.from({ length: 250 }, (_, i) => ({ id: `c${i}` }))
+    await store.removeMany('courses', tables.courses.slice(0, 220).map((c) => String(c.id)))
+    expect(tables.courses).toHaveLength(30)
+    expect(requests.filter((r) => r.method === 'DELETE')).toHaveLength(3)
+  })
+
+  it('deletes only the owner\'s notification when two people share an id', async () => {
+    const { tables, store } = make()
+    tables.notifications = [{ uid: 'u1', id: 'n1' }, { uid: 'u2', id: 'n1' }]
+    await store.remove('notifications/u1/items', 'n1')
+    expect(tables.notifications).toEqual([{ uid: 'u2', id: 'n1' }])
+  })
+})
+
+describe('setMany', () => {
+  it('a merge leaves alone a field a document does not mention', async () => {
+    // The HR import omits `nickname` when the CSV cell is empty, on purpose. If
+    // that document were sent in the same request as one that sets a nickname,
+    // the first would be given the column's DEFAULT and the existing value lost.
+    const { tables, store } = make()
+    tables.users = [
+      { uid: 'u1', email: 'a@x', nickname: 'Kept', department: 'Old' },
+      { uid: 'u2', email: 'b@x', nickname: 'Also kept', department: 'Old' },
+    ]
+    await store.setMany('users', [
+      { id: 'u1', data: { email: 'a@x', department: 'New' } },                    // no nickname
+      { id: 'u2', data: { email: 'b@x', department: 'New', nickname: 'Changed' } },
+    ], { merge: true })
+
+    expect(tables.users[0]).toMatchObject({ department: 'New', nickname: 'Kept' })
+    expect(tables.users[1]).toMatchObject({ department: 'New', nickname: 'Changed' })
+  })
+
+  it('sends documents with the same fields together', async () => {
+    const { store, requests } = make()
+    await store.setMany('users', [
+      { id: 'u1', data: { email: 'a@x', department: 'D' } },
+      { id: 'u2', data: { email: 'b@x', department: 'D' } },
+      { id: 'u3', data: { email: 'c@x' } },
+    ], { merge: true })
+    expect(requests.filter((r) => r.method === 'POST')).toHaveLength(2)
+  })
+
+  it('a replace is one request per chunk and names every column', async () => {
+    const { tables, store, requests } = make()
+    await store.setMany('courses', Array.from({ length: 1200 }, (_, i) => ({
+      id: `c${i}`, data: { title: 'T', category: 'product', createdBy: 'u' },
+    })))
+    expect(tables.courses).toHaveLength(1200)
+    const posts = requests.filter((r) => r.method === 'POST')
+    expect(posts).toHaveLength(3)                                   // 500 + 500 + 200
+    expect(posts[0].params.columns.split(',')).toEqual(expect.arrayContaining(['id', 'title', 'extra']))
+  })
+
+  it('does nothing for an empty list', async () => {
+    const { store, requests } = make()
+    await store.setMany('courses', [])
+    expect(requests).toHaveLength(0)
+  })
+})
+
+describe('addCourseLearners', () => {
+  it('adds people to a roster and reports how many were new', async () => {
+    const { tables, store } = make()
+    tables.courses = [{ id: 'c1', assigned_user_ids: ['a', 'b'] }]
+    expect(await store.addCourseLearners('c1', ['b', 'c', 'd'])).toBe(2)
+    expect(tables.courses[0].assigned_user_ids).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('reports zero for a course that does not exist', async () => {
+    const { store } = make()
+    expect(await store.addCourseLearners('nope', ['x'])).toBe(0)
+  })
+})
+
+// ── deepMerge ───────────────────────────────────────────────────────────────
+
+describe('deepMerge', () => {
+  it('folds objects together and replaces everything else', () => {
+    expect(deepMerge(
+      { a: { x: 1, y: 2 }, list: [1, 2], s: 'old' },
+      { a: { y: 3, z: 4 }, list: [9], s: 'new' },
+    )).toEqual({ a: { x: 1, y: 3, z: 4 }, list: [9], s: 'new' })
+  })
+
+  it('does not touch its inputs', () => {
+    const a = { a: { x: 1 } }
+    deepMerge(a, { a: { y: 2 } })
+    expect(a).toEqual({ a: { x: 1 } })
+  })
+})
+
+// The app-config spec stores a whole document in one column.
+describe('whole-document tables', () => {
+  it('read back as the document, with its id', async () => {
+    const { tables, store } = make()
+    tables.app_config = [{ id: 'moduleAccess', value: { departments: { A: { lms: true } } } }]
+    expect(await store.get('appConfig', 'moduleAccess')).toEqual({ id: 'moduleAccess', departments: { A: { lms: true } } })
+    expect(APP_CONFIG.asJson).toBe('value')
+  })
+})
