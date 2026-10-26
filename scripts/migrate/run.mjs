@@ -189,16 +189,24 @@ for (const { rows, report } of built) {
   const table = report.table
   const conflict = keyColumnsOf(table).join(',')
   for (let i = 0; i < rows.length; i += CHUNK) {
-    const res = await fetch(`${base}/rest/v1/${table}?on_conflict=${conflict}`, {
-      method: 'POST',
-      headers: headers({
-        'Content-Type': 'application/json',
-        // missing=default: rows omit nulls, so a column a row does not mention
-        // takes its table default rather than being forced to NULL.
-        Prefer: 'resolution=merge-duplicates,return=minimal,missing=default',
-      }),
-      body: JSON.stringify(rows.slice(i, i + CHUNK)),
-    })
+    const chunk = rows.slice(i, i + CHUNK)
+    // Rows deliberately omit nulls so the table default applies, which means
+    // they do not all carry the same keys. PostgREST refuses a batch like that
+    // ("All object keys must match") unless it is told the full column list;
+    // with `columns` given, missing=default fills the gaps with each column's
+    // default rather than forcing NULL.
+    const columns = Array.from(new Set(chunk.flatMap((r) => Object.keys(r))))
+    const res = await fetch(
+      `${base}/rest/v1/${table}?on_conflict=${conflict}&columns=${columns.map(encodeURIComponent).join(',')}`,
+      {
+        method: 'POST',
+        headers: headers({
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates,return=minimal,missing=default',
+        }),
+        body: JSON.stringify(chunk),
+      },
+    )
     if (!res.ok) {
       const text = (await res.text()).slice(0, 300)
       console.error(`\n${table}: HTTP ${res.status} loading rows ${i}-${i + CHUNK}: ${text}`)
