@@ -57,6 +57,7 @@ function makeServer(opts: { maxRows?: number; failReadsOnce?: number } = {}) {
 
   const matches = (row: Row, col: string, expr: string) => {
     const v = row[col]
+    if (expr === 'is.null') return v == null
     if (expr.startsWith('eq.')) return v != null && String(v) === expr.slice(3)
     if (expr.startsWith('in.(')) return v != null && parseList(expr.slice(4, -1)).includes(String(v))
     return true
@@ -120,6 +121,11 @@ function makeServer(opts: { maxRows?: number; failReadsOnce?: number } = {}) {
       const conflict = (params.on_conflict ?? '').split(',').filter(Boolean)
       for (const row of body as Row[]) {
         const existing = rows.find((r) => conflict.every((c) => r[c] === row[c]))
+        // users.auth_uid is unique: one login belongs to one person.
+        if (path === 'users' && row.auth_uid != null && rows.some((r) => r !== existing && r.auth_uid === row.auth_uid)) {
+          return reply({ message: 'duplicate key value violates unique constraint "users_auth_uid_key"' }, 409)
+        }
+        if (existing && headers.Prefer?.includes('ignore-duplicates')) continue
         const filled: Row = {}
         for (const c of columns) filled[c] = c in row ? row[c] : (DEFAULTS[path]?.[c] ?? null)
         if (existing) Object.assign(existing, filled)
@@ -130,6 +136,10 @@ function makeServer(opts: { maxRows?: number; failReadsOnce?: number } = {}) {
 
     if (method === 'PATCH') {
       const hit = selected()
+      const b = body as Row
+      if (path === 'users' && b.auth_uid != null && rows.some((r) => !hit.includes(r) && r.auth_uid === b.auth_uid)) {
+        return reply({ message: 'duplicate key value violates unique constraint "users_auth_uid_key"' }, 409)
+      }
       for (const r of hit) Object.assign(r, body)
       return reply(hit)
     }
@@ -511,6 +521,110 @@ describe('addCourseLearners', () => {
   it('reports zero for a course that does not exist', async () => {
     const { store } = make()
     expect(await store.addCourseLearners('nope', ['x'])).toBe(0)
+  })
+})
+
+// ── identity lookups (server-internal) ──────────────────────────────────────
+
+describe('findUsers', () => {
+  const seedUsers = () => [
+    { uid: 'csv-E1', email: 'Sam@Freshket.co', email_lc: 'sam@freshket.co', auth_uid: 'fb-sam', display_name: 'Sam' },
+    { uid: 'csv-E2', email: 'first_last@freshket.co', email_lc: 'first_last@freshket.co', display_name: 'FL' },
+    { uid: 'csv-E3', email: 'firstXlast@freshket.co', email_lc: 'firstxlast@freshket.co', display_name: 'FX' },
+  ]
+
+  it('finds a person by the Firebase uid they sign in with', async () => {
+    const { tables, store } = make()
+    tables.users = seedUsers()
+    const [u] = await store.findUsers({ authUid: 'fb-sam' })
+    expect(u.id).toBe('csv-E1')
+    expect(u.authUid).toBe('fb-sam')
+  })
+
+  it('finds by email without regard to case, on the stored lower-case copy', async () => {
+    const { tables, store, requests } = make()
+    tables.users = seedUsers()
+    const rows = await store.findUsers({ email: '  SAM@freshket.CO ' })
+    expect(rows.map((r) => r.id)).toEqual(['csv-E1'])
+    expect(requests[0].params.email_lc).toBe('eq.sam@freshket.co')
+  })
+
+  it('does not treat `_` in an address as a wildcard', async () => {
+    // first_last@ must not also match firstXlast@ — that would sign someone in
+    // as a different person.
+    const { tables, store } = make()
+    tables.users = seedUsers()
+    expect((await store.findUsers({ email: 'first_last@freshket.co' })).map((r) => r.id)).toEqual(['csv-E2'])
+  })
+
+  it('does NOT put the Firebase uid inside the user document', async () => {
+    // Every colleague can read every user document; a login identifier must not
+    // travel with it. It comes back beside the document, never in it.
+    const { tables, store } = make()
+    tables.users = seedUsers()
+    const [u] = await store.findUsers({ authUid: 'fb-sam' })
+    const { authUid, ...document } = u
+    void authUid
+    expect(JSON.stringify(document)).not.toContain('fb-sam')
+    expect(document).not.toHaveProperty('auth_uid')
+  })
+
+  it('returns nothing for a login nobody has', async () => {
+    const { tables, store } = make()
+    tables.users = seedUsers()
+    expect(await store.findUsers({ authUid: 'nobody' })).toEqual([])
+  })
+})
+
+describe('linkAuthUid', () => {
+  it('links a person who has no login yet', async () => {
+    const { tables, store } = make()
+    tables.users = [{ uid: 'csv-E1', email: 'a@x' }]
+    expect(await store.linkAuthUid('csv-E1', 'fb-1')).toBe(true)
+    expect(tables.users[0].auth_uid).toBe('fb-1')
+  })
+
+  it('does NOT overwrite a login that is already there, and says so', async () => {
+    // The condition is in the request itself, so two tabs signing in at once
+    // cannot both win.
+    const { tables, store } = make()
+    tables.users = [{ uid: 'csv-E1', email: 'a@x', auth_uid: 'fb-first' }]
+    expect(await store.linkAuthUid('csv-E1', 'fb-second')).toBe(false)
+    expect(tables.users[0].auth_uid).toBe('fb-first')
+  })
+
+  it('reports false for a person who does not exist, and creates nobody', async () => {
+    const { tables, store } = make()
+    tables.users = []
+    expect(await store.linkAuthUid('ghost', 'fb-1')).toBe(false)
+    expect(tables.users).toHaveLength(0)
+  })
+
+  it('surfaces the database refusing a login another person already holds', async () => {
+    const { tables, store } = make()
+    tables.users = [
+      { uid: 'csv-E1', email: 'a@x' },
+      { uid: 'csv-E2', email: 'b@x', auth_uid: 'fb-taken' },
+    ]
+    await expect(store.linkAuthUid('csv-E1', 'fb-taken')).rejects.toMatchObject({ code: 'rejected' })
+    expect(tables.users[0].auth_uid).toBeUndefined()
+  })
+})
+
+describe('createUser', () => {
+  it('creates a person with their login', async () => {
+    const { tables, store } = make()
+    await store.createUser({ uid: 'fb-new', email: 'n@x', role: 'sale', displayName: 'N' }, 'fb-new')
+    expect(tables.users[0]).toMatchObject({ uid: 'fb-new', email: 'n@x', role: 'sale', auth_uid: 'fb-new' })
+  })
+
+  it('leaves an existing person alone — a racing second create must not clobber the first', async () => {
+    // In particular it must not overwrite a role somebody has since set.
+    const { tables, store } = make()
+    tables.users = [{ uid: 'fb-new', email: 'n@x', role: 'manager', auth_uid: 'fb-new' }]
+    await store.createUser({ uid: 'fb-new', email: 'n@x', role: 'sale' }, 'fb-new')
+    expect(tables.users).toHaveLength(1)
+    expect(tables.users[0].role).toBe('manager')
   })
 })
 
