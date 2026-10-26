@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { FieldValue, type DocumentSnapshot, type Firestore } from 'firebase-admin/firestore'
 import { getAdminFirestore } from '@/lib/firebase/admin'
 import { requireManager } from '@/lib/firebase/requireManager'
 import { cleanVisibleTeamIds } from '@/lib/users/visibleTeams'
+import {
+  computeDepartmentAssignmentSync,
+  usersForMoveSync,
+  type TeamMove,
+} from '@/lib/courses/syncDepartmentAssignments'
 
 type Assignment = {
   uid: string
@@ -45,6 +51,10 @@ export async function POST(req: NextRequest) {
     const skipped: string[] = []
     const roleChangesDenied: string[] = []
     const invalid: string[] = []
+    // Members placed INTO a team by this request — only ones that are actually
+    // written below. Clearing a team (null) is not a move into anything, and a
+    // skipped or invalid row never changed, so neither belongs here.
+    const moves: TeamMove[] = []
     let saved = 0
 
     for (const a of targets) {
@@ -69,13 +79,90 @@ export async function POST(req: NextRequest) {
       if (Object.keys(update).length > 0) {
         batch.update(db.collection('users').doc(a.uid), update)
         saved++
+        if (typeof update.teamId === 'string' && update.teamId) {
+          moves.push({ uid: a.uid, teamId: update.teamId })
+        }
       }
     }
 
     if (saved > 0) await batch.commit()
-    return NextResponse.json({ saved, skipped, roleChangesDenied, invalid })
+
+    // A course aimed at a department or team is a snapshot in assignedUserIds,
+    // so someone moved into a tracked team stays invisible to that course until
+    // something re-derives the snapshot. Do it here, in the same request, once
+    // the move has committed — rather than leaving it to a CSV import or an
+    // admin remembering the sync button.
+    //
+    // Scoped to the people who moved. The standalone sync route reads every
+    // employee (~1,700 documents) per call; dragging twenty people around
+    // would have spent a day's free read quota doing it twenty times over.
+    //
+    // This is secondary to the move itself, which is already saved: a failure
+    // here is reported in the response but must never turn it into an error,
+    // or the UI would tell the admin the move failed when it did not.
+    let courseSync: { coursesUpdated: number; totalAdded: number } | { failed: true } | undefined
+    if (moves.length > 0) {
+      try {
+        courseSync = await syncCoursesForMoves(db, moves, existing)
+      } catch (e) {
+        console.error('course sync after team move failed', e)
+        courseSync = { failed: true }
+      }
+    }
+
+    return NextResponse.json({ saved, skipped, roleChangesDenied, invalid, courseSync })
   } catch (e) {
     console.error('POST /api/users/save-assignments', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+/**
+ * Add each member who just moved to every course whose department or team
+ * condition now covers them. Additive, like the standalone sync: it never
+ * removes anyone, so leaving a team does not pull a person out of that team's
+ * courses.
+ */
+async function syncCoursesForMoves(
+  db: Firestore,
+  moves: TeamMove[],
+  profiles: DocumentSnapshot[],
+): Promise<{ coursesUpdated: number; totalAdded: number }> {
+  const profileByUid = new Map(
+    profiles
+      .filter((d) => d.exists)
+      .map((d) => [d.id, d.data() as { department?: string; employmentStatus?: string }] as const),
+  )
+
+  // `select` keeps this to the three fields the match needs; the course
+  // documents also carry their entire lesson tree.
+  const coursesSnap = await db
+    .collection('courses')
+    .select('assignedDepartments', 'assignedTeamIds', 'assignedUserIds')
+    .get()
+  const courses = coursesSnap.docs.map((d) => ({
+    id: d.id,
+    assignedDepartments: d.data().assignedDepartments as string[] | undefined,
+    assignedTeamIds: d.data().assignedTeamIds as string[] | undefined,
+    assignedUserIds: d.data().assignedUserIds as string[] | undefined,
+  }))
+
+  const results = computeDepartmentAssignmentSync(courses, usersForMoveSync(moves, profileByUid))
+  if (results.length === 0) return { coursesUpdated: 0, totalAdded: 0 }
+
+  const batch = db.batch()
+  for (const r of results) {
+    // arrayUnion rather than writing newAssignedUserIds back. That array was
+    // read a moment ago; if another request added someone in between, writing
+    // the whole array would silently drop them. A union cannot.
+    batch.update(db.collection('courses').doc(r.courseId), {
+      assignedUserIds: FieldValue.arrayUnion(...r.addedUids),
+    })
+  }
+  await batch.commit()
+
+  return {
+    coursesUpdated: results.length,
+    totalAdded: results.reduce((sum, r) => sum + r.addedUids.length, 0),
   }
 }

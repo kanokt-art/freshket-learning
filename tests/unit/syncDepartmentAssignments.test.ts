@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { computeDepartmentAssignmentSync } from '@/lib/courses/syncDepartmentAssignments'
+import {
+  computeDepartmentAssignmentSync,
+  usersForMoveSync,
+} from '@/lib/courses/syncDepartmentAssignments'
 
 describe('computeDepartmentAssignmentSync', () => {
   it('adds a new active employee in a tracked department', () => {
@@ -152,5 +155,131 @@ describe('computeDepartmentAssignmentSync — assignedTeamIds (partial team-leve
       [{ uid: 'u1', teamId: 'team-samc', employmentStatus: 'Resigned' }],
     )
     expect(results).toEqual([])
+  })
+})
+
+// ── A member moved into a new team ──────────────────────────────────────────
+// The scenario an admin cares about: a course is aimed at a team or department,
+// and someone is dragged into it later. These run the move through the same
+// two functions the save-assignments route uses, so the route's behaviour is
+// pinned without needing the Admin SDK.
+describe('moving a member into a team', () => {
+  const profiles = new Map([
+    ['u-new', { department: 'Portfolio Management', employmentStatus: 'Active' }],
+    ['u-gone', { department: 'Portfolio Management', employmentStatus: 'Resigned' }],
+  ])
+
+  it('adds them to a course that tracks the team they moved into', () => {
+    const results = computeDepartmentAssignmentSync(
+      [{ id: 'mbti', assignedTeamIds: ['team-chain'], assignedUserIds: ['u1'] }],
+      usersForMoveSync([{ uid: 'u-new', teamId: 'team-chain' }], profiles),
+    )
+    expect(results).toEqual([
+      { courseId: 'mbti', newAssignedUserIds: ['u1', 'u-new'], addedUids: ['u-new'] },
+    ])
+  })
+
+  it('matches on the NEW team, never the one they left', () => {
+    // The stored profile still holds the old teamId when this runs. If the move
+    // were matched against it, a course on the old team would re-add the person
+    // and a course on the new team would miss them.
+    const users = usersForMoveSync([{ uid: 'u-new', teamId: 'team-new' }], profiles)
+    expect(users[0].teamId).toBe('team-new')
+
+    const results = computeDepartmentAssignmentSync(
+      [
+        { id: 'old-course', assignedTeamIds: ['team-old'], assignedUserIds: [] },
+        { id: 'new-course', assignedTeamIds: ['team-new'], assignedUserIds: [] },
+      ],
+      users,
+    )
+    expect(results.map((r) => r.courseId)).toEqual(['new-course'])
+  })
+
+  it('still picks them up through a whole-department course', () => {
+    // A move does not change their department, so a course tracking the whole
+    // department must keep covering them.
+    const results = computeDepartmentAssignmentSync(
+      [{ id: 'pm', assignedDepartments: ['Portfolio Management'], assignedUserIds: [] }],
+      usersForMoveSync([{ uid: 'u-new', teamId: 'any-team' }], profiles),
+    )
+    expect(results[0].addedUids).toEqual(['u-new'])
+  })
+
+  it('does not enrol a resigned employee, whatever team they are dragged to', () => {
+    const results = computeDepartmentAssignmentSync(
+      [{ id: 'mbti', assignedTeamIds: ['team-chain'], assignedUserIds: [] }],
+      usersForMoveSync([{ uid: 'u-gone', teamId: 'team-chain' }], profiles),
+    )
+    expect(results).toEqual([])
+  })
+
+  it('changes nothing for a course that does not track where they went', () => {
+    const results = computeDepartmentAssignmentSync(
+      [{ id: 'other', assignedTeamIds: ['team-elsewhere'], assignedUserIds: [] }],
+      usersForMoveSync([{ uid: 'u-new', teamId: 'team-chain' }], new Map()),
+    )
+    expect(results).toEqual([])
+  })
+
+  it('does not touch a course that already has them', () => {
+    const results = computeDepartmentAssignmentSync(
+      [{ id: 'mbti', assignedTeamIds: ['team-chain'], assignedUserIds: ['u-new'] }],
+      usersForMoveSync([{ uid: 'u-new', teamId: 'team-chain' }], profiles),
+    )
+    expect(results).toEqual([])
+  })
+
+  it('never removes them from the courses of the team they left', () => {
+    // Additive by design: only the courses that CHANGED are returned, so the old
+    // team's course is simply absent from the result and keeps its roster.
+    const results = computeDepartmentAssignmentSync(
+      [
+        { id: 'old-course', assignedTeamIds: ['team-old'], assignedUserIds: ['u-new'] },
+        { id: 'new-course', assignedTeamIds: ['team-new'], assignedUserIds: [] },
+      ],
+      usersForMoveSync([{ uid: 'u-new', teamId: 'team-new' }], profiles),
+    )
+    expect(results.map((r) => r.courseId)).toEqual(['new-course'])
+  })
+
+  it('handles several people moving at once, each into a different team', () => {
+    const results = computeDepartmentAssignmentSync(
+      [
+        { id: 'a', assignedTeamIds: ['team-a'], assignedUserIds: [] },
+        { id: 'b', assignedTeamIds: ['team-b'], assignedUserIds: [] },
+      ],
+      usersForMoveSync(
+        [{ uid: 'u1', teamId: 'team-a' }, { uid: 'u2', teamId: 'team-b' }],
+        new Map(),
+      ),
+    )
+    expect(results).toEqual([
+      { courseId: 'a', newAssignedUserIds: ['u1'], addedUids: ['u1'] },
+      { courseId: 'b', newAssignedUserIds: ['u2'], addedUids: ['u2'] },
+    ])
+  })
+})
+
+describe('usersForMoveSync', () => {
+  it('carries department and employment status from the stored profile', () => {
+    const out = usersForMoveSync(
+      [{ uid: 'u1', teamId: 't1' }],
+      new Map([['u1', { department: 'People Experience', employmentStatus: 'Active' }]]),
+    )
+    expect(out).toEqual([
+      { uid: 'u1', teamId: 't1', department: 'People Experience', employmentStatus: 'Active' },
+    ])
+  })
+
+  it('keeps a move whose profile is missing, so the team condition can still match', () => {
+    const out = usersForMoveSync([{ uid: 'ghost', teamId: 't1' }], new Map())
+    expect(out).toEqual([
+      { uid: 'ghost', teamId: 't1', department: undefined, employmentStatus: undefined },
+    ])
+  })
+
+  it('returns nothing for no moves', () => {
+    expect(usersForMoveSync([], new Map())).toEqual([])
   })
 })

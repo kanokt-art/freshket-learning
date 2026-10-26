@@ -92,3 +92,39 @@ export function computeDepartmentAssignmentSync(
 
   return results
 }
+
+/** A member who was just placed into a team. */
+export interface TeamMove {
+  uid: string
+  /** The team they were moved INTO — the new value, not the one on file. */
+  teamId: string
+}
+
+/**
+ * Shape a batch of just-completed team moves for computeDepartmentAssignmentSync,
+ * so a move can be reconciled against course conditions on its own instead of
+ * re-reading every employee.
+ *
+ * Two details matter, and both are easy to get wrong:
+ *  · `teamId` is the NEW team. The stored document still holds the old one at
+ *    the moment this runs, so reading it from there would match the person
+ *    against the team they just left — which is exactly the lookup this exists
+ *    to replace.
+ *  · `department` and `employmentStatus` come from the stored profile, because
+ *    a move does not change them. A course tracking a whole department should
+ *    still pick the person up, and a resigned employee must still be skipped.
+ *
+ * A move for a uid with no profile is kept (with no department) rather than
+ * dropped: the team condition alone can still match it.
+ */
+export function usersForMoveSync(
+  moves: TeamMove[],
+  profiles: ReadonlyMap<string, { department?: string; employmentStatus?: string }>,
+): UserForSync[] {
+  return moves.map((m) => ({
+    uid: m.uid,
+    teamId: m.teamId,
+    department: profiles.get(m.uid)?.department,
+    employmentStatus: profiles.get(m.uid)?.employmentStatus,
+  }))
+}
