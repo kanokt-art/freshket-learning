@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
@@ -43,10 +43,21 @@ export default function AssessmentPage() {
   const [confirmDelete, setConfirmDelete] = useState<Assessment | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  if (user && user.role !== 'super_admin') {
-    router.replace('/courses')
-    return null
-  }
+  const allowed = !user || user.role === 'super_admin'
+
+  // Navigating is a side effect, so it belongs in an effect rather than in the
+  // render pass — calling router.replace() while rendering updates the Router
+  // mid-render, which React warns about ("Cannot update a component while
+  // rendering a different component") and which concurrent rendering is free
+  // to run more than once.
+  //
+  // The early return below still runs on the SAME render, so an unauthorized
+  // viewer never sees the page: the effect only schedules the navigation.
+  useEffect(() => {
+    if (!allowed) router.replace('/courses')
+  }, [allowed, router])
+
+  if (!allowed) return null
 
   const all = [
     ...localCreated.filter((a) => !localDeleted.has(a.id)),

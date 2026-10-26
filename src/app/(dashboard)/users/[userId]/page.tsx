@@ -89,10 +89,21 @@ export default function UserReportPage() {
     if ((activeTab === 'shadow' && !showShadow) || (activeTab === 'roleplay' && !showRoleplay)) setActiveTab('profile')
   }, [activeTab, showShadow, showRoleplay])
 
-  if (user && !canAccess(user.role, 'team_lead')) {
-    router.replace('/sale')
-    return null
-  }
+  const allowed = !user || canAccess(user.role, 'team_lead')
+
+  // Navigating is a side effect, so it belongs in an effect rather than in the
+  // render pass — calling router.replace() while rendering updates the Router
+  // mid-render, which React warns about ("Cannot update a component while
+  // rendering a different component") and which concurrent rendering is free
+  // to run more than once.
+  //
+  // The early return below still runs on the SAME render, so an unauthorized
+  // viewer never sees the page: the effect only schedules the navigation.
+  useEffect(() => {
+    if (!allowed) router.replace('/sale')
+  }, [allowed, router])
+
+  if (!allowed) return null
 
   const loading = usersLoading || recordsLoading
 
