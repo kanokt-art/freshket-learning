@@ -5,6 +5,8 @@ import { parseAssessmentCSV, type ParsedAssessmentScore } from '@/lib/utils/csvP
 import type { UserProfile } from '@/types/user'
 import type { CSVImportError } from '@/types/tracking'
 import { saveMany } from '@/lib/data/collection'
+import { DownloadTemplateButton } from '@/components/features/DownloadTemplateButton'
+import { ASSESSMENT_SCORE_TEMPLATE } from '@/lib/utils/csvTemplates'
 
 // Super-admin tool: import a Google-Forms assessment CSV (Pre/Post scores),
 // map each row to an employee by email, preview the match, then write the
@@ -110,6 +112,11 @@ export function ImportAssessmentModal({ users, onClose, onDone }: {
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-gray-500">ยังไม่มีไฟล์? เริ่มจากเทมเพลตที่กรอกตัวอย่างไว้แล้ว</p>
+            <DownloadTemplateButton template={ASSESSMENT_SCORE_TEMPLATE} variant="link" />
+          </div>
+
           {/* Dropzone / picker */}
           <button
             type="button"

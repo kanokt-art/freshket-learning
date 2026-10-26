@@ -13,6 +13,8 @@ import type { RoleplayAssessment } from '@/types/roleplay'
 import { STATUS_LABELS, STATUS_COLORS } from '@/types/tracking'
 import { formatDate, formatDateEN, toDate } from '@/lib/utils/dateFormatter'
 import { parseCsvDate } from '@/lib/users/parseCsvDate'
+import { DownloadTemplateButton } from '@/components/features/DownloadTemplateButton'
+import { EMPLOYEE_TEMPLATE } from '@/lib/utils/csvTemplates'
 import { computeAutoTeamMappings } from '@/lib/users/autoMapTeam'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { alertError, alertSuccess, alertWarning, confirmAction } from '@/lib/ui/alert'
@@ -1988,7 +1990,13 @@ function AddEmployeeModal({
                     are the actual HR export headers, cross-checked column by
                     column against parseCsvToProfiles' cols[N] reads. */}
                 <div className="rounded-2xl border border-gray-100 bg-gray-50/60 px-4 py-3.5">
-                  <p className="text-xs font-bold text-gray-600 mb-2">โครงสร้างไฟล์ CSV ที่ต้องใช้ (16 คอลัมน์ เรียงตามลำดับ — ไม่อ้างอิงชื่อหัวตาราง)</p>
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <p className="text-xs font-bold text-gray-600">โครงสร้างไฟล์ CSV ที่ต้องใช้ (16 คอลัมน์ เรียงตามลำดับ — ไม่อ้างอิงชื่อหัวตาราง)</p>
+                    {/* Right here rather than beside the upload button: this
+                        format is positional, so the list below IS the spec and
+                        the template is the shortcut past reading it. */}
+                    <DownloadTemplateButton template={EMPLOYEE_TEMPLATE} variant="link" className="shrink-0" />
+                  </div>
                   <ol className="text-xs text-gray-500 space-y-0.5 list-none">
                     <li><span className="font-mono text-gray-400 mr-1.5">1.</span><span className="text-gray-400">ems</span> — ไม่ใช้</li>
                     <li><span className="font-mono text-gray-400 mr-1.5">2.</span><span className="font-bold text-gray-700">Status</span> — เช่น Active / Resigned / No show</li>

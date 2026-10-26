@@ -11,6 +11,8 @@ import { useState, useRef, type ChangeEvent, type DragEvent } from 'react'
 import { authedUpload } from '@/lib/api/authedFetch'
 import { STATUS_LABELS, type TrainingStatus, type CSVImportError } from '@/types/tracking'
 import type { Course } from '@/types/course'
+import { DownloadTemplateButton } from '@/components/features/DownloadTemplateButton'
+import { COURSE_RESULT_TEMPLATE } from '@/lib/utils/csvTemplates'
 
 // Loading has two genuinely different phases with different progress signals:
 //   'uploading'  → real byte-transfer % from the XHR upload event
@@ -81,16 +83,6 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
   function onChange(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
     if (f) pickFile(f)
-  }
-
-  function downloadTemplate() {
-    const blob = new Blob(['employeeEmail,score,status,completedAt\nsomchai@freshket.co,85,completed,2026-07-19\n'], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'template_course_results.csv'
-    a.click()
-    URL.revokeObjectURL(url)
   }
 
   async function post<T>(mode: 'check' | 'commit'): Promise<T | null> {
@@ -184,11 +176,9 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
                 </select>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <label className="block text-xs font-bold text-gray-500">ไฟล์ผลคะแนน (.csv)</label>
-                <button onClick={downloadTemplate} className="text-xs text-freshket-600 underline underline-offset-2 hover:text-freshket-700">
-                  ดาวน์โหลด Template
-                </button>
+                <DownloadTemplateButton template={COURSE_RESULT_TEMPLATE} variant="link" />
               </div>
               <div
                 onDragOver={(e) => { if (busy) return; e.preventDefault(); setDragging(true) }}

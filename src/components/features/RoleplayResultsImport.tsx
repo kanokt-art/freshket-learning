@@ -11,6 +11,8 @@
 import { useState, useRef, type ChangeEvent, type DragEvent } from 'react'
 import { authedUpload } from '@/lib/api/authedFetch'
 import type { CSVImportError } from '@/types/tracking'
+import { DownloadTemplateButton } from '@/components/features/DownloadTemplateButton'
+import { ROLEPLAY_TEMPLATE } from '@/lib/utils/csvTemplates'
 
 type Phase = 'idle' | 'uploading' | 'processing'
 
@@ -144,7 +146,10 @@ export function RoleplayResultsImport({ onClose, onDone }: {
                 <b>Email Address</b> = ผู้ประเมิน · <b>ครั้งที่สอบ</b> รอบ 1 = Pre, รอบอื่น = Post ·
                 แถวที่ชื่อมีคำว่า test/round จะถูกข้ามอัตโนมัติ
               </div>
-              <label className="block text-xs font-bold text-gray-500">ไฟล์ Roleplay (.csv)</label>
+              <div className="flex items-center justify-between gap-3">
+                <label className="block text-xs font-bold text-gray-500">ไฟล์ Roleplay (.csv)</label>
+                <DownloadTemplateButton template={ROLEPLAY_TEMPLATE} variant="link" />
+              </div>
               <div
                 onDragOver={(e) => { if (busy) return; e.preventDefault(); setDragging(true) }}
                 onDragLeave={() => setDragging(false)}
