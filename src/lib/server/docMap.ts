@@ -264,7 +264,12 @@ export function rowToDoc(spec: TableSpec, row: Row): Doc {
   for (const [column, value] of Object.entries(row)) {
     if (value === null || value === undefined || column === 'extra') continue
     const field = inverse[column]
-    if (field !== undefined) doc[field] = value
+    if (field === undefined) continue
+    // The database writes a timestamp as 2026-07-20T10:16:13.429+00:00; the
+    // browser sends 2026-07-20T10:16:13.429Z. Same instant, different text, so
+    // anything comparing "did this field change" would see a change that is not
+    // one. Every date leaves in the one canonical form.
+    doc[field] = spec.fields[field].kind === 'ts' ? (toIso(value) ?? value) : value
   }
   for (const f of spec.selfIdFields ?? []) doc[f] = id
 

@@ -131,6 +131,29 @@ describe('rowToDoc', () => {
   })
 })
 
+describe('timestamps leaving the database', () => {
+  it('come out in one canonical form whatever the database wrote', () => {
+    // The real REST layer returns +00:00; the browser sends Z. Left alone, a
+    // field that has not changed would compare as changed.
+    const doc = rowToDoc(TRAINING_RECORDS, {
+      id: 'x', user_id: 'u', course_id: 'c', updated_at: '2026-07-20T10:16:13.429+00:00',
+    })
+    expect(doc.updatedAt).toBe('2026-07-20T10:16:13.429Z')
+  })
+
+  it('treat a different UTC offset as the same instant', () => {
+    const doc = rowToDoc(TRAINING_RECORDS, {
+      id: 'x', user_id: 'u', course_id: 'c', updated_at: '2026-07-20T17:16:13.429+07:00',
+    })
+    expect(doc.updatedAt).toBe('2026-07-20T10:16:13.429Z')
+  })
+
+  it('leave a value that is not a date alone rather than inventing one', () => {
+    const doc = rowToDoc(TRAINING_RECORDS, { id: 'x', user_id: 'u', course_id: 'c', updated_at: 'garbage' })
+    expect(doc.updatedAt).toBe('garbage')
+  })
+})
+
 describe('dateFieldsOf', () => {
   it('lists the document fields that hold dates, so the browser can revive them', () => {
     expect(dateFieldsOf(USERS).sort()).toEqual(['createdAt', 'startDate', 'updatedAt'])
