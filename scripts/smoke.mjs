@@ -10,11 +10,11 @@
  * Login broke in production while every existing test passed. Three gaps let
  * that happen, and this closes all three:
  *
- *   1. The e2e suite runs against localhost. The fault was the Firebase Admin
- *      SDK's gRPC transport failing to settle on Vercel's runtime — it works
- *      fine locally, so no local test could ever see it.
+ *   1. The e2e suite runs against localhost. The fault was a database transport
+ *      failing to settle on Vercel's runtime — it works fine locally, so no
+ *      local test could ever see it.
  *   2. The API tests only send bad tokens, which are rejected at the auth step
- *      before any Firestore call. The hang was in the Firestore call, so the
+ *      before any database call. The hang was in the database call, so the
  *      one code path that mattered was never executed. This mints a REAL token.
  *   3. Nothing asserted on latency. A hung request is not a wrong status code,
  *      it is a request that never answers, so every check here is timed and a
@@ -102,19 +102,26 @@ for (const path of ['/login', '/sale', '/tools', '/profile']) {
 }
 
 // ── Auth gates still refuse anonymous callers ────────────────────────────────
-await timed('POST /api/users rejects no token', async () => {
-  const res = await fetch(`${BASE}/api/users`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
+for (const [name, path, body] of [
+  ['POST /api/auth/session rejects no token', '/api/auth/session', {}],
+  ['POST /api/data/query rejects no token', '/api/data/query', { path: 'courses' }],
+]) {
+  await timed(name, async () => {
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`)
+    return `HTTP ${res.status}`
   })
-  if (res.status !== 400 && res.status !== 401) throw new Error(`expected 400/401, got ${res.status}`)
-  return `HTTP ${res.status}`
-})
+}
 
 // ── The login path, end to end, with a real token ────────────────────────────
 // This is the check that would have caught the outage: it is the only one that
-// reaches Firestore through the Admin SDK on the deployed runtime.
+// reaches the database from the deployed runtime. Note that it behaves exactly
+// like that person signing in, so the first run links their login to their HR
+// profile.
 let idToken
 try {
   idToken = await mintIdToken()
@@ -123,16 +130,24 @@ try {
 }
 
 if (idToken) {
-  await timed('POST /api/users with a real token (the login path)', async () => {
-    const res = await fetch(`${BASE}/api/users`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken }),
+  const authed = { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` }
+
+  await timed('POST /api/auth/session with a real token (the login path)', async () => {
+    const res = await fetch(`${BASE}/api/auth/session`, { method: 'POST', headers: authed })
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 120)}`)
+    const { user } = await res.json()
+    if (!user?.uid) throw new Error('response carried no uid')
+    return `HTTP ${res.status}, role=${user.role}`
+  })
+
+  await timed('POST /api/data/query reads a collection', async () => {
+    const res = await fetch(`${BASE}/api/data/query`, {
+      method: 'POST', headers: authed, body: JSON.stringify({ path: 'courses' }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 120)}`)
-    const user = await res.json()
-    if (!user.uid) throw new Error('response carried no uid')
-    return `HTTP ${res.status}, role=${user.role}`
+    const { docs } = await res.json()
+    if (!Array.isArray(docs)) throw new Error('response carried no docs array')
+    return `HTTP ${res.status}, ${docs.length} course(s)`
   })
 }
 
