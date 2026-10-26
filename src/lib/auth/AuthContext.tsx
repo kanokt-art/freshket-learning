@@ -12,6 +12,7 @@ import {
 import type { UserProfile, UserRole } from '@/types/user'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { getLocalUserPatches } from '@/hooks/useFirestore'
+import { get as getDoc } from '@/lib/data/collection'
 
 import { MOCK_USERS } from '@/lib/utils/mockData'
 
@@ -24,7 +25,7 @@ function getDemoUser(role: UserRole): UserProfile {
   return { ...raw, createdAt: new Date(), updatedAt: new Date() }
 }
 
-// ── Firestore doc → UserProfile ───────────────────────────────────────────────
+// ── User document → UserProfile ───────────────────────────────────────────────
 
 function dateFromTimestamp(val: unknown): Date | undefined {
   if (!val) return undefined
@@ -202,44 +203,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         try {
-          const db = fb.getClientFirestore()
-          const snap = await fb.getDoc(fb.doc(db, 'users', fbUser.uid))
-
-          if (snap.exists()) {
-            setUser(mapDocToProfile(
-              fbUser.uid,
-              email,
-              fbUser.displayName ?? email,
-              fbUser.photoURL,
-              snap.data() as Record<string, unknown>,
-            ))
-          } else {
-            // First-time login — send idToken so server can verify identity
-            const idToken = await fbUser.getIdToken()
-            const res = await fetch('/api/users', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                idToken,
-                displayName: fbUser.displayName,
-                photoURL: fbUser.photoURL,
-              }),
-            })
-
-            if (!res.ok) {
-              const { error: apiErr } = await res.json().catch(() => ({}))
-              throw new Error(apiErr ?? `HTTP ${res.status}`)
-            }
-
-            const created = await res.json()
-            setUser(mapDocToProfile(
-              fbUser.uid,
-              email,
-              fbUser.displayName ?? email,
-              fbUser.photoURL,
-              created as Record<string, unknown>,
-            ))
+          // One call resolves the login to a PERSON: the server finds the
+          // profile HR imported for this email (or the one already linked to this
+          // login), links it on first sign-in, and creates a plain sale profile
+          // for someone nobody imported. The person's id — not the Firebase uid —
+          // is what every record points at, so it becomes the profile's uid.
+          const idToken = await fbUser.getIdToken()
+          const res = await fetch('/api/auth/session', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${idToken}` },
+          })
+          if (!res.ok) {
+            const { error: apiErr } = await res.json().catch(() => ({}))
+            throw new Error(apiErr ?? `HTTP ${res.status}`)
           }
+          const { user: person } = await res.json() as { user: Record<string, unknown> }
+          setUser(mapDocToProfile(
+            String(person.uid),
+            email,
+            fbUser.displayName ?? email,
+            fbUser.photoURL,
+            person,
+          ))
         } catch (e) {
           console.error('AuthContext:', e)
           setError('ไม่สามารถโหลดข้อมูลผู้ใช้ได้ กรุณาลองใหม่')
@@ -263,10 +248,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false
     ;(async () => {
       try {
-        const fb = await import('@/lib/firebase/client')
-        const snap = await fb.getDoc(fb.doc(fb.getClientFirestore(), 'users', pendingOverrideUid))
-        if (!cancelled && snap.exists()) {
-          const d = snap.data() as Record<string, unknown>
+        const d = await getDoc<Record<string, unknown>>('users', pendingOverrideUid)
+        if (!cancelled && d) {
           const profile = mapDocToProfile(
             pendingOverrideUid,
             (d.email as string) ?? '',

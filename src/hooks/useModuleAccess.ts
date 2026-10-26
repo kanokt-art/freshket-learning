@@ -2,6 +2,8 @@
 
 import { useSyncExternalStore } from 'react'
 import { getDemoMode } from '@/lib/demo/demoMode'
+import { getDocument } from '@/lib/data/client'
+import { attachLive } from '@/lib/data/live'
 import { ALL_MODULE_IDS, DEFAULT_MODULES, type ModuleId, type ModuleAccessConfig } from '@/lib/modules'
 
 const DEMO = getDemoMode()
@@ -12,14 +14,14 @@ export interface ModuleAccessResult {
 }
 
 // ── Shared module-access store ────────────────────────────────────────────────
-// Previously every useModuleAccess() call opened its OWN onSnapshot on
+// Previously every useModuleAccess() call opened its OWN live read of
 // appConfig/moduleAccess and started at loading=true. The sidebar, the tab bar,
 // the page, and useUnseenTools all call it, so each navigation spun up 3-4
 // listeners AND — because 7 pages gate their whole render on `moduleLoading` —
 // flashed a full-screen spinner while those fresh listeners resolved. That
 // re-subscribe-and-reload churn was the main cause of slow tab/page switches.
 //
-// Now there is ONE listener for the whole app, and the last config is cached at
+// Now there is ONE live read for the whole app, and the last config is cached at
 // module scope. After the first load, remounts read the warm cache synchronously
 // (loading=false immediately) — no re-fetch, no spinner flash, instant switches.
 // A short grace period keeps the listener alive across navigations; the cache is
@@ -35,64 +37,33 @@ let refCount = 0
 let idleTimer: ReturnType<typeof setTimeout> | undefined
 const listeners = new Set<() => void>()
 const GRACE_MS = 300_000 // match useFirestore's LISTENER_GRACE_MS
+const POLL_MS = 60_000
 
 function notify() {
   version++
   listeners.forEach((cb) => cb())
 }
 
-// `attaching` guards the async window: ensureListener can be called again (a
-// second component subscribing) before the dynamic import resolves, which would
-// otherwise open a duplicate listener.
-let attaching = false
-
 function ensureListener() {
-  if (unsub || attaching || DEMO) return
-  attaching = true
-  // Firebase is imported DYNAMICALLY here, matching useFirestore.ts. A static
-  // `import { onSnapshot } from 'firebase/firestore'` made the whole Firestore
-  // SDK (~70 kB gzipped) a static dependency of the dashboard layout — this hook
-  // runs in Sidebar, which the layout renders — so every dashboard route shipped
-  // and parsed it before first paint, even routes that never read Firestore.
-  import('@/lib/firebase/client')
-    .then(({ getClientFirestore, doc, onSnapshot }) => {
-      attaching = false
-      // Only guard against a DUPLICATE listener here — never against refCount
-      // being 0. Bailing on refCount left `sharedLoaded` false with nothing
-      // scheduled to retry, so `loading` stayed true forever and every page that
-      // gates on moduleLoading (tools, courses, points…) spun indefinitely. The
-      // window is real: the dashboard layout remounts its subtree on every
-      // navigation (key={pathname}), so refCount dips to 0 mid-import.
-      // Attaching while refCount is 0 is harmless — the config is meant to stay
-      // warm at module scope, and the grace-period teardown still applies.
-      if (unsub) return
-      const db = getClientFirestore()
-      unsub = onSnapshot(
-        doc(db, 'appConfig', 'moduleAccess'),
-        (snap) => {
-          sharedConfig = snap.exists() ? (snap.data() as ModuleAccessConfig).departments : null
-          sharedLoaded = true
-          notify()
-        },
-        () => {
-          // On error, treat as loaded (optimistic "all modules" fallback below).
-          sharedLoaded = true
-          notify()
-        },
-      )
-      // We may have attached with no live subscriber (see above). Nobody's
-      // cleanup will schedule the teardown in that case, so do it here.
-      if (refCount <= 0 && !idleTimer) {
-        idleTimer = setTimeout(() => {
-          if (refCount <= 0) { unsub?.(); unsub = undefined }
-        }, GRACE_MS)
-      }
-    })
-    .catch(() => {
-      attaching = false
+  if (unsub || DEMO) return
+  unsub = attachLive({
+    path: 'appConfig',
+    pollMs: POLL_MS,
+    load: () => getDocument('appConfig', 'moduleAccess'),
+    apply: (doc) => {
+      const next = doc ? ((doc as unknown as ModuleAccessConfig).departments ?? null) : null
+      // A poll that finds the same config must not wake every subscriber.
+      if (sharedLoaded && JSON.stringify(next) === JSON.stringify(sharedConfig)) return
+      sharedConfig = next
       sharedLoaded = true
       notify()
-    })
+    },
+    // On error, treat as loaded (optimistic "all modules" fallback below).
+    fail: () => {
+      sharedLoaded = true
+      notify()
+    },
+  })
 }
 
 function subscribe(cb: () => void): () => void {

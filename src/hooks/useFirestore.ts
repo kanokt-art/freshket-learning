@@ -23,6 +23,8 @@ import type { AssessmentScore } from '@/types/assessmentScore'
 import type { UserBucketResult } from '@/types/bucketAssessment'
 import { computeUserStats, type UserStats } from '@/types/stats'
 import { save, patch as patchDoc, remove, removeMany, saveMany } from '@/lib/data/collection'
+import { queryDocs, getDocument } from '@/lib/data/client'
+import { attachLive } from '@/lib/data/live'
 
 // ── Local imported-user overlay (persists CSV-imported users in localStorage) ──
 /**
@@ -332,16 +334,19 @@ interface FirestoreConstraint {
   count?: number
 }
 
-// ── Shared live-listener registry ─────────────────────────────────────────────
-// One Firestore onSnapshot per unique query, shared across every hook instance
-// and kept alive for a short grace period after the last subscriber unmounts.
+// ── Shared live-query registry ────────────────────────────────────────────────
+// One live query per unique query, shared across every hook instance and kept
+// alive for a short grace period after the last subscriber unmounts.
 //
-// This is the core navigation-speed fix: the dashboard layout remounts its page
+// This is the core navigation-speed fix: the dashboard layout remounts the page
 // subtree on every route change (key={pathname}), which previously tore down and
-// re-created a listener — plus a fresh Firestore read — on EVERY navigation.
-// Sharing + ref-counting means re-mounting a page (or navigating away and back)
-// reattaches to the existing warm listener and its data instantly, with no
-// teardown/re-subscribe churn and no duplicate listeners for the same query.
+// re-created a query — plus a fresh read — on EVERY navigation. Sharing +
+// ref-counting means re-mounting a page (or navigating away and back) reattaches
+// to the existing warm query and its data instantly, with no teardown/re-read
+// churn and no duplicate queries for the same data.
+//
+// "Live" now means: read once, read again when the app says something changed,
+// and poll while the tab is visible (see lib/data/live.ts). There is no push.
 interface LiveListener {
   data: unknown[]
   error: string | null
@@ -352,12 +357,23 @@ interface LiveListener {
   idle?: ReturnType<typeof setTimeout>
 }
 const liveListeners = new Map<string, LiveListener>()
-// Keep a listener alive this long after its last subscriber leaves, so a quick
-// navigation away-and-back reuses it instead of re-reading from Firestore.
-// 5 min (not 60s): with the persistent IndexedDB cache a re-attach resumes via
-// resume-token (only changed docs are billed), but keeping the stream warm
-// avoids even that round-trip during a normal browsing session.
+// Keep a query alive this long after its last subscriber leaves, so a quick
+// navigation away-and-back reuses it instead of reading again. 5 min.
 const LISTENER_GRACE_MS = 300_000
+
+// How often to look for OTHER people's changes. A person's own saves do not wait
+// for this — they invalidate. Notifications are the one thing someone else
+// produces that a person is waiting to see, so they are checked more often.
+const POLL_MS = 60_000
+const NOTIFICATION_POLL_MS = 30_000
+const pollFor = (path: string) => (path.startsWith('notifications/') ? NOTIFICATION_POLL_MS : POLL_MS)
+
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+/** True when a read brought back exactly what was already held — nothing to re-render. */
+function sameData(a: unknown, b: unknown): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b)
+}
 
 function acquireListener(cacheKey: string, collectionPath: string, constraintsKey: string): LiveListener {
   const existing = liveListeners.get(cacheKey)
@@ -375,44 +391,27 @@ function acquireListener(cacheKey: string, collectionPath: string, constraintsKe
   }
   liveListeners.set(cacheKey, listener)
 
-  // Attach the real Firestore listener (client-only, so this never runs on SSR).
-  import('@/lib/firebase/client')
-    .then((fb) => {
-      // Bail if it was torn down before the dynamic import resolved.
-      if (liveListeners.get(cacheKey) !== listener) return
-      const db = fb.getClientFirestore()
-      const ref = fb.collection(db, collectionPath)
-      const parsed: FirestoreConstraint[] = JSON.parse(constraintsKey)
-      const built = parsed.map((c) =>
-        c.type === 'where'
-          ? fb.where(c.field!, c.op as never, c.value)
-          : c.type === 'limit'
-          ? fb.limit(c.count ?? 100)
-          : fb.orderBy(c.field!, c.direction ?? 'asc'),
-      )
-      const q = built.length > 0 ? fb.query(ref, ...built) : fb.query(ref)
-      listener.unsub = fb.onSnapshot(
-        q,
-        (snap) => {
-          const rows = snap.docs.map((d) => convertTimestamps({ id: d.id, ...d.data() }))
-          snapshotCache.set(cacheKey, rows)
-          listener.data = rows
-          listener.error = null
-          listener.loaded = true
-          listener.subs.forEach((cb) => cb())
-        },
-        (err) => {
-          listener.error = err.message
-          listener.loaded = true
-          listener.subs.forEach((cb) => cb())
-        },
-      )
-    })
-    .catch((e) => {
-      listener.error = String(e)
+  const constraints: FirestoreConstraint[] = JSON.parse(constraintsKey)
+  listener.unsub = attachLive({
+    path: collectionPath,
+    pollMs: pollFor(collectionPath),
+    load: () => queryDocs(collectionPath, constraints),
+    apply: (rows) => {
+      // A poll that finds nothing new must not hand the page a new array: that
+      // re-renders the whole tree once a minute for no visible change.
+      if (listener.loaded && listener.error === null && sameData(listener.data, rows)) return
+      snapshotCache.set(cacheKey, rows)
+      listener.data = rows
+      listener.error = null
       listener.loaded = true
       listener.subs.forEach((cb) => cb())
-    })
+    },
+    fail: (e) => {
+      listener.error = errorMessage(e)
+      listener.loaded = true
+      listener.subs.forEach((cb) => cb())
+    },
+  })
 
   return listener
 }
@@ -424,22 +423,6 @@ function releaseListener(cacheKey: string): void {
     listener.unsub?.()
     liveListeners.delete(cacheKey)
   }, LISTENER_GRACE_MS)
-}
-
-// Firestore Timestamp fields (createdAt, updatedAt, startDate, ...) come back
-// from onSnapshot as Timestamp objects, not JS Dates — every type in this app
-// declares them as `Date`, so left unconverted, `new Date(timestampObj)`
-// downstream (e.g. fmtDate) silently produces "Invalid Date". Convert once,
-// generically, for every collection read through useFirestoreList rather than
-// special-casing each collection's date fields.
-function convertTimestamps<T>(row: Record<string, unknown>): T {
-  const out: Record<string, unknown> = { ...row }
-  for (const [key, value] of Object.entries(out)) {
-    if (value && typeof value === 'object' && typeof (value as { toDate?: unknown }).toDate === 'function') {
-      out[key] = (value as { toDate: () => Date }).toDate()
-    }
-  }
-  return out as T
 }
 
 // Exported so feature hooks outside this file (useNotifications, ...) share
@@ -990,8 +973,8 @@ export function useKnowledgeDecks(): UseResult<KnowledgeDeck> {
 // ── Shared doc-level live listeners ───────────────────────────────────────────
 // Same warm registry idea as acquireListener, but for single documents. Every
 // detail page (course/[id], assessment/[id]) and per-user doc hook (points,
-// heart allowance) previously opened its own onSnapshot per mount, so each
-// navigation re-read the doc and flashed a loading state. One listener per doc
+// heart allowance) previously opened its own read per mount, so each
+// navigation re-read the doc and flashed a loading state. One live read per doc
 // path, ref-counted, kept warm through the same grace period.
 interface DocListener {
   data: unknown | null
@@ -1004,6 +987,12 @@ interface DocListener {
 }
 const docListeners = new Map<string, DocListener>()
 const docSnapshotCache = new Map<string, unknown | null>()
+
+/** 'courses/c1' → path 'courses', id 'c1'; 'notifications/u1/items/n1' → path 'notifications/u1/items'. */
+function splitDocPath(docPath: string): { path: string; id: string } {
+  const i = docPath.lastIndexOf('/')
+  return { path: docPath.slice(0, i), id: docPath.slice(i + 1) }
+}
 
 function acquireDocListener(docPath: string): DocListener {
   const existing = docListeners.get(docPath)
@@ -1021,33 +1010,25 @@ function acquireDocListener(docPath: string): DocListener {
   }
   docListeners.set(docPath, listener)
 
-  import('@/lib/firebase/client')
-    .then((fb) => {
-      if (docListeners.get(docPath) !== listener) return
-      const segments = docPath.split('/')
-      const ref = fb.doc(fb.getClientFirestore(), segments[0], ...segments.slice(1))
-      listener.unsub = fb.onSnapshot(
-        ref,
-        (snap) => {
-          const value = snap.exists() ? convertTimestamps<unknown>({ id: snap.id, ...snap.data() }) : null
-          docSnapshotCache.set(docPath, value)
-          listener.data = value
-          listener.error = null
-          listener.loaded = true
-          listener.subs.forEach((cb) => cb())
-        },
-        (err) => {
-          listener.error = err.message
-          listener.loaded = true
-          listener.subs.forEach((cb) => cb())
-        },
-      )
-    })
-    .catch((e) => {
-      listener.error = String(e)
+  const { path, id } = splitDocPath(docPath)
+  listener.unsub = attachLive({
+    path,
+    pollMs: pollFor(path),
+    load: () => getDocument(path, id),
+    apply: (value) => {
+      if (listener.loaded && listener.error === null && sameData(listener.data, value)) return
+      docSnapshotCache.set(docPath, value)
+      listener.data = value
+      listener.error = null
       listener.loaded = true
       listener.subs.forEach((cb) => cb())
-    })
+    },
+    fail: (e) => {
+      listener.error = errorMessage(e)
+      listener.loaded = true
+      listener.subs.forEach((cb) => cb())
+    },
+  })
 
   return listener
 }
@@ -1235,7 +1216,7 @@ export function useRoleplayAssessmentsByUser(uid: string | undefined): UseResult
 }
 
 // All roleplay assessments (manager / super_admin datatable + CSV-imported data).
-// createdAt comes back as a JS Date via convertTimestamps. In demo mode returns
+// createdAt comes back as a JS Date (the data client revives it). In demo mode returns
 // empty so the page keeps its local DEMO_ASSESSMENTS.
 export function useAllRoleplayAssessments(enabled = true): UseResult<RoleplayAssessment> {
   const result = useFirestoreList<RoleplayAssessment>(

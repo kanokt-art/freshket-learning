@@ -1,4 +1,17 @@
 import { getClientAuth } from '@/lib/firebase/client'
+import { invalidateSoon } from '@/lib/data/invalidation'
+
+// A server route that changes data (assigning a course, importing scores, a quiz
+// submission) does it where the browser cannot see, and nothing pushes the
+// change to open screens any more. So a successful call that is not a read, and
+// is not /api/data (which announces its own writes precisely) or /api/auth
+// (sign-in changes no data), tells every live
+// query to read again. Coarse on purpose: a missed refresh is a stale screen
+// that looks like a bug; an extra one is a single cheap read.
+function changesData(url: string, method: string): boolean {
+  if (method === 'GET' || method === 'HEAD') return false
+  return !/^\/api\/(data|auth)\//.test(url)
+}
 
 // fetch() wrapper that attaches the signed-in user's Firebase ID token as a
 // Bearer header, for API routes gated by requireSuperAdmin(). Returns the same
@@ -8,7 +21,10 @@ export async function authedFetch(input: RequestInfo | URL, init: RequestInit = 
   const token = await getClientAuth().currentUser?.getIdToken()
   const headers = new Headers(init.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  return fetch(input, { ...init, headers })
+  const res = await fetch(input, { ...init, headers })
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url
+  if (res.ok && changesData(url, (init.method ?? 'GET').toUpperCase())) invalidateSoon()
+  return res
 }
 
 // XHR-based upload for callers that want a REAL byte-transfer progress
@@ -44,6 +60,7 @@ export async function authedUpload<T = unknown>(
       let json: unknown = null
       try { json = JSON.parse(xhr.responseText) } catch { /* non-JSON body */ }
       if (xhr.status >= 200 && xhr.status < 300) {
+        if (changesData(url, 'POST')) invalidateSoon()
         resolve(json as T)
       } else {
         const message = (json as { error?: string } | null)?.error ?? `HTTP ${xhr.status}`

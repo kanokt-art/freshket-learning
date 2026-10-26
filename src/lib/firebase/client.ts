@@ -7,45 +7,12 @@ import {
   signInWithPopup,
   type Auth,
 } from 'firebase/auth'
-import {
-  getFirestore,
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  onSnapshot,
-  writeBatch,
-  type Firestore,
-} from 'firebase/firestore'
-
+// Firebase is here for sign-in only. Data lives in Postgres behind /api/data.
 export {
   onAuthStateChanged,
   signOut,
   GoogleAuthProvider,
   signInWithPopup,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  onSnapshot,
-  writeBatch,
 }
 
 const firebaseConfig = {
@@ -62,31 +29,10 @@ function getFirebaseApp(): FirebaseApp {
 }
 
 let authInstance: Auth | null = null
-let firestoreInstance: Firestore | null = null
 
 export function getClientAuth(): Auth {
   if (!authInstance) {
     authInstance = getAuth(getFirebaseApp())
   }
   return authInstance
-}
-
-export function getClientFirestore(): Firestore {
-  if (!firestoreInstance) {
-    const app = getFirebaseApp()
-    // Persistent (IndexedDB) cache: onSnapshot answers from disk first and
-    // revalidates in the background, so collections show instantly on reloads
-    // and cold navigations instead of waiting on a network round-trip every
-    // time. Multi-tab manager keeps several open tabs in sync. Falls back to
-    // the default in-memory cache where IndexedDB isn't available (SSR, private
-    // windows, or if a Firestore instance was already created).
-    try {
-      firestoreInstance = initializeFirestore(app, {
-        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-      })
-    } catch {
-      firestoreInstance = getFirestore(app)
-    }
-  }
-  return firestoreInstance
 }
