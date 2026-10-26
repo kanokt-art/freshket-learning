@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminFirestore } from '@/lib/firebase/admin'
-import { requireStaff } from '@/lib/firebase/requireStaff'
+import { getStore } from '@/lib/server/store'
+import { requireStaff } from '@/lib/server/auth'
 import type { NotifType } from '@/types/notification'
 
 // Server-side notification writer — the IN-APP BELL only.
@@ -13,10 +13,10 @@ import type { NotifType } from '@/types/notification'
 // the same visit several times. The client now calls announce once alongside
 // this, so that mechanism is gone — and posting here too would double-post.
 //
-// firestore.rules used to let ANY signed-in employee create a document in ANY
+// The old access rules let ANY signed-in employee create a document in ANY
 // other employee's notifications subcollection, with arbitrary title/body/link —
 // an in-house phishing primitive (a message that looks like it came from the
-// system, pointing anywhere). Client create is now denied by the rules and every
+// system, pointing anywhere). Client create is now denied (policies.ts) and every
 // notification comes through here, where:
 //   • the sender is taken from the verified token, never from the request body
 //   • `type` must be one of the known NotifType values
@@ -38,7 +38,7 @@ const VALID_TYPES: NotifType[] = [
 const MAX_TITLE = 200
 const MAX_BODY = 500
 const MAX_REF = 200
-// Firestore doc ids: no slashes, and keep it well under the 1500-byte limit.
+// Ids are one path segment: no slashes, and a sensible length.
 const UID_RE = /^[A-Za-z0-9_-]{1,128}$/
 
 function bad(message: string) {
@@ -78,12 +78,8 @@ export async function POST(req: NextRequest) {
   if (refId.includes('/')) return bad('refId must not contain "/"')
 
   try {
-    const db = getAdminFirestore()
     const docId = `${type}_${refId}`
-    await db
-      .collection('notifications').doc(targetUid)
-      .collection('items').doc(docId)
-      .set({
+    await getStore().set(`notifications/${targetUid}/items`, docId, {
         type,
         title: title.trim(),
         body: notifBody,
@@ -94,7 +90,7 @@ export async function POST(req: NextRequest) {
         // Attribution comes from the verified token, so a notification can always
         // be traced back to the account that actually triggered it.
         createdByUid: gate.uid,
-      })
+      }, { merge: false })
     return NextResponse.json({ ok: true, id: docId })
   } catch (err) {
     console.error('notifications/push failed', err)

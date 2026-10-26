@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireStaff } from '@/lib/firebase/requireStaff'
+import { requireStaff } from '@/lib/server/auth'
 
 // forms.gle/xxxx is a redirect Google itself serves, and the redirect target
 // (docs.google.com/forms/d/e/.../viewform) is what actually embeds in an

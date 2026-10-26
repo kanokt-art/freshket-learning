@@ -270,24 +270,6 @@ export function applyLocalUserPatch(uid: string, patch: UserPatch): void {
   }
 }
 
-// Migrate patches from old UIDs to new canonical UIDs (call after dedup)
-export function migrateLocalUserPatches(uidMap: Record<string, string>): void {
-  if (typeof window === 'undefined') return
-  const patches = getLocalUserPatches()
-  let changed = false
-  for (const [oldUid, newUid] of Object.entries(uidMap)) {
-    if (oldUid === newUid || !patches[oldUid]) continue
-    // Merge: canonical uid patch takes precedence over migrated old-uid patch
-    patches[newUid] = { ...patches[oldUid], ...(patches[newUid] ?? {}) }
-    delete patches[oldUid]
-    changed = true
-  }
-  if (changed) {
-    localStorage.setItem(LOCAL_PATCH_KEY, JSON.stringify(patches))
-    window.dispatchEvent(new Event(LOCAL_PATCH_EVT))
-  }
-}
-
 // ── Shared result type ────────────────────────────────────────────────────────
 interface UseResult<T> {
   data: T[]

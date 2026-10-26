@@ -397,6 +397,29 @@ export function createStore(config: StoreConfig) {
     }
   }
 
+  /**
+   * Create a document only if there is none, and say whether THIS call made it.
+   * First one wins: it is how something is done once however many requests race
+   * to do it (a Slack post that must announce the first save, not every edit).
+   * The check is part of the write, so there is no read-then-write gap.
+   */
+  async function claim(path: string, id: string, data: Record<string, unknown>): Promise<boolean> {
+    const { spec, parentUid } = resolve(path)
+    const row = toRow(spec, parentUid, id, data)
+    const columns = Object.keys(row).map(encodeURIComponent).join(',')
+    const res = await call(`${spec.table}?on_conflict=${spec.keyColumns.join(',')}&columns=${columns}`, {
+      method: 'POST',
+      headers: headers({
+        'Content-Type': 'application/json',
+        // Only rows actually inserted come back, so an empty answer means "already there".
+        Prefer: 'resolution=ignore-duplicates,return=representation,missing=default',
+      }),
+      body: JSON.stringify([row]),
+    })
+    if (!res.ok) await fail(res, `claim ${spec.table}`)
+    return ((await res.json()) as unknown[]).length > 0
+  }
+
   /** Add people to a course roster atomically (see supabase/migrations/006). */
   async function addCourseLearners(courseId: string, uids: string[]): Promise<number> {
     const res = await call('rpc/add_course_learners', {
@@ -474,7 +497,7 @@ export function createStore(config: StoreConfig) {
   }
 
   return {
-    query, get, getMany, set, update, remove, setMany, removeMany, addCourseLearners,
+    query, get, getMany, set, update, remove, setMany, removeMany, claim, addCourseLearners,
     findUsers, linkAuthUid, createUser,
   }
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { COURSE_IMAGES_BUCKET, getCourseImageUrl } from '@/lib/supabase/client'
-import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
+import { requireSuperAdmin } from '@/lib/server/auth'
 
 // Tool cover images share the course-images bucket (under a tools/ prefix) —
 // same storage project, no need for a second bucket. Otherwise identical to

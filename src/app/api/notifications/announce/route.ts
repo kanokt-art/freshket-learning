@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminFirestore } from '@/lib/firebase/admin'
-import { requireStaff } from '@/lib/firebase/requireStaff'
+import { getStore } from '@/lib/server/store'
+import { requireStaff } from '@/lib/server/auth'
 import type { UserProfile } from '@/types/user'
 import {
   postCoursePublishedToSlack,
@@ -122,9 +122,7 @@ export async function POST(req: NextRequest) {
         // identified by the verified token, so there is no reason to let it
         // describe itself, and this keeps the channel's wording consistent
         // with the rest of the app (English name plus nickname).
-        const db = getAdminFirestore()
-        const snap = await db.collection('users').doc(gate.uid).get()
-        const sender = snap.exists ? (snap.data() as Partial<UserProfile>) : {}
+        const sender = ((await getStore().get('users', gate.uid)) ?? {}) as Partial<UserProfile>
 
         // Only sales visits go to the channel — the same gate the old push
         // route applied, kept so this change does not quietly widen who the

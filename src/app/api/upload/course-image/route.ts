@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { COURSE_IMAGES_BUCKET, getCourseImageUrl } from '@/lib/supabase/client'
-import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
+import { requireSuperAdmin } from '@/lib/server/auth'
 
 // Only real image types may be stored — `file.type` is attacker-controlled, so it
 // is checked against a whitelist rather than passed through to `contentType`.

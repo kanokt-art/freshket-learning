@@ -119,6 +119,7 @@ function makeServer(opts: { maxRows?: number; failReadsOnce?: number } = {}) {
     if (method === 'POST') {
       const columns = (params.columns ?? '').split(',').filter(Boolean)
       const conflict = (params.on_conflict ?? '').split(',').filter(Boolean)
+      const inserted: Row[] = []
       for (const row of body as Row[]) {
         const existing = rows.find((r) => conflict.every((c) => r[c] === row[c]))
         // users.auth_uid is unique: one login belongs to one person.
@@ -129,9 +130,10 @@ function makeServer(opts: { maxRows?: number; failReadsOnce?: number } = {}) {
         const filled: Row = {}
         for (const c of columns) filled[c] = c in row ? row[c] : (DEFAULTS[path]?.[c] ?? null)
         if (existing) Object.assign(existing, filled)
-        else rows.push({ ...(DEFAULTS[path] ?? {}), ...filled })
+        else { const made = { ...(DEFAULTS[path] ?? {}), ...filled }; rows.push(made); inserted.push(made) }
       }
-      return reply(null, 201)
+      // return=representation answers with the rows that were inserted (not the ones ignored).
+      return headers.Prefer?.includes('return=representation') ? reply(inserted, 201) : reply(null, 201)
     }
 
     if (method === 'PATCH') {
@@ -625,6 +627,36 @@ describe('createUser', () => {
     await store.createUser({ uid: 'fb-new', email: 'n@x', role: 'sale' }, 'fb-new')
     expect(tables.users).toHaveLength(1)
     expect(tables.users[0].role).toBe('manager')
+  })
+})
+
+describe('claim', () => {
+  it('creates the document and says it was the one that did', async () => {
+    const { tables, store } = make()
+    expect(await store.claim('slackPosts', 'takeaway_u1_c1', { kind: 'takeaway', postedAt: new Date('2026-03-01T00:00:00Z') })).toBe(true)
+    expect(tables.slack_posts).toHaveLength(1)
+    expect(tables.slack_posts[0]).toMatchObject({ id: 'takeaway_u1_c1', kind: 'takeaway' })
+  })
+
+  it('says no, and changes nothing, when it is already there', async () => {
+    // The second save of a takeaway must not announce again, nor rewrite the first claim.
+    const { tables, store } = make()
+    await store.claim('slackPosts', 'takeaway_u1_c1', { kind: 'takeaway' })
+    const before = JSON.stringify(tables.slack_posts)
+    expect(await store.claim('slackPosts', 'takeaway_u1_c1', { kind: 'other' })).toBe(false)
+    expect(JSON.stringify(tables.slack_posts)).toBe(before)
+  })
+
+  it('lets different ids each claim once', async () => {
+    const { store } = make()
+    expect(await store.claim('slackPosts', 'a', { kind: 'x' })).toBe(true)
+    expect(await store.claim('slackPosts', 'b', { kind: 'x' })).toBe(true)
+    expect(await store.claim('slackPosts', 'a', { kind: 'x' })).toBe(false)
+  })
+
+  it('surfaces a database refusal rather than reporting a claim', async () => {
+    const { store } = make()
+    await expect(store.claim('nope', 'a', {})).rejects.toMatchObject({ code: 'invalid-query' })
   })
 })
 

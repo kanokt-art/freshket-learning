@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminFirestore } from '@/lib/firebase/admin'
-import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
+import { getStore } from '@/lib/server/store'
+import { requireSuperAdmin } from '@/lib/server/auth'
 import { computeDepartmentAssignmentSync } from '@/lib/courses/syncDepartmentAssignments'
 
 // POST /api/courses/sync-department-assignments
@@ -25,23 +25,20 @@ export async function POST(req: NextRequest) {
     const gate = await requireSuperAdmin(req)
     if (!gate.ok) return gate.response
 
-    const db = getAdminFirestore()
-    const [coursesSnap, usersSnap] = await Promise.all([
-      db.collection('courses').get(),
-      db.collection('users').get(),
-    ])
+    const store = getStore()
+    const [courseDocs, userDocs] = await Promise.all([store.query('courses'), store.query('users')])
 
-    const courses = coursesSnap.docs.map(d => ({
+    const courses = courseDocs.map(d => ({
       id: d.id,
-      assignedDepartments: d.data().assignedDepartments as string[] | undefined,
-      assignedTeamIds: d.data().assignedTeamIds as string[] | undefined,
-      assignedUserIds: d.data().assignedUserIds as string[] | undefined,
+      assignedDepartments: d.assignedDepartments as string[] | undefined,
+      assignedTeamIds: d.assignedTeamIds as string[] | undefined,
+      assignedUserIds: d.assignedUserIds as string[] | undefined,
     }))
-    const users = usersSnap.docs.map(d => ({
+    const users = userDocs.map(d => ({
       uid: d.id,
-      department: d.data().department as string | undefined,
-      teamId: d.data().teamId as string | undefined,
-      employmentStatus: d.data().employmentStatus as string | undefined,
+      department: d.department as string | undefined,
+      teamId: d.teamId as string | undefined,
+      employmentStatus: d.employmentStatus as string | undefined,
     }))
 
     const results = computeDepartmentAssignmentSync(courses, users)
@@ -49,11 +46,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ coursesUpdated: 0, totalAdded: 0, results: [] })
     }
 
-    const batch = db.batch()
-    for (const r of results) {
-      batch.update(db.collection('courses').doc(r.courseId), { assignedUserIds: r.newAssignedUserIds })
-    }
-    await batch.commit()
+    // Additive and atomic per course: the database adds only the people not
+    // already on the roster, so a teacher editing the same roster at the same
+    // moment cannot have someone dropped by a write built from an older read.
+    for (const r of results) await store.addCourseLearners(r.courseId, r.addedUids)
 
     const totalAdded = results.reduce((sum, r) => sum + r.addedUids.length, 0)
     return NextResponse.json({

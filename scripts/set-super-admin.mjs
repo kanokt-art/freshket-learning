@@ -1,67 +1,52 @@
 /**
- * One-off script: set role=super_admin for a given email in Firestore.
- * Uses service account from .env.local — delete this file after use.
+ * One-off script: set role=super_admin for a given email.
+ * Talks to the database with the service-role key from .env.local — delete this
+ * file after use.
  *
- * Usage: node scripts/set-super-admin.mjs kanok.t@freshket.co
+ * Usage: node --env-file=.env.local scripts/set-super-admin.mjs kanok.t@freshket.co
+ *
+ * The person must already have a profile — either imported from the HR file or
+ * created by signing in once. Someone who has done neither is told so rather than
+ * given a half-made profile.
  */
-
-import { initializeApp, cert } from 'firebase-admin/app'
-import { getAuth } from 'firebase-admin/auth'
-import { getFirestore, FieldValue } from 'firebase-admin/firestore'
 
 const email = process.argv[2]
 if (!email) {
-  console.error('Usage: node scripts/set-super-admin.mjs <email>')
+  console.error('Usage: node --env-file=.env.local scripts/set-super-admin.mjs <email>')
   process.exit(1)
 }
 
-initializeApp({
-  credential: cert({
-    projectId:   process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-  }),
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+if (!url || !key) {
+  console.error('❌ NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set (see .env.local)')
+  process.exit(1)
+}
+
+// email_lc is the stored lower-case copy of the email: a plain equality, where a
+// case-insensitive LIKE would treat the `_` in real addresses as a wildcard.
+const target = `${url.replace(/\/$/, '')}/rest/v1/users?email_lc=eq.${encodeURIComponent(email.trim().toLowerCase())}`
+
+const res = await fetch(target, {
+  method: 'PATCH',
+  headers: {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    'Content-Type': 'application/json',
+    Prefer: 'return=representation',
+  },
+  body: JSON.stringify({ role: 'super_admin', updated_at: new Date().toISOString() }),
 })
 
-const auth = getAuth()
-const db   = getFirestore()
-
-try {
-  // 1. Get UID from Firebase Auth
-  const fbUser = await auth.getUserByEmail(email)
-  const { uid } = fbUser
-  console.log(`✔ Found user  uid=${uid}  email=${email}`)
-
-  // 2. Upsert Firestore document
-  const ref = db.collection('users').doc(uid)
-  const snap = await ref.get()
-
-  if (snap.exists) {
-    await ref.update({
-      role:      'super_admin',
-      updatedAt: FieldValue.serverTimestamp(),
-    })
-    console.log(`✔ Updated existing document → role=super_admin`)
-  } else {
-    // User hasn't logged in yet — create a minimal document
-    await ref.set({
-      uid,
-      email,
-      displayName: fbUser.displayName ?? email.split('@')[0],
-      photoURL:    fbUser.photoURL ?? null,
-      role:        'super_admin',
-      createdAt:   FieldValue.serverTimestamp(),
-      updatedAt:   FieldValue.serverTimestamp(),
-    })
-    console.log(`✔ Created new document → role=super_admin`)
-  }
-
-  console.log(`\n✅ Done — ${email} is now super_admin`)
-} catch (err) {
-  if (err.code === 'auth/user-not-found') {
-    console.error(`❌ User not found: ${email}\n   Login with Google first to create the account.`)
-  } else {
-    console.error('❌ Error:', err.message)
-  }
+if (!res.ok) {
+  console.error(`❌ Error: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`)
   process.exit(1)
 }
+
+const changed = await res.json()
+if (changed.length === 0) {
+  console.error(`❌ No profile for ${email}\n   Sign in with Google once (or import them from the HR file), then run this again.`)
+  process.exit(1)
+}
+
+console.log(`✅ Done — ${changed.length} profile(s) for ${email} now super_admin`)

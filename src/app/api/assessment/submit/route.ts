@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { FieldValue } from 'firebase-admin/firestore'
-import { getAdminFirestore } from '@/lib/firebase/admin'
-import { requireStaff } from '@/lib/firebase/requireStaff'
+import { getStore, type Store } from '@/lib/server/store'
+import { requireStaff } from '@/lib/server/auth'
+import { newId } from '@/lib/server/dataApi'
+import { refreshUserStats } from '@/lib/server/userStats'
 import { gradeSubmission, type GivenAnswers } from '@/lib/assessment/grade'
-import { computeUserStats } from '@/types/stats'
 import { postCompletionToSlack, isSalesDepartment } from '@/lib/notifications/slack'
 import type { Assessment, Question } from '@/types/assessment'
 import type { Course } from '@/types/course'
@@ -13,7 +13,7 @@ import type { UserProfile } from '@/types/user'
 //
 // This route is the fix for the worst defect in the system: grading used to run
 // in the browser and the resulting score was written to localStorage, which the
-// course page then mirrored into trainingRecords. Since firestore.rules only
+// course page then mirrored into trainingRecords. Since the access rules only
 // checked `userId == uid()` and validated nothing else, a learner could set
 // `course_prog_*` to {postDone:true, postScore:100} in DevTools and have a
 // fabricated 100 land in the database, indistinguishable from a real result.
@@ -48,7 +48,7 @@ function bad(message: string) {
  * failure must not undo an already-graded, already-recorded submission.
  */
 async function notifyManagerOfCompletion(
-  db: FirebaseFirestore.Firestore,
+  store: Store,
   uid: string,
   courseTitle: string,
   score: number,
@@ -63,9 +63,9 @@ async function notifyManagerOfCompletion(
     // without the button rather than with a broken relative link.
     const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, '')
 
-    const learnerSnap = await db.collection('users').doc(uid).get()
-    if (!learnerSnap.exists) return
-    const learner = learnerSnap.data() as Partial<UserProfile>
+    const learnerDoc = await store.get('users', uid)
+    if (!learnerDoc) return
+    const learner = learnerDoc as Partial<UserProfile>
 
     const name = (learner.displayNameEN?.trim() || learner.displayName || learner.email || 'พนักงาน')
       + (learner.nickname ? ` (${learner.nickname})` : '')
@@ -82,24 +82,22 @@ async function notifyManagerOfCompletion(
     } else {
       // canAccess('team_lead') passes for team_lead, manager, and super_admin —
       // an `in` query needs those roles spelled out instead.
-      const leadsSnap = await db.collection('users').where('role', 'in', ['team_lead', 'manager', 'super_admin']).get()
-      targetUids = leadsSnap.docs.map((d) => d.id)
+      const leads = await store.query('users', { where: [{ field: 'role', op: 'in', value: ['team_lead', 'manager', 'super_admin'] }] })
+      targetUids = leads.map((d) => d.id)
     }
 
     const now = new Date()
     await Promise.all(targetUids.map((targetUid) =>
-      db.collection('notifications').doc(targetUid).collection('items')
-        .doc(`assessment_completed_${uid}_${courseId}_${now.getTime()}`)
-        .set({
-          type: 'assessment_completed',
-          title,
-          body,
-          refId: courseId,
-          refPath: `/courses/${courseId}`,
-          read: false,
-          createdAt: now,
-          createdByUid: uid,
-        }),
+      store.set(`notifications/${targetUid}/items`, `assessment_completed_${uid}_${courseId}_${now.getTime()}`, {
+        type: 'assessment_completed',
+        title,
+        body,
+        refId: courseId,
+        refPath: `/courses/${courseId}`,
+        read: false,
+        createdAt: now,
+        createdByUid: uid,
+      }, { merge: false }),
     ))
     // Slack is an additional channel, not a replacement: the in-app record
     // above is already written, so a Slack failure loses nothing. Gated to the
@@ -124,7 +122,7 @@ async function notifyManagerOfCompletion(
   }
 }
 
-/** Reject payload shapes we won't grade, before touching Firestore. */
+/** Reject payload shapes we won't grade, before touching the database. */
 function parseAnswers(raw: unknown): GivenAnswers | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
   const entries = Object.entries(raw as Record<string, unknown>)
@@ -177,23 +175,22 @@ export async function POST(req: NextRequest) {
   if (!answers) return bad('Invalid answers payload')
 
   try {
-    const db = getAdminFirestore()
+    const store = getStore()
 
     // ── Timed-attempt enforcement ────────────────────────────────────────────
     // The session holds the server's own start time, so a reloaded page or an
     // edited client clock can't buy extra time. Three ways a session is refused:
     // not the caller's, already used (replay), or past its deadline.
-    let timedOutSession: { ref: FirebaseFirestore.DocumentReference; elapsedMs: number; limitMs: number } | null = null
-    let sessionRef: FirebaseFirestore.DocumentReference | null = null
+    let timedOutSession: { id: string; elapsedMs: number; limitMs: number } | null = null
+    let burnSessionId: string | null = null
 
     if (typeof sessionId === 'string') {
-      const sRef = db.collection('assessmentSessions').doc(sessionId)
-      const sSnap = await sRef.get()
-      if (!sSnap.exists) return NextResponse.json({ error: 'ไม่พบรอบการทำแบบทดสอบนี้' }, { status: 409 })
+      const sDoc = await store.get('assessmentSessions', sessionId)
+      if (!sDoc) return NextResponse.json({ error: 'ไม่พบรอบการทำแบบทดสอบนี้' }, { status: 409 })
 
-      const s = sSnap.data() as {
+      const s = sDoc as {
         uid?: string; assessmentId?: string; timeLimitMinutes?: number
-        startedAt?: { toDate(): Date }; submittedAt?: unknown
+        startedAt?: Date; submittedAt?: unknown
       }
       if (s.uid !== uid || s.assessmentId !== assessmentId) {
         return NextResponse.json({ error: 'รอบการทำแบบทดสอบไม่ถูกต้อง' }, { status: 403 })
@@ -203,25 +200,22 @@ export async function POST(req: NextRequest) {
       }
 
       const limitMin = Number(s.timeLimitMinutes ?? 0)
-      if (limitMin > 0 && s.startedAt?.toDate) {
-        const elapsedMs = Date.now() - s.startedAt.toDate().getTime()
+      if (limitMin > 0 && s.startedAt instanceof Date) {
+        const elapsedMs = Date.now() - s.startedAt.getTime()
         const limitMs = limitMin * 60_000
         if (elapsedMs > limitMs + DEADLINE_GRACE_MS) {
-          timedOutSession = { ref: sRef, elapsedMs, limitMs }
+          timedOutSession = { id: sessionId, elapsedMs, limitMs }
         }
       }
-      sessionRef = sRef
+      burnSessionId = sessionId
     }
 
     // Past the deadline: record the attempt for audit (so "they ran out of time"
     // is visible, not silent) but grade nothing and write NO score. A learner who
     // stalls past the limit has to retake — which is what a time limit means.
     if (timedOutSession) {
-      await timedOutSession.ref.set(
-        { submittedAt: FieldValue.serverTimestamp(), timedOut: true },
-        { merge: true },
-      )
-      await db.collection('assessmentAttempts').doc().set({
+      await store.set('assessmentSessions', timedOutSession.id, { submittedAt: new Date(), timedOut: true }, { merge: true })
+      await store.set('assessmentAttempts', newId(), {
         uid,
         assessmentId,
         ...(typeof courseId === 'string' ? { courseId } : {}),
@@ -233,17 +227,17 @@ export async function POST(req: NextRequest) {
         limitMs: timedOutSession.limitMs,
         answers: [],
         autoSubmitted,
-        createdAt: FieldValue.serverTimestamp(),
-      })
+        createdAt: new Date(),
+      }, { merge: false })
       return NextResponse.json(
         { error: 'หมดเวลาทำแบบทดสอบ — คำตอบนี้ไม่ถูกบันทึก กรุณาเริ่มทำใหม่', timedOut: true },
         { status: 409 },
       )
     }
 
-    const aSnap = await db.collection('assessments').doc(assessmentId).get()
-    if (!aSnap.exists) return NextResponse.json({ error: 'ไม่พบแบบทดสอบนี้' }, { status: 404 })
-    const assessment = aSnap.data() as Partial<Assessment>
+    const aDoc = await store.get('assessments', assessmentId)
+    if (!aDoc) return NextResponse.json({ error: 'ไม่พบแบบทดสอบนี้' }, { status: 404 })
+    const assessment = aDoc as Partial<Assessment>
     if (assessment.isPublished !== true) {
       return NextResponse.json({ error: 'แบบทดสอบนี้ยังไม่เผยแพร่' }, { status: 403 })
     }
@@ -260,14 +254,12 @@ export async function POST(req: NextRequest) {
 
     // Attempt number = how many rows this learner already has for this quiz.
     // Counted rather than incremented so it stays right even if a write was lost.
-    const priorAttempts = await db.collection('assessmentAttempts')
-      .where('uid', '==', uid)
-      .where('assessmentId', '==', assessmentId)
-      .count().get()
-    const attemptNumber = priorAttempts.data().count + 1
+    const priorAttempts = await store.query('assessmentAttempts', {
+      where: [{ field: 'uid', op: '==', value: uid }, { field: 'assessmentId', op: '==', value: assessmentId }],
+    })
+    const attemptNumber = priorAttempts.length + 1
 
-    const attemptRef = db.collection('assessmentAttempts').doc()
-    await attemptRef.set({
+    await store.set('assessmentAttempts', newId(), {
       uid,
       assessmentId,
       assessmentTitle: assessment.title ?? '',
@@ -281,21 +273,20 @@ export async function POST(req: NextRequest) {
       attemptNumber,
       answers: graded.answers,
       autoSubmitted,
-      createdAt: FieldValue.serverTimestamp(),
-    })
+      createdAt: new Date(),
+    }, { merge: false })
 
     // Burn the session so the same one can't be replayed for a second attempt.
-    if (sessionRef) {
-      await sessionRef.set({ submittedAt: FieldValue.serverTimestamp(), timedOut: false }, { merge: true })
+    if (burnSessionId) {
+      await store.set('assessmentSessions', burnSessionId, { submittedAt: new Date(), timedOut: false }, { merge: true })
     }
 
     // When the quiz was launched from a course, the score belongs on that
     // learner's training record — written here, never by the client.
     if (typeof courseId === 'string') {
-      const cSnap = await db.collection('courses').doc(courseId).get()
-      const course = cSnap.exists ? (cSnap.data() as Partial<Course>) : undefined
-      const recRef = db.collection('trainingRecords').doc(`${uid}_${courseId}`)
-      const recSnap = await recRef.get()
+      const course = ((await store.get('courses', courseId)) ?? undefined) as Partial<Course> | undefined
+      const recId = `${uid}_${courseId}`
+      const existingRecord = await store.get('trainingRecords', recId)
 
       const payload: Record<string, unknown> = {
         userId: uid,
@@ -309,7 +300,7 @@ export async function POST(req: NextRequest) {
         passScore: passingScore,
         attemptCount: attemptNumber,
         source: 'manual',
-        updatedAt: FieldValue.serverTimestamp(),
+        updatedAt: new Date(),
       }
       // A quiz the admin tagged as the course's pre-test or post-test
       // (CourseLesson.quizRole) also lands in its own column, so the learner
@@ -317,35 +308,24 @@ export async function POST(req: NextRequest) {
       if (step === 'pre') payload.preTestScore = graded.score
       if (step === 'post') payload.postTestScore = graded.score
       // First touch stamps only — never move an existing startedAt.
-      if (!recSnap.exists || !recSnap.data()?.startedAt) {
-        payload.startedAt = FieldValue.serverTimestamp()
+      if (!existingRecord?.startedAt) {
+        payload.startedAt = new Date()
       }
-      if (!recSnap.exists) {
+      if (!existingRecord) {
         // The learner may submit a quiz before any lesson tick has created the
         // record. Seed a status the client will refine; don't claim completion.
         payload.status = 'in_progress'
       }
-      await recRef.set(payload, { merge: true })
+      await store.set('trainingRecords', recId, payload, { merge: true })
 
       // Score moved, so the learner's rollup is stale.
-      const mine = await db.collection('trainingRecords').where('userId', '==', uid).get()
-      const stats = computeUserStats(
-        uid,
-        mine.docs.map((d) => {
-          const r = d.data() as { status?: string; score?: number | null }
-          return { status: r.status ?? '', score: r.score ?? null }
-        }),
-      )
-      await db.collection('userStats').doc(uid).set(
-        { ...stats, updatedAt: FieldValue.serverTimestamp() },
-        { merge: true },
-      )
+      await refreshUserStats(store, uid)
 
       // "จบแล้ว" means the course is actually done — that's the post-assessment
       // (or a plain lesson-quiz with no pre/post concept at all), never the
       // pre-assessment, which only means the learner is just starting out.
       if (step !== 'pre') {
-        await notifyManagerOfCompletion(db, uid, payload.courseTitle as string, graded.score, passed, courseId, nothingToAutoGrade)
+        await notifyManagerOfCompletion(store, uid, payload.courseTitle as string, graded.score, passed, courseId, nothingToAutoGrade)
       }
     }
 

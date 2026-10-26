@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { FieldValue } from 'firebase-admin/firestore'
-import { getAdminFirestore } from '@/lib/firebase/admin'
-import { requireStaff } from '@/lib/firebase/requireStaff'
+import { getStore } from '@/lib/server/store'
+import { requireStaff } from '@/lib/server/auth'
+import { newId } from '@/lib/server/dataApi'
 import type { Assessment } from '@/types/assessment'
 
 // Opens a timed attempt session.
 //
 // The time limit has to be anchored on the server or it is decoration: a
 // countdown that lives only in the browser is reset by a reload and edited in
-// DevTools. So the clock starts HERE (server timestamp), the deadline is derived
+// DevTools. So the clock starts HERE (the server's clock), the deadline is derived
 // from it, and POST /api/assessment/submit refuses a submission that arrives
 // after it. The browser countdown becomes a display of the server's deadline
 // rather than the thing being enforced.
@@ -40,11 +40,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const db = getAdminFirestore()
+    const store = getStore()
 
-    const aSnap = await db.collection('assessments').doc(assessmentId).get()
-    if (!aSnap.exists) return NextResponse.json({ error: 'ไม่พบแบบทดสอบนี้' }, { status: 404 })
-    const assessmentData = aSnap.data() as Partial<Assessment>
+    const assessmentDoc = await store.get('assessments', assessmentId)
+    if (!assessmentDoc) return NextResponse.json({ error: 'ไม่พบแบบทดสอบนี้' }, { status: 404 })
+    const assessmentData = assessmentDoc as Partial<Assessment>
     if (assessmentData.isPublished !== true) {
       return NextResponse.json({ error: 'แบบทดสอบนี้ยังไม่เผยแพร่' }, { status: 403 })
     }
@@ -54,19 +54,19 @@ export async function POST(req: NextRequest) {
     const timeLimitMinutes = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 600) : 0
 
     const startedAt = new Date()
-    const ref = db.collection('assessmentSessions').doc()
-    await ref.set({
+    const sessionId = newId()
+    await store.set('assessmentSessions', sessionId, {
       uid: gate.uid,
       assessmentId,
       ...(typeof courseId === 'string' ? { courseId } : {}),
       timeLimitMinutes,
-      startedAt: FieldValue.serverTimestamp(),
+      startedAt,
       submittedAt: null,
-      createdAt: FieldValue.serverTimestamp(),
+      createdAt: startedAt,
     })
 
     return NextResponse.json({
-      sessionId: ref.id,
+      sessionId,
       timeLimitMinutes,
       // Absolute epoch ms so the client doesn't have to trust its own clock drift
       // for the starting point — it still counts down locally, but against this.

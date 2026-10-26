@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Timestamp } from 'firebase-admin/firestore'
-import { getAdminFirestore } from '@/lib/firebase/admin'
-import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
+import { getStore } from '@/lib/server/store'
+import { requireSuperAdmin } from '@/lib/server/auth'
+import { newId } from '@/lib/server/dataApi'
 import { parseRoleplayText, type ParsedRoleplayRow } from '@/lib/utils/csvParser'
 import type { CSVImportError } from '@/types/tracking'
 import type { UserRole } from '@/types/user'
@@ -52,37 +52,35 @@ export async function POST(req: NextRequest) {
     const { data: parsedRows, skipped, errors } = parseRoleplayText(text)
     const allErrors: CSVImportError[] = [...errors]
 
-    const db = getAdminFirestore()
+    const store = getStore()
 
     // ── Build case-insensitive indexes from the users collection (one read) ────
     // emailIndex: lowercased email → assessor. nameIndex: candidate name key →
     // subject, with priority (nickname > EN first token > Thai first token) so a
-    // more specific match wins. Both prefer auth docs over csv- docs on a tie,
-    // matching useAllUsers' canonical-uid rule.
+    // more specific match wins. Both prefer the HR-imported profile (`csv-…`,
+    // the person's stable id) over one made at a first login on a tie.
     const emailIndex = new Map<string, { userId: string; displayName: string; role: UserRole }>()
     const nameIndex = new Map<string, { userId: string; displayName: string; priority: number }>()
-    const usersSnap = await db.collection('users').get()
 
     const firstToken = (s: string) => s.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
     const registerName = (key: string, userId: string, displayName: string, priority: number) => {
       if (!key) return
       const cur = nameIndex.get(key)
       const isCsv = userId.startsWith('csv-')
-      if (!cur || priority > cur.priority || (priority === cur.priority && cur.userId.startsWith('csv-') && !isCsv)) {
+      if (!cur || priority > cur.priority || (priority === cur.priority && !cur.userId.startsWith('csv-') && isCsv)) {
         nameIndex.set(key, { userId, displayName, priority })
       }
     }
 
-    for (const doc of usersSnap.docs) {
-      const d = doc.data()
-      const userId = doc.id
+    for (const d of await store.query('users')) {
+      const userId = d.id
       const isCsv = userId.startsWith('csv-')
       const displayName = (d.displayName as string) ?? (d.displayNameEN as string) ?? userId
 
       const emailKey = String(d.email ?? '').trim().toLowerCase()
       if (emailKey) {
         const cur = emailIndex.get(emailKey)
-        if (!cur || (cur.userId.startsWith('csv-') && !isCsv)) {
+        if (!cur || (!cur.userId.startsWith('csv-') && isCsv)) {
           emailIndex.set(emailKey, { userId, displayName, role: (d.role as UserRole) ?? 'sale' })
         }
       }
@@ -122,9 +120,8 @@ export async function POST(req: NextRequest) {
 
     // ── Diff against existing docs ─────────────────────────────────────────────
     if (resolved.length > 0) {
-      const refs = resolved.map((r) => db.collection('roleplayAssessments').doc(r.docId))
-      const snaps = await db.getAll(...refs)
-      snaps.forEach((snap, i) => { resolved[i].existing = snap.exists })
+      const found = new Set((await store.getMany('roleplayAssessments', resolved.map((r) => r.docId))).map((d) => d.id))
+      for (const r of resolved) r.existing = found.has(r.docId)
     }
 
     const fresh = resolved.filter((r) => !r.existing)
@@ -152,15 +149,14 @@ export async function POST(req: NextRequest) {
     // ── Commit ─────────────────────────────────────────────────────────────────
     const toWrite = strategy === 'overwrite' ? [...fresh, ...duplicates] : fresh
     const skippedDup = strategy === 'overwrite' ? 0 : duplicates.length
-    const batchId = db.collection('csvImports').doc().id
+    const batchId = newId()
 
-    const batch = db.batch()
+    const docs: Array<{ id: string; data: Record<string, unknown> }> = []
     for (const r of toWrite) {
       const createdAt = r.takenAt && !isNaN(new Date(r.takenAt).getTime())
-        ? Timestamp.fromDate(new Date(r.takenAt))
-        : Timestamp.now()
-      batch.set(db.collection('roleplayAssessments').doc(r.docId), {
-        id: r.docId,
+        ? new Date(r.takenAt)
+        : new Date()
+      docs.push({ id: r.docId, data: {
         createdAt,
         assessorUid: r.assessorUid,
         assessorName: r.assessorName,
@@ -174,12 +170,11 @@ export async function POST(req: NextRequest) {
         topics: r.ratings.map((t) => ({ key: t.key, rating: t.rating, comment: '' })),
         source: 'csv_import',
         importBatchId: batchId,
-      }, { merge: true })
+      } })
     }
-    await batch.commit()
+    await store.setMany('roleplayAssessments', docs, { merge: true })
 
-    await db.collection('csvImports').doc(batchId).set({
-      id: batchId,
+    await store.set('csvImports', batchId, {
       type: 'roleplay',
       fileName: file.name,
       totalRows: parsedRows.length,
@@ -187,8 +182,8 @@ export async function POST(req: NextRequest) {
       skippedRows: skippedDup + skipped.length,
       failedRows: unmatched.length + errors.length,
       errors: allErrors,
-      importedAt: Timestamp.now(),
-    })
+      importedAt: new Date(),
+    }, { merge: false })
 
     return NextResponse.json({
       batchId,

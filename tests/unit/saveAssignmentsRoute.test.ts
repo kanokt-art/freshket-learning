@@ -7,67 +7,47 @@ import { NextRequest } from 'next/server'
 // syncDepartmentAssignments.test.ts. What is NOT covered there, and is where a
 // bug here would actually live, is the route's own decisions: which rows count
 // as "moved into a team", what happens to the response when the sync fails, and
-// what shape of write reaches the course document. None of those can be run
-// against the real database without writing to production, so the Admin SDK is
-// replaced with a small in-memory fake and the tests assert on the writes it
-// receives.
+// what reaches the course roster. None of those can be run against the real
+// database without writing to production, so the store is replaced with a small
+// in-memory fake and the tests assert on the calls it receives.
 
 // ── Fakes ───────────────────────────────────────────────────────────────────
 
-interface FakeUser { exists: boolean; data?: Record<string, unknown> }
 interface FakeCourse { id: string; data: Record<string, unknown> }
-interface RecordedBatch { updates: { path: string; data: Record<string, unknown> }[]; committed: boolean }
 
-let users: Record<string, FakeUser> = {}
+let users: Record<string, Record<string, unknown>> = {}
 let courses: FakeCourse[] = []
-let batches: RecordedBatch[] = []
+/** Every write the route made, in order. */
+let log: Array<{ kind: 'user' | 'roster'; id: string; data: unknown }> = []
 let courseReads = 0
 let courseReadError: Error | null = null
 
-const fakeDb = {
-  collection: (name: string) => ({
-    doc: (id: string) => ({ path: `${name}/${id}` }),
-    select: () => ({
-      get: async () => {
-        courseReads++
-        if (courseReadError) throw courseReadError
-        return { docs: courses.map((c) => ({ id: c.id, data: () => c.data })) }
-      },
-    }),
-  }),
-  getAll: async (...refs: { path: string }[]) =>
-    refs.map((r) => {
-      const id = r.path.split('/')[1]
-      const u = users[id]
-      return { id, exists: !!u?.exists, data: () => u?.data }
-    }),
-  batch: () => {
-    const b: RecordedBatch = { updates: [], committed: false }
-    batches.push(b)
-    return {
-      update: (ref: { path: string }, data: Record<string, unknown>) => {
-        b.updates.push({ path: ref.path, data })
-      },
-      commit: async () => { b.committed = true },
-    }
+const fakeStore = {
+  getMany: async (_path: string, ids: string[]) =>
+    ids.filter((id) => users[id]).map((id) => ({ id, ...users[id] })),
+  update: async (_path: string, id: string, data: Record<string, unknown>) => {
+    log.push({ kind: 'user', id, data })
+  },
+  query: async (path: string) => {
+    if (path !== 'courses') throw new Error('unexpected read of ' + path)
+    courseReads++
+    if (courseReadError) throw courseReadError
+    return courses.map((c) => ({ id: c.id, ...c.data }))
+  },
+  addCourseLearners: async (courseId: string, uids: string[]) => {
+    log.push({ kind: 'roster', id: courseId, data: uids })
+    return uids.length
   },
 }
-
-vi.mock('@/lib/firebase/admin', () => ({ getAdminFirestore: () => fakeDb }))
+vi.mock('@/lib/server/store', () => ({ getStore: () => fakeStore }))
 
 // The route is gated by requireManager; the gate's own behaviour is not what is
 // under test, so it is opened and the role is made switchable per test.
 let gateIsSuperAdmin = false
-vi.mock('@/lib/firebase/requireManager', () => ({
+vi.mock('@/lib/server/auth', () => ({
   requireManager: async () => ({
     ok: true, uid: 'manager-1', role: gateIsSuperAdmin ? 'super_admin' : 'manager', isSuperAdmin: gateIsSuperAdmin,
   }),
-}))
-
-// arrayUnion is replaced by a marker so the test can see that a union — not a
-// whole array — was written.
-vi.mock('firebase-admin/firestore', () => ({
-  FieldValue: { arrayUnion: (...values: string[]) => ({ __arrayUnion: values }) },
 }))
 
 import { POST } from '@/app/api/users/save-assignments/route'
@@ -79,20 +59,19 @@ function call(assignments: unknown[]) {
   }))
 }
 
-/** The batch holding user writes vs the one holding course writes. */
-const userBatch = () => batches.find((b) => b.updates.some((u) => u.path.startsWith('users/')))
-const courseBatch = () => batches.find((b) => b.updates.some((u) => u.path.startsWith('courses/')))
+const userWrites = () => log.filter((l) => l.kind === 'user')
+const rosterWrites = () => log.filter((l) => l.kind === 'roster')
 
 beforeEach(() => {
   users = {
-    'u-new': { exists: true, data: { department: 'Portfolio Management', employmentStatus: 'Active' } },
-    'u-gone': { exists: true, data: { department: 'Portfolio Management', employmentStatus: 'Resigned' } },
+    'u-new': { department: 'Portfolio Management', employmentStatus: 'Active' },
+    'u-gone': { department: 'Portfolio Management', employmentStatus: 'Resigned' },
   }
   courses = [
     { id: 'mbti', data: { assignedTeamIds: ['team-chain'], assignedUserIds: ['u1'] } },
     { id: 'other', data: { assignedTeamIds: ['team-elsewhere'], assignedUserIds: [] } },
   ]
-  batches = []
+  log = []
   courseReads = 0
   courseReadError = null
   gateIsSuperAdmin = false
@@ -107,29 +86,25 @@ describe('moving a member into a team', () => {
     expect(body.saved).toBe(1)
     expect(body.courseSync).toEqual({ coursesUpdated: 1, totalAdded: 1 })
 
-    expect(userBatch()?.updates).toEqual([{ path: 'users/u-new', data: { teamId: 'team-chain' } }])
-    expect(courseBatch()?.updates.map((u) => u.path)).toEqual(['courses/mbti'])
+    expect(userWrites()).toEqual([{ kind: 'user', id: 'u-new', data: { teamId: 'team-chain' } }])
+    expect(rosterWrites().map((w) => w.id)).toEqual(['mbti'])
   })
 
-  it('writes a union, not the whole array back', async () => {
+  it('adds only the newcomer to the roster, never the whole list back', async () => {
     // The roster was read a moment earlier. Writing it back whole would drop
-    // anyone another request added in between; a union cannot.
+    // anyone another request added in between; adding just the new person cannot.
     await call([{ uid: 'u-new', teamId: 'team-chain' }])
-    expect(courseBatch()?.updates[0].data).toEqual({
-      assignedUserIds: { __arrayUnion: ['u-new'] },
-    })
+    expect(rosterWrites()).toEqual([{ kind: 'roster', id: 'mbti', data: ['u-new'] }])
   })
 
-  it('commits the move before it touches any course', async () => {
+  it('saves the move before it touches any course', async () => {
     await call([{ uid: 'u-new', teamId: 'team-chain' }])
-    expect(batches[0].committed).toBe(true)
-    expect(batches[0].updates[0].path).toBe('users/u-new')
+    expect(log.map((l) => l.kind)).toEqual(['user', 'roster'])
   })
 
   it('leaves courses aimed at other teams alone', async () => {
     await call([{ uid: 'u-new', teamId: 'team-chain' }])
-    const touched = courseBatch()?.updates.map((u) => u.path) ?? []
-    expect(touched).not.toContain('courses/other')
+    expect(rosterWrites().map((w) => w.id)).not.toContain('other')
   })
 
   it('does not enrol a resigned employee', async () => {
@@ -137,12 +112,12 @@ describe('moving a member into a team', () => {
     const body = await res.json()
     expect(body.saved).toBe(1)                       // the move itself still happens
     expect(body.courseSync).toEqual({ coursesUpdated: 0, totalAdded: 0 })
-    expect(courseBatch()).toBeUndefined()
+    expect(rosterWrites()).toEqual([])
   })
 
   it('handles a bulk move with one course read, not one per person', async () => {
-    users['u2'] = { exists: true, data: { department: 'Portfolio Management' } }
-    users['u3'] = { exists: true, data: { department: 'Portfolio Management' } }
+    users['u2'] = { department: 'Portfolio Management' }
+    users['u3'] = { department: 'Portfolio Management' }
     courses = [{ id: 'mbti', data: { assignedTeamIds: ['team-chain'], assignedUserIds: [] } }]
 
     const res = await call([
@@ -156,9 +131,7 @@ describe('moving a member into a team', () => {
     // once per person: that route reads every employee each time.
     expect(courseReads).toBe(1)
     expect(body.courseSync).toEqual({ coursesUpdated: 1, totalAdded: 3 })
-    expect(courseBatch()?.updates[0].data).toEqual({
-      assignedUserIds: { __arrayUnion: ['u-new', 'u2', 'u3'] },
-    })
+    expect(rosterWrites()).toEqual([{ kind: 'roster', id: 'mbti', data: ['u-new', 'u2', 'u3'] }])
   })
 })
 
@@ -181,7 +154,7 @@ describe('changes that are not a move into a team', () => {
   })
 
   it('does not sync for someone who no longer exists', async () => {
-    // A stale uid (merged away by dedup) is skipped rather than written; it was
+    // A stale uid (a person who no longer exists) is skipped rather than written; it was
     // never moved, so it must not be enrolled either.
     const res = await call([{ uid: 'stale', teamId: 'team-chain' }])
     const body = await res.json()
@@ -203,7 +176,7 @@ describe('changes that are not a move into a team', () => {
   it('syncs only the people who moved when the batch mixes kinds of change', async () => {
     // u2 must exist before the call, or it is skipped as stale and the case
     // would pass without ever exercising a team being cleared.
-    users['u2'] = { exists: true, data: {} }
+    users['u2'] = {}
     const res = await call([
       { uid: 'u-new', teamId: 'team-chain' },
       { uid: 'u2', teamId: null },
@@ -211,9 +184,7 @@ describe('changes that are not a move into a team', () => {
     const body = await res.json()
     expect(body.saved).toBe(2)
     expect(body.courseSync).toEqual({ coursesUpdated: 1, totalAdded: 1 })
-    expect(courseBatch()?.updates[0].data).toEqual({
-      assignedUserIds: { __arrayUnion: ['u-new'] },
-    })
+    expect(rosterWrites()).toEqual([{ kind: 'roster', id: 'mbti', data: ['u-new'] }])
   })
 })
 
@@ -229,13 +200,13 @@ describe('when the course sync fails', () => {
     expect(res.status).toBe(200)
     expect(body.saved).toBe(1)
     expect(body.courseSync).toEqual({ failed: true })
-    expect(userBatch()?.committed).toBe(true)
+    expect(userWrites()).toHaveLength(1)
   })
 
   it('does not write anything to a course', async () => {
     courseReadError = new Error('quota exceeded')
     await call([{ uid: 'u-new', teamId: 'team-chain' }])
-    expect(courseBatch()).toBeUndefined()
+    expect(rosterWrites()).toEqual([])
   })
 })
 

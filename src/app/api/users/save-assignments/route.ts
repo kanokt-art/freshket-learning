@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { FieldValue, type DocumentSnapshot, type Firestore } from 'firebase-admin/firestore'
-import { getAdminFirestore } from '@/lib/firebase/admin'
-import { requireManager } from '@/lib/firebase/requireManager'
+import { getStore, type Store } from '@/lib/server/store'
+import type { Doc } from '@/lib/server/docMap'
+import { requireManager } from '@/lib/server/auth'
 import { cleanVisibleTeamIds } from '@/lib/users/visibleTeams'
 import {
   computeDepartmentAssignmentSync,
@@ -17,15 +17,16 @@ type Assignment = {
 }
 
 const VALID_ROLES = ['sale', 'team_lead', 'manager', 'super_admin']
+const WRITE_CONCURRENCY = 8
 
 // POST /api/users/save-assignments
-// Writes teamId / visibleTeamIds / role for csv- users via Admin SDK (bypasses Firestore rules)
+// Writes teamId / visibleTeamIds / role for csv- users on the server (the access rules in policies.ts do not apply)
 // Body: { assignments: Assignment[] }
 export async function POST(req: NextRequest) {
   try {
     // manager+, not super_admin only. Team assignment is a manager action in both
-    // the UI (`canAccess(role, 'manager')` on /users) and firestore.rules
-    // (`allow write: if isManagerOrAbove()` on /teams); this route was the odd one
+    // the UI (`canAccess(role, 'manager')` on /users) and the access rules
+    // (managers may write /teams); this route was the odd one
     // out, so a manager dragging someone into a team got "server ปฏิเสธ" and the
     // move never persisted. Changing someone's ROLE stays super_admin-only below.
     const gate = await requireManager(req)
@@ -36,18 +37,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No assignments provided' }, { status: 400 })
     }
 
-    const db = getAdminFirestore()
+    const store = getStore()
     const targets = assignments.filter(a => !!a.uid)
-    const refs = targets.map(a => db.collection('users').doc(a.uid))
 
-    // set(..., {merge:true}) on a uid that no longer exists (e.g. merged away by
-    // a dedup run, or a stale id from client cache) silently CREATES an empty
-    // doc containing only the patched fields — that produced 32 ghost docs
-    // (no uid/email/role) in production. Check existence first and skip instead.
-    const existing = refs.length > 0 ? await db.getAll(...refs) : []
-    const existsSet = new Set(existing.filter(d => d.exists).map(d => d.id))
+    // A write to a person that no longer exists (a stale id from client cache)
+    // must not create an empty profile containing only the patched fields — that
+    // produced 32 ghost docs (no uid/email/role) in production. Check existence
+    // first and skip instead; each write below is an update, which refuses to
+    // create one anyway.
+    const existing = targets.length > 0 ? await store.getMany('users', targets.map(a => a.uid)) : []
+    const existsSet = new Set(existing.map(d => d.id))
 
-    const batch = db.batch()
+    const writes: Array<{ uid: string; update: Record<string, unknown> }> = []
     const skipped: string[] = []
     const roleChangesDenied: string[] = []
     const invalid: string[] = []
@@ -68,8 +69,8 @@ export async function POST(req: NextRequest) {
       }
 
       // Role changes stay super_admin-only. Without this the widened gate would
-      // hand every manager a privilege-escalation primitive: this route uses the
-      // Admin SDK, so it bypasses the firestore.rules clause that stops a manager
+      // hand every manager a privilege-escalation primitive: this route writes
+      // on the server, so it bypasses the access rule that stops a manager
       // from touching `role` — a manager could promote themselves to super_admin.
       if (a.role !== undefined && VALID_ROLES.includes(a.role)) {
         if (gate.isSuperAdmin) update.role = a.role
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (Object.keys(update).length > 0) {
-        batch.update(db.collection('users').doc(a.uid), update)
+        writes.push({ uid: a.uid, update })
         saved++
         if (typeof update.teamId === 'string' && update.teamId) {
           moves.push({ uid: a.uid, teamId: update.teamId })
@@ -85,7 +86,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (saved > 0) await batch.commit()
+    // A few at a time: one request each, but not thousands in flight at once.
+    for (let i = 0; i < writes.length; i += WRITE_CONCURRENCY) {
+      await Promise.all(writes.slice(i, i + WRITE_CONCURRENCY).map((w) => store.update('users', w.uid, w.update)))
+    }
 
     // A course aimed at a department or team is a snapshot in assignedUserIds,
     // so someone moved into a tracked team stays invisible to that course until
@@ -95,7 +99,7 @@ export async function POST(req: NextRequest) {
     //
     // Scoped to the people who moved. The standalone sync route reads every
     // employee (~1,700 documents) per call; dragging twenty people around
-    // would have spent a day's free read quota doing it twenty times over.
+    // would have read them all twenty times over.
     //
     // This is secondary to the move itself, which is already saved: a failure
     // here is reported in the response but must never turn it into an error,
@@ -103,7 +107,7 @@ export async function POST(req: NextRequest) {
     let courseSync: { coursesUpdated: number; totalAdded: number } | { failed: true } | undefined
     if (moves.length > 0) {
       try {
-        courseSync = await syncCoursesForMoves(db, moves, existing)
+        courseSync = await syncCoursesForMoves(store, moves, existing)
       } catch (e) {
         console.error('course sync after team move failed', e)
         courseSync = { failed: true }
@@ -124,42 +128,28 @@ export async function POST(req: NextRequest) {
  * courses.
  */
 async function syncCoursesForMoves(
-  db: Firestore,
+  store: Store,
   moves: TeamMove[],
-  profiles: DocumentSnapshot[],
+  profiles: Doc[],
 ): Promise<{ coursesUpdated: number; totalAdded: number }> {
   const profileByUid = new Map(
-    profiles
-      .filter((d) => d.exists)
-      .map((d) => [d.id, d.data() as { department?: string; employmentStatus?: string }] as const),
+    profiles.map((d) => [d.id, d as { department?: string; employmentStatus?: string }] as const),
   )
 
-  // `select` keeps this to the three fields the match needs; the course
-  // documents also carry their entire lesson tree.
-  const coursesSnap = await db
-    .collection('courses')
-    .select('assignedDepartments', 'assignedTeamIds', 'assignedUserIds')
-    .get()
-  const courses = coursesSnap.docs.map((d) => ({
+  const courses = (await store.query('courses')).map((d) => ({
     id: d.id,
-    assignedDepartments: d.data().assignedDepartments as string[] | undefined,
-    assignedTeamIds: d.data().assignedTeamIds as string[] | undefined,
-    assignedUserIds: d.data().assignedUserIds as string[] | undefined,
+    assignedDepartments: d.assignedDepartments as string[] | undefined,
+    assignedTeamIds: d.assignedTeamIds as string[] | undefined,
+    assignedUserIds: d.assignedUserIds as string[] | undefined,
   }))
 
   const results = computeDepartmentAssignmentSync(courses, usersForMoveSync(moves, profileByUid))
   if (results.length === 0) return { coursesUpdated: 0, totalAdded: 0 }
 
-  const batch = db.batch()
-  for (const r of results) {
-    // arrayUnion rather than writing newAssignedUserIds back. That array was
-    // read a moment ago; if another request added someone in between, writing
-    // the whole array would silently drop them. A union cannot.
-    batch.update(db.collection('courses').doc(r.courseId), {
-      assignedUserIds: FieldValue.arrayUnion(...r.addedUids),
-    })
-  }
-  await batch.commit()
+  // The database adds only the people not already on the roster, in one step.
+  // The roster was read a moment ago; if another request added someone in
+  // between, writing newAssignedUserIds back whole would silently drop them.
+  for (const r of results) await store.addCourseLearners(r.courseId, r.addedUids)
 
   return {
     coursesUpdated: results.length,

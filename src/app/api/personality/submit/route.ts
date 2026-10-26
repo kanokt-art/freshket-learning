@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { FieldValue } from 'firebase-admin/firestore'
-import { getAdminFirestore } from '@/lib/firebase/admin'
-import { requireStaff } from '@/lib/firebase/requireStaff'
+import { getStore } from '@/lib/server/store'
+import { requireStaff } from '@/lib/server/auth'
 import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { scoreBuckets, minAnswersFor, type BucketAnswers } from '@/lib/bucketAssessments/scoreBuckets'
 
@@ -76,10 +75,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const db = getAdminFirestore()
     // One result per user per questionnaire: retaking replaces the previous
     // result rather than appending, so the profile shows the current answer.
-    await db.collection('userBucketResults').doc(`${uid}_${def.id}`).set({
+    await getStore().set('userBucketResults', `${uid}_${def.id}`, {
       uid,
       definitionId: def.id,
       code: result.code,
@@ -87,8 +85,8 @@ export async function POST(req: NextRequest) {
       answered: result.answered,
       total: result.total,
       ...(typeof courseId === 'string' ? { courseId } : {}),
-      takenAt: FieldValue.serverTimestamp(),
-    })
+      takenAt: new Date(),
+    }, { merge: false })
 
     return NextResponse.json(result)
   } catch (err) {

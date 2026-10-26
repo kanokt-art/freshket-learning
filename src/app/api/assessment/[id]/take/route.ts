@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAdminFirestore } from '@/lib/firebase/admin'
-import { requireStaff } from '@/lib/firebase/requireStaff'
+import { getStore } from '@/lib/server/store'
+import { requireStaff } from '@/lib/server/auth'
 import { sanitizeQuestion } from '@/lib/assessment/grade'
 import type { Assessment, Question } from '@/types/assessment'
 
@@ -10,7 +10,7 @@ import type { Assessment, Question } from '@/types/assessment'
 // firestore.rules let any signed-in employee read any assessment — so every
 // `choices[].isCorrect` flag and every drag_drop pairing was sitting in the
 // browser before a single question was answered. Reading the doc here with the
-// Admin SDK and stripping the key on the way out means the client physically
+// server's own database access and stripping the key on the way out means the client physically
 // cannot see the answers (see sanitizeQuestion).
 //
 // Also enforces `isPublished`, which the old client path never checked: a draft
@@ -26,12 +26,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 
   try {
-    const snap = await getAdminFirestore().collection('assessments').doc(id).get()
-    if (!snap.exists) {
+    const doc = await getStore().get('assessments', id)
+    if (!doc) {
       return NextResponse.json({ error: 'ไม่พบแบบทดสอบนี้' }, { status: 404 })
     }
 
-    const data = snap.data() as Partial<Assessment>
+    const data = doc as Partial<Assessment>
     if (data.isPublished !== true) {
       return NextResponse.json({ error: 'แบบทดสอบนี้ยังไม่เผยแพร่' }, { status: 403 })
     }
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // timer, anti-cheat, submit) entirely.
     if (data.googleFormUrl) {
       return NextResponse.json({
-        id: snap.id,
+        id: doc.id,
         title: data.title ?? '',
         description: data.description ?? '',
         passingScore: typeof data.passingScore === 'number' ? data.passingScore : 70,
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const questions = (data.questions ?? []) as Question[]
 
     return NextResponse.json({
-      id: snap.id,
+      id: doc.id,
       title: data.title ?? '',
       description: data.description ?? '',
       passingScore: typeof data.passingScore === 'number' ? data.passingScore : 70,

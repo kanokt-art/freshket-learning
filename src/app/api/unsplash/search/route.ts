@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
+import { requireSuperAdmin } from '@/lib/server/auth'
 
 // Picsum seed URL — deterministic per keyword, no API key needed
 function picsumFallback(query: string) {

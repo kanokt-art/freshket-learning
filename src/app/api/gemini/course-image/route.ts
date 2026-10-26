@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
+import { requireSuperAdmin } from '@/lib/server/auth'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 

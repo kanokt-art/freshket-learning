@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 import { useAuth } from '@/hooks/useAuth'
-import { useAllUsers, useMyTrainingRecords, useTeams, useDepartments, saveLocalImportedUsers, saveLocalTeam, deleteLocalTeam, deleteLocalTeams, getLocalTeams, applyLocalUserPatch, migrateLocalUserPatches, getLocalUserPatches, clearDeletedTeamIds, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
+import { useAllUsers, useMyTrainingRecords, useTeams, useDepartments, saveLocalImportedUsers, saveLocalTeam, deleteLocalTeam, deleteLocalTeams, getLocalTeams, applyLocalUserPatch, getLocalUserPatches, clearDeletedTeamIds, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { canAccess, ROLE_LABELS, getTeamManagerIds, type UserRole, type UserProfile, type Department, type Team, type EmploymentStatus } from '@/types/user'
 import type { ShadowRecord } from '@/types/shadow'
@@ -117,8 +117,6 @@ export default function UsersPage() {
   const [fixingDepts, setFixingDepts] = useState(false)
   const [fixedDeptsCount, setFixedDeptsCount] = useState<number | null>(null)
   const [rebuildingStats, setRebuildingStats] = useState(false)
-  const [dedupRunning, setDedupRunning] = useState(false)
-  const [dedupResult, setDedupResult] = useState<{ mergedGroups: number; deletedDocs: number; uidMap?: Record<string, string> } | null>(null)
   const [autoMapping, setAutoMapping] = useState(false)
   const [savingAssignments, setSavingAssignments] = useState(false)
   const [savedAssignments, setSavedAssignments] = useState(false)
@@ -436,50 +434,6 @@ export default function UsersPage() {
       void alertError('อัปเดตสถิติไม่สำเร็จ', String(e))
     } finally {
       setRebuildingStats(false)
-    }
-  }
-
-  async function handleDedup() {
-    setDedupRunning(true)
-    setDedupResult(null)
-    try {
-      const res = await authedFetch('/api/users/dedup', { method: 'POST' })
-      const json = await res.json()
-      if (!res.ok) { void alertError('รวมข้อมูลซ้ำไม่สำเร็จ', json.error ?? 'Unknown error'); return }
-
-      // Migrate localStorage patches from old UIDs to canonical UIDs
-      if (json.uidMap && Object.keys(json.uidMap).length > 0) {
-        migrateLocalUserPatches(json.uidMap)
-        // Persist migrated assignments to Firestore via Admin SDK
-        const allPatches = getLocalUserPatches()
-        const assignments = Object.entries(allPatches)
-          .filter(([uid]) => uid.startsWith('csv-'))
-          .map(([uid, p]) => ({ uid, ...p }))
-        if (assignments.length > 0) {
-          authedFetch('/api/users/save-assignments', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ assignments }),
-          }).then(async r => {
-            const j = await r.json()
-            if (j.skipped?.length > 0) console.warn(`save-assignments after dedup: ${j.skipped.length} stale uid(s) skipped`, j.skipped)
-          }).catch(err => {
-            // Dedup itself succeeded; only re-applying the team assignments
-            // failed. Say so precisely — a silent failure here meant a manager
-            // quietly lost the teams they were assigned to.
-            console.error('save-assignments after dedup failed', err)
-            void alertError(
-              'รวมข้อมูลซ้ำสำเร็จ แต่บันทึกทีมที่ดูแลไม่สำเร็จ',
-              'กรุณาตรวจสอบและตั้งค่าทีมที่ดูแลของผู้ใช้อีกครั้ง',
-            )
-          })
-        }
-      }
-      setDedupResult(json)
-    } catch {
-      void alertError('รวมข้อมูลซ้ำไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
-    } finally {
-      setDedupRunning(false)
     }
   }
 

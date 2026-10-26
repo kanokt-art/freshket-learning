@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Timestamp } from 'firebase-admin/firestore'
-import { getAdminFirestore } from '@/lib/firebase/admin'
-import { requireSuperAdmin } from '@/lib/firebase/requireSuperAdmin'
+import { getStore } from '@/lib/server/store'
+import { requireSuperAdmin } from '@/lib/server/auth'
+import { newId } from '@/lib/server/dataApi'
+import { refreshManyUserStats } from '@/lib/server/userStats'
 import { parseCourseScoreText, type ParsedCourseScore } from '@/lib/utils/csvParser'
 import type { CSVImportError } from '@/types/tracking'
-import { computeUserStats } from '@/types/stats'
 
 // Per-course score import (นำเข้าผลคะแนน) — two-phase so the admin always sees
 // duplicates BEFORE anything is written:
@@ -41,33 +41,23 @@ export async function POST(req: NextRequest) {
     const { data: rows, errors } = parseCourseScoreText(text)
     const allErrors: CSVImportError[] = [...errors]
 
-    const db = getAdminFirestore()
+    const store = getStore()
 
     // ── Build a CASE-INSENSITIVE email → user index ────────────────────────────
-    // A per-row `where('email','==',...)` query is case-SENSITIVE, but user docs
-    // don't store emails uniformly: saveLocalImportedUsers writes the raw-case
-    // email, so a doc can hold "Sirinrat.S@freshket.co" while the CSV (and this
-    // parser) lowercases to "sirinrat.s@freshket.co" → the exact query misses it
-    // and the employee reads as "not found" despite existing. The entire client
-    // codebase matches emails via `.toLowerCase()`; do the same here. Loading the
-    // collection once is also cheaper than N point queries. When both an auth doc
-    // and a csv- doc share an email, prefer the auth doc (its uid is canonical,
-    // same tiebreak useAllUsers applies).
+    // Emails are stored as typed (the HR import keeps the raw case, so a profile
+    // can hold "Sirinrat.S@freshket.co" while the CSV — and this parser —
+    // lowercases to "sirinrat.s@freshket.co"). The entire client codebase matches
+    // emails via `.toLowerCase()`; do the same here. Loading the people once is
+    // also cheaper than N point queries. If two profiles share an email, the one
+    // HR imported (`csv-…`, the person's stable id) wins over one made at a
+    // first login.
     const emailIndex = new Map<string, { userId: string; displayName: string }>()
-    const usersSnap = await db.collection('users').get()
-    for (const doc of usersSnap.docs) {
-      const d = doc.data()
+    for (const d of await store.query('users')) {
       const key = String(d.email ?? '').trim().toLowerCase()
       if (!key) continue
-      const isCsv = doc.id.startsWith('csv-')
       const existing = emailIndex.get(key)
-      // Keep the first non-csv match; only let a csv doc fill a gap.
-      if (existing && !isCsv && existing.userId.startsWith('csv-')) {
-        // upgrade a previously-stored csv uid to the auth uid
-      } else if (existing) {
-        continue
-      }
-      emailIndex.set(key, { userId: doc.id, displayName: (d.displayName as string) ?? key })
+      if (existing && (existing.userId.startsWith('csv-') || !d.id.startsWith('csv-'))) continue
+      emailIndex.set(key, { userId: d.id, displayName: (d.displayName as string) ?? key })
     }
 
     // ── Resolve each row's email against the index (case-insensitive) ──────────
@@ -94,14 +84,13 @@ export async function POST(req: NextRequest) {
 
     // ── Diff against existing records for THIS course ──────────────────────────
     if (resolved.length > 0) {
-      const refs = resolved.map((r) => db.collection('trainingRecords').doc(`${r.userId}_${courseId}`))
-      const snaps = await db.getAll(...refs)
-      snaps.forEach((snap, i) => {
-        if (snap.exists) {
-          const d = snap.data()!
-          resolved[i].existing = { score: (d.score as number | null) ?? null, status: String(d.status ?? 'not_started') }
-        }
-      })
+      const found = new Map(
+        (await store.getMany('trainingRecords', resolved.map((r) => `${r.userId}_${courseId}`))).map((d) => [d.id, d]),
+      )
+      for (const r of resolved) {
+        const d = found.get(`${r.userId}_${courseId}`)
+        if (d) r.existing = { score: (d.score as number | null) ?? null, status: String(d.status ?? 'not_started') }
+      }
     }
 
     const fresh = resolved.filter((r) => !r.existing)
@@ -126,17 +115,17 @@ export async function POST(req: NextRequest) {
     // ── Commit ─────────────────────────────────────────────────────────────────
     const toWrite = strategy === 'overwrite' ? [...fresh, ...duplicates] : fresh
     const skipped = strategy === 'overwrite' ? 0 : duplicates.length
-    const batchId = db.collection('csvImports').doc().id
-    const now = Timestamp.now()
+    const batchId = newId()
+    const now = new Date()
 
-    const batch = db.batch()
     const touchedUids = new Set<string>()
+    const docs: Array<{ id: string; data: Record<string, unknown> }> = []
     for (const r of toWrite) {
       touchedUids.add(r.userId)
       const completedAt = r.completedAt
-        ? Timestamp.fromDate(new Date(r.completedAt))
+        ? new Date(r.completedAt)
         : r.status === 'completed' ? now : null
-      batch.set(db.collection('trainingRecords').doc(`${r.userId}_${courseId}`), {
+      docs.push({ id: `${r.userId}_${courseId}`, data: {
         userId: r.userId,
         courseId,
         courseTitle,
@@ -149,23 +138,16 @@ export async function POST(req: NextRequest) {
         source: 'csv_import',
         importBatchId: batchId,
         updatedAt: now,
-      }, { merge: true })
+      } })
     }
-    await batch.commit()
+    // A merge: fields the file does not carry (lesson progress, a pre-test score)
+    // are left as they are.
+    await store.setMany('trainingRecords', docs, { merge: true })
 
     // Refresh per-user aggregates so dashboards reflect the import immediately.
-    const statsNow = new Date()
-    for (const uid of Array.from(touchedUids)) {
-      const recs = await db.collection('trainingRecords').where('userId', '==', uid).get()
-      const records = recs.docs.map((d) => ({
-        status: String(d.data().status ?? 'not_started'),
-        score: (d.data().score as number | undefined) ?? null,
-      }))
-      await db.collection('userStats').doc(uid).set({ ...computeUserStats(uid, records), updatedAt: statsNow })
-    }
+    await refreshManyUserStats(store, Array.from(touchedUids))
 
-    await db.collection('csvImports').doc(batchId).set({
-      id: batchId,
+    await store.set('csvImports', batchId, {
       type: 'course_results',
       courseId,
       courseTitle,
@@ -176,7 +158,7 @@ export async function POST(req: NextRequest) {
       failedRows: unmatched.length + errors.length,
       errors: allErrors,
       importedAt: now,
-    })
+    }, { merge: false })
 
     return NextResponse.json({
       batchId,
