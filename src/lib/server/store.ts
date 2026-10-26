@@ -24,7 +24,7 @@
 
 import {
   resolveCollection, transformDoc, rowToDoc, columnFor, allColumns, normalize, identityRemap,
-  NOTIFICATIONS, type Doc, type Row, type TableSpec,
+  NOTIFICATIONS, USERS, type Doc, type Row, type TableSpec,
 } from './docMap'
 
 // ── Errors ──────────────────────────────────────────────────────────────────
@@ -409,7 +409,74 @@ export function createStore(config: StoreConfig) {
     return typeof n === 'number' ? n : 0
   }
 
-  return { query, get, getMany, set, update, remove, setMany, removeMany, addCourseLearners }
+  // ── identity (server-internal) ────────────────────────────────────────────
+  //
+  // users.auth_uid and users.email_lc are deliberately NOT document fields. A
+  // Firebase uid is a login identifier, and every colleague can read every user
+  // document, so it must not ride along in one. Resolving who a login belongs to
+  // is the one caller that needs them, so it gets its own narrow methods rather
+  // than widening the document model for everybody.
+
+  /** Rows that belong to this login: by the Firebase uid it signs in with, or by email. */
+  async function findUsers(
+    by: { authUid: string } | { email: string },
+  ): Promise<Array<Doc & { authUid?: string }>> {
+    // email_lc is a stored lower-case copy, so this is a plain equality — a
+    // case-insensitive LIKE would treat the `_` in real addresses as a wildcard.
+    const filter: Params = 'authUid' in by
+      ? [['auth_uid', `eq.${by.authUid}`]]
+      : [['email_lc', `eq.${by.email.trim().toLowerCase()}`]]
+    const res = await call(`users?${toQueryString([['select', '*'], ...filter, ['limit', '50']])}`, {
+      headers: headers(),
+      retry: true,
+    })
+    if (!res.ok) await fail(res, 'read users')
+    return ((await res.json()) as Row[]).map((r) => ({
+      ...rowToDoc(USERS, r),
+      authUid: typeof r.auth_uid === 'string' ? r.auth_uid : undefined,
+    }))
+  }
+
+  /**
+   * Record which login a person signs in with — but only if nobody has yet. The
+   * condition is part of the request, so two tabs signing in at once cannot both
+   * win. Returns whether THIS call linked it. A login already held by someone
+   * else is refused by the database (the column is unique) and surfaces as a
+   * StoreError('rejected').
+   */
+  async function linkAuthUid(uid: string, authUid: string): Promise<boolean> {
+    const res = await call(`users?${toQueryString([['uid', `eq.${uid}`], ['auth_uid', 'is.null']])}`, {
+      method: 'PATCH',
+      headers: headers({ 'Content-Type': 'application/json', Prefer: 'return=representation' }),
+      body: JSON.stringify({ auth_uid: authUid }),
+    })
+    if (!res.ok) await fail(res, 'link login')
+    return ((await res.json()) as unknown[]).length > 0
+  }
+
+  /**
+   * First sign-in by someone HR has no row for. Ignores a duplicate rather than
+   * overwriting it: if two requests race to create the same person, the second
+   * must not clobber the first's row (or, later, a role somebody has since set).
+   */
+  async function createUser(doc: Record<string, unknown> & { uid: string }, authUid: string): Promise<void> {
+    const row = { ...toRow(USERS, undefined, doc.uid, doc), auth_uid: authUid }
+    const columns = Object.keys(row).map(encodeURIComponent).join(',')
+    const res = await call(`users?on_conflict=uid&columns=${columns}`, {
+      method: 'POST',
+      headers: headers({
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=ignore-duplicates,return=minimal,missing=default',
+      }),
+      body: JSON.stringify([row]),
+    })
+    if (!res.ok) await fail(res, 'create user')
+  }
+
+  return {
+    query, get, getMany, set, update, remove, setMany, removeMany, addCourseLearners,
+    findUsers, linkAuthUid, createUser,
+  }
 }
 
 export type Store = ReturnType<typeof createStore>
