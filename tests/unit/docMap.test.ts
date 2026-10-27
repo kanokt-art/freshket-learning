@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   transformDoc, rowToDoc, dateFieldsOf, columnFor, allColumns, resolveCollection,
   USERS, TEAMS, COURSES, TRAINING_RECORDS, USER_BUCKET_RESULTS, MANDATORY_ITEMS,
-  NOTIFICATIONS, APP_CONFIG, CSV_IMPORTS, TOOLS, SPECS,
+  NOTIFICATIONS, APP_CONFIG, CSV_IMPORTS, TOOLS, CUISINE_GUIDES, SPECS,
 } from '@/lib/server/docMap'
 
 // The running app speaks in documents; Postgres stores rows. docMap is the one
@@ -263,5 +263,34 @@ describe('resolveCollection', () => {
       if (s.source === 'notifications') continue
       expect(resolveCollection(s.source)?.spec, s.source).toBe(s)
     }
+  })
+})
+
+describe('cuisine guides keep only the public price', () => {
+  const skus = [
+    { id: 's1', fktId: 'FKT-1', itemName: 'A', price: 320, pvpPrice: 289 },
+    { id: 's2', fktId: 'FKT-2', itemName: 'B', price: 450 },
+  ]
+
+  it('drops pvpPrice from every SKU on the way in', () => {
+    const doc = roundTrip(CUISINE_GUIDES, 'g1', { name: 'Italian', skus })
+    expect(doc.skus).toEqual([
+      { id: 's1', fktId: 'FKT-1', itemName: 'A', price: 320 },
+      { id: 's2', fktId: 'FKT-2', itemName: 'B', price: 450 },
+    ])
+  })
+
+  it('leaves everything else on the SKU alone', () => {
+    const doc = roundTrip(CUISINE_GUIDES, 'g1', { name: 'Italian', skus: [{ id: 's1', fktId: 'F', itemName: 'A', price: 0, note: 'x' }] })
+    expect(doc.skus).toEqual([{ id: 's1', fktId: 'F', itemName: 'A', price: 0, note: 'x' }])
+  })
+
+  it('does not mutate the document it was given', () => {
+    roundTrip(CUISINE_GUIDES, 'g1', { name: 'Italian', skus })
+    expect(skus[0]).toHaveProperty('pvpPrice', 289)
+  })
+
+  it('copes with a guide that has no SKU list', () => {
+    expect(roundTrip(CUISINE_GUIDES, 'g1', { name: 'Italian' }).name).toBe('Italian')
   })
 })

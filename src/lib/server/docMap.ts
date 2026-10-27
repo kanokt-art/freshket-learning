@@ -517,6 +517,21 @@ export const CUISINE_GUIDES: TableSpec = {
     isPublished: fBool('is_published'), skus: fJson('skus'),
     createdAt: fTs('created_at'), updatedAt: fTs('updated_at'), createdBy: fText('created_by'),
   },
+  // Guides show only the public price. The PVP column was removed, so a SKU that
+  // still carries `pvpPrice` (from before, or from the Firestore copy) has it
+  // dropped on the way in rather than stored where nothing reads it.
+  preprocess: (data) => {
+    if (!Array.isArray(data.skus)) return data
+    return {
+      ...data,
+      skus: data.skus.map((sku) => {
+        if (sku === null || typeof sku !== 'object' || Array.isArray(sku)) return sku
+        const { pvpPrice, ...rest } = sku as Record<string, unknown>
+        void pvpPrice
+        return rest
+      }),
+    }
+  },
   uidFields: ['createdBy'],
   required: [],
 }
