@@ -20,7 +20,7 @@ const DEMO_MODE = getDemoMode()
 // Cuisine Guide — tells a sale rep which SKUs to lead with when walking into a
 // restaurant of a given cuisine. Two-level view: a grid of cuisine cards
 // (cover photo + name), click into one for the SKU table (fkt-id / item name /
-// price / PVP price). Same CRUD shape as /tools (SaleTool): Firestore-backed,
+// price). Same CRUD shape as /tools (SaleTool): Firestore-backed,
 // super_admin authors, a mock-data fallback with an "import defaults" action
 // while the collection is still empty — this ships with placeholder SKU data
 // (see lib/cuisineGuide.ts) rather than starting blank, since real SKU data is
@@ -35,7 +35,7 @@ interface FormState {
 }
 
 function emptySku(): CuisineSku {
-  return { id: `sku-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, fktId: '', itemName: '', price: 0, pvpPrice: 0 }
+  return { id: `sku-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, fktId: '', itemName: '', price: 0 }
 }
 
 function emptyForm(): FormState {
@@ -304,9 +304,9 @@ function CuisineCard({
   )
 }
 
-// ── CuisineDetailPanel — SKU table (fkt-id / item name / price / PVP price) ───
+// ── CuisineDetailPanel — SKU table (fkt-id / item name / price) ───
 
-type SkuSortKey = 'fktId' | 'itemName' | 'price' | 'pvpPrice'
+type SkuSortKey = 'fktId' | 'itemName' | 'price'
 
 function SkuSortableTh({ label, sortKey, activeSortKey, sortDir, onSort, align = 'left' }: {
   label: string; sortKey: SkuSortKey; activeSortKey: SkuSortKey | null; sortDir: 'asc' | 'desc'
@@ -387,7 +387,6 @@ function CuisineDetailPanel({ item, onClose }: { item: CuisineGuideItem; onClose
                       <SkuSortableTh label="FKT-ID" sortKey="fktId" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                       <SkuSortableTh label="Item Name" sortKey="itemName" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                       <SkuSortableTh label="Price" sortKey="price" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
-                      <SkuSortableTh label="PVP Price" sortKey="pvpPrice" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -396,7 +395,6 @@ function CuisineDetailPanel({ item, onClose }: { item: CuisineGuideItem; onClose
                         <td className="px-4 py-3 text-xs font-mono text-gray-500 whitespace-nowrap">{s.fktId}</td>
                         <td className="px-4 py-3 text-sm font-bold text-gray-800">{s.itemName}</td>
                         <td className="px-4 py-3 text-sm text-gray-600 text-right tabular-nums whitespace-nowrap">{formatBaht(s.price)}</td>
-                        <td className="px-4 py-3 text-sm font-bold text-freshket-700 text-right tabular-nums whitespace-nowrap">{formatBaht(s.pvpPrice)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -524,7 +522,7 @@ function CuisineFormModal({
             </div>
             <div className="space-y-2">
               {form.skus.map((s) => (
-                <div key={s.id} className="grid grid-cols-[1fr_1.5fr_0.8fr_0.8fr_auto] gap-1.5 items-center">
+                <div key={s.id} className="grid grid-cols-[1fr_1.5fr_0.8fr_auto] gap-1.5 items-center">
                   <input
                     type="text"
                     value={s.fktId}
@@ -545,14 +543,6 @@ function CuisineFormModal({
                     value={s.price || ''}
                     onChange={(e) => setSku(s.id, { price: Number(e.target.value) || 0 })}
                     placeholder="Price"
-                    className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs text-right outline-none focus:border-freshket-400 focus:ring-1 focus:ring-freshket-100"
-                  />
-                  <input
-                    type="number"
-                    min={0}
-                    value={s.pvpPrice || ''}
-                    onChange={(e) => setSku(s.id, { pvpPrice: Number(e.target.value) || 0 })}
-                    placeholder="PVP"
                     className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs text-right outline-none focus:border-freshket-400 focus:ring-1 focus:ring-freshket-100"
                   />
                   <button

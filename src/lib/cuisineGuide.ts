@@ -9,7 +9,7 @@ export interface CuisineSku {
   fktId: string
   itemName: string
   price: number
-  pvpPrice: number
+  pvpPrice?: number // no longer shown or edited; kept so existing stored guides still type-check
 }
 
 export interface CuisineGuideItem {
