@@ -1,5 +1,6 @@
 'use client'
 
+import { courseAudience } from '@/lib/courses/audience'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
@@ -1299,12 +1300,9 @@ function CourseResultsDashboard({
   const [filterStatus, setFilterStatus] = useState<'all' | TrainingStatus>('all')
   const [search, setSearch]             = useState('')
 
-  // Build rows: users in targetRoles + their record for this course
+  // Build rows: the course's audience + their record for this course
   const rows = useMemo<UserRow[]>(() => {
-    const targetRoles = course?.targetRoles ?? []
-    const targetUsers = allUsers.filter(u =>
-      targetRoles.length === 0 || targetRoles.includes(u.role)
-    )
+    const targetUsers = courseAudience(course, allUsers)
     return targetUsers.map(u => {
       const record = allRecords.find(r => r.userId === u.uid && r.courseId === courseId) ?? null
       const team = teams.find(t => t.id === u.teamId)

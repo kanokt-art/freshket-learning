@@ -4,10 +4,34 @@
 
 Internal web platform for Freshket sale team training tracking and enablement.
 
-- **Auth**: Google OAuth, `@freshket.co` domain only. Block all other domains immediately.
+- **Auth**: Google OAuth via Firebase Auth, `@freshket.co` domain only. Block all other domains immediately. Firebase is used for sign-in only.
 - **RBAC**: `sale` < `team_lead` < `manager` < `super_admin`
-- **Demo mode**: `NEXT_PUBLIC_DEMO_MODE=true` bypasses Firebase entirely, serves mock data
+- **Demo mode**: `NEXT_PUBLIC_DEMO_MODE=true` bypasses the backend entirely, serves mock data
 - **Security**: Never commit `.env`, `.env.local`, or any file with API keys / service account JSON
+
+## Data Layer (branch `phase4-supabase`: Firestore → Supabase Postgres)
+
+Status: code complete, **not yet deployed**. `main` still runs on Firestore. Before cutover: run `supabase/migrations/006_runtime_support.sql`, re-run `node scripts/migrate/run.mjs --apply` (data copy is a snapshot), and set Vercel env (`NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` server-only, `SLACK_WEBHOOK_URL`, `NEXT_PUBLIC_APP_URL`). Plan and gotchas: memory file `project_supabase_migration.md`.
+
+- **Documents in, documents out**: the app still handles Firestore-shaped docs (camelCase, `id`, `Date`). `src/lib/server/docMap.ts` maps docs ↔ table rows; `store.ts` talks PostgREST with the service_role key.
+- **All DB access is server-side.** Every table is RLS deny-all; the browser never holds a DB key. Browser → `/api/data/{query,get,write}` → `policies.ts` (rules ported from `firestore.rules`) → store.
+- **Browser writes** go through `src/lib/data/collection.ts` (`save/patch/remove/saveMany/removeMany/get/findBy`). Never call `fetch('/api/data/...')` directly elsewhere.
+- **Reads** use the `useFirestore.ts` hooks. There is no realtime: queries fetch once, poll every 60s (notifications 30s) while the tab is visible, and refetch on invalidation (`src/lib/data/live.ts`, `invalidation.ts`). A successful non-GET `authedFetch` outside `/api/data` and `/api/auth` invalidates everything automatically.
+- **Identity**: `users.uid` is a stable **person id** (`csv-{employeeId}`, or the Firebase uid for someone HR never imported). `users.auth_uid` is the Firebase uid they sign in with. Login = `POST /api/auth/session`. Server routes must use the person id from `src/lib/server/auth.ts` gates (`requireStaff/Manager/SuperAdmin` → `gate.uid`), **never** `decoded.uid` directly.
+- **Server routes** use `getStore()` (`src/lib/server/store.ts`), not Firebase Admin Firestore (removed). `firebase/admin.ts` only verifies ID tokens. Reuse `refreshUserStats` / `refreshManyUserStats` after changing training records; `store.claim` for first-writer-wins; `store.addCourseLearners` to add to a roster atomically.
+- **PostgREST gotchas**: 1,000-row response cap (store pages automatically); `ilike` treats `_` as a wildcard (use `users.email_lc`); heterogeneous bulk upserts must be grouped by column set.
+- **Migrations** are run by the user in the Supabase SQL Editor (the Supabase MCP refuses statements containing `drop`). Keep each file idempotent.
+
+## Commands
+
+- `npx vitest run` — unit tests (stand-in REST server, no DB needed) · `npx tsc --noEmit -p .` · `npx eslint src tests` · `npx next build`
+- `node scripts/migrate/run.mjs [--apply]` — Firestore → Postgres data copy (dry run by default)
+- `node --env-file=.env.local scripts/smoke.mjs [url]` — post-deploy smoke test
+- `node --env-file=.env.local scripts/set-super-admin.mjs <email>` — one-off promotion; delete after use
+
+## Cuisine Sale sync (Google Sheet → Supabase)
+
+Apps Script in `docs/apps-script/cuisine-sale/` (`Code.gs`, `appsscript.json`), pushed with `clasp push -f` from that folder (script ID in `.clasp.json`). Tabs `Japanese / Western / Beef / Non food for all / Beer` (row 2 = headers) upsert into `cuisine_sale` on `(cuisine, item_id)`; midnight trigger via `createMidnightTrigger()`; `healthCheck()` verifies key, sheet, tabs, Supabase, row counts and trigger. Needs Script Property `SUPABASE_SERVICE_KEY`. Pending design: split a 20k-row `item_master` from a small `cuisine_map` (see conversation 2026-10-27).
 
 ## Development Rules
 
