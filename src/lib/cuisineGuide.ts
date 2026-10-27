@@ -9,7 +9,6 @@ export interface CuisineSku {
   fktId: string
   itemName: string
   price: number
-  pvpPrice?: number // no longer shown or edited; kept so existing stored guides still type-check
 }
 
 export interface CuisineGuideItem {
@@ -43,11 +42,11 @@ export const MOCK_CUISINE_GUIDES: CuisineGuideItem[] = [
     createdAt: new Date('2026-06-01'),
     updatedAt: new Date('2026-06-01'),
     skus: [
-      { id: 'sku-it-1', fktId: 'FKT-10001', itemName: 'มอสซาเรลล่าชีส 1kg', price: 320, pvpPrice: 289 },
-      { id: 'sku-it-2', fktId: 'FKT-10002', itemName: 'พาร์เมซานชีสขูด 500g', price: 450, pvpPrice: 399 },
-      { id: 'sku-it-3', fktId: 'FKT-10003', itemName: 'มะเขือเทศซานมาร์ซาโน กระป๋อง', price: 95, pvpPrice: 85 },
-      { id: 'sku-it-4', fktId: 'FKT-10004', itemName: 'เบคอนอิตาเลียน (Pancetta) 1kg', price: 580, pvpPrice: 520 },
-      { id: 'sku-it-5', fktId: 'FKT-10005', itemName: 'เส้นพาสต้าเซโมลิน่า 500g', price: 65, pvpPrice: 58 },
+      { id: 'sku-it-1', fktId: 'FKT-10001', itemName: 'มอสซาเรลล่าชีส 1kg', price: 320 },
+      { id: 'sku-it-2', fktId: 'FKT-10002', itemName: 'พาร์เมซานชีสขูด 500g', price: 450 },
+      { id: 'sku-it-3', fktId: 'FKT-10003', itemName: 'มะเขือเทศซานมาร์ซาโน กระป๋อง', price: 95 },
+      { id: 'sku-it-4', fktId: 'FKT-10004', itemName: 'เบคอนอิตาเลียน (Pancetta) 1kg', price: 580 },
+      { id: 'sku-it-5', fktId: 'FKT-10005', itemName: 'เส้นพาสต้าเซโมลิน่า 500g', price: 65 },
     ],
   },
   {
@@ -59,10 +58,10 @@ export const MOCK_CUISINE_GUIDES: CuisineGuideItem[] = [
     createdAt: new Date('2026-06-02'),
     updatedAt: new Date('2026-06-02'),
     skus: [
-      { id: 'sku-jp-1', fktId: 'FKT-20001', itemName: 'แซลมอนนอร์เวย์ ซาชิมิเกรด 1kg', price: 890, pvpPrice: 799 },
-      { id: 'sku-jp-2', fktId: 'FKT-20002', itemName: 'ข้าวญี่ปุ่นเกรดพรีเมียม 5kg', price: 420, pvpPrice: 380 },
-      { id: 'sku-jp-3', fktId: 'FKT-20003', itemName: 'สาหร่ายโนริ (100 แผ่น)', price: 280, pvpPrice: 250 },
-      { id: 'sku-jp-4', fktId: 'FKT-20004', itemName: 'ซอสโชยุพรีเมียม 1L', price: 180, pvpPrice: 165 },
+      { id: 'sku-jp-1', fktId: 'FKT-20001', itemName: 'แซลมอนนอร์เวย์ ซาชิมิเกรด 1kg', price: 890 },
+      { id: 'sku-jp-2', fktId: 'FKT-20002', itemName: 'ข้าวญี่ปุ่นเกรดพรีเมียม 5kg', price: 420 },
+      { id: 'sku-jp-3', fktId: 'FKT-20003', itemName: 'สาหร่ายโนริ (100 แผ่น)', price: 280 },
+      { id: 'sku-jp-4', fktId: 'FKT-20004', itemName: 'ซอสโชยุพรีเมียม 1L', price: 180 },
     ],
   },
   {
@@ -74,11 +73,11 @@ export const MOCK_CUISINE_GUIDES: CuisineGuideItem[] = [
     createdAt: new Date('2026-06-03'),
     updatedAt: new Date('2026-06-03'),
     skus: [
-      { id: 'sku-th-1', fktId: 'FKT-30001', itemName: 'ผักบุ้งไทยออร์แกนิก 1kg', price: 45, pvpPrice: 39 },
-      { id: 'sku-th-2', fktId: 'FKT-30002', itemName: 'กะทิสด 1L', price: 65, pvpPrice: 58 },
-      { id: 'sku-th-3', fktId: 'FKT-30003', itemName: 'พริกขี้หนูสวน 1kg', price: 120, pvpPrice: 105 },
-      { id: 'sku-th-4', fktId: 'FKT-30004', itemName: 'ใบมะกรูดสด 100g', price: 35, pvpPrice: 30 },
-      { id: 'sku-th-5', fktId: 'FKT-30005', itemName: 'น้ำปลาแท้ 700ml', price: 55, pvpPrice: 48 },
+      { id: 'sku-th-1', fktId: 'FKT-30001', itemName: 'ผักบุ้งไทยออร์แกนิก 1kg', price: 45 },
+      { id: 'sku-th-2', fktId: 'FKT-30002', itemName: 'กะทิสด 1L', price: 65 },
+      { id: 'sku-th-3', fktId: 'FKT-30003', itemName: 'พริกขี้หนูสวน 1kg', price: 120 },
+      { id: 'sku-th-4', fktId: 'FKT-30004', itemName: 'ใบมะกรูดสด 100g', price: 35 },
+      { id: 'sku-th-5', fktId: 'FKT-30005', itemName: 'น้ำปลาแท้ 700ml', price: 55 },
     ],
   },
   {
@@ -90,9 +89,9 @@ export const MOCK_CUISINE_GUIDES: CuisineGuideItem[] = [
     createdAt: new Date('2026-06-04'),
     updatedAt: new Date('2026-06-04'),
     skus: [
-      { id: 'sku-cn-1', fktId: 'FKT-40001', itemName: 'หมูสามชั้น 1kg', price: 210, pvpPrice: 189 },
-      { id: 'sku-cn-2', fktId: 'FKT-40002', itemName: 'ซีอิ๊วดำ 1L', price: 75, pvpPrice: 65 },
-      { id: 'sku-cn-3', fktId: 'FKT-40003', itemName: 'ผักกาดขาว 1kg', price: 30, pvpPrice: 26 },
+      { id: 'sku-cn-1', fktId: 'FKT-40001', itemName: 'หมูสามชั้น 1kg', price: 210 },
+      { id: 'sku-cn-2', fktId: 'FKT-40002', itemName: 'ซีอิ๊วดำ 1L', price: 75 },
+      { id: 'sku-cn-3', fktId: 'FKT-40003', itemName: 'ผักกาดขาว 1kg', price: 30 },
     ],
   },
   // ── Added later — no real SKU data yet, so skus is empty until it's

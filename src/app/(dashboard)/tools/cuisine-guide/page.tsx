@@ -79,7 +79,11 @@ export default function CuisineGuidePage() {
       description: form.description,
       coverUrl: form.coverUrl,
       isPublished: form.isPublished,
-      skus: form.skus.filter((s) => s.fktId.trim() || s.itemName.trim()),
+      // Only the public price is kept. Rebuilt field by field so a SKU saved before
+      // the PVP column was removed loses its old pvpPrice on the next save.
+      skus: form.skus
+        .filter((s) => s.fktId.trim() || s.itemName.trim())
+        .map(({ id, fktId, itemName, price }) => ({ id, fktId, itemName, price })),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       createdBy: existing?.createdBy ?? user?.uid,
