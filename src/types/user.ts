@@ -55,6 +55,8 @@ export interface UserProfile extends AppUser {
   position?: string
   rank?: string           // Rank/Level from CSV e.g. "Manager", "Supervisor"
   nickname?: string
+  /** Slack member id (U…), set by a super_admin; lets the Slack app message this person directly. */
+  slackUserId?: string
   startDate?: Date        // วันเข้างาน (hire date)
   lineManager?: string    // Line Manager name from CSV
   visibleTeamIds?: string[]  // undefined = see all; string[] = only these teams

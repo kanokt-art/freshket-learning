@@ -47,6 +47,8 @@ export type AnnounceEvent =
     }
   | {
       kind: 'shadow_acked'
+      /** The visit that was reviewed; the server looks up who to tell and what was given. */
+      recordId?: string
       reviewerName: string
       observerName: string
       rating?: number

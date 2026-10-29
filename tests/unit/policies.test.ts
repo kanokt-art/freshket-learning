@@ -229,6 +229,23 @@ describe('users', () => {
     expect(write({ actor: MGR, collection: 'users', id: 'them', existing: them, data: { role: 'sale', teamId: 't2' } })).toBe(true)
   })
 
+  describe('the Slack member id decides who a DM goes to', () => {
+    const ID = 'U01ABCDEF2'
+    it('a super_admin may set it, and clear it', () => {
+      expect(write({ actor: ADMIN, collection: 'users', id: 'them', existing: them, data: { slackUserId: ID } })).toBe(true)
+      expect(write({ actor: ADMIN, collection: 'users', id: 'them', existing: them, data: { slackUserId: null } })).toBe(true)
+    })
+    it('a manager, a team lead and the person themselves may not', () => {
+      expect(write({ actor: MGR, collection: 'users', id: 'them', existing: them, data: { slackUserId: ID } })).toBe(false)
+      expect(write({ actor: LEAD, collection: 'users', id: 'them', existing: them, data: { slackUserId: ID } })).toBe(false)
+      expect(write({ actor: me, collection: 'users', id: 'me', existing: mine, data: { slackUserId: ID } })).toBe(false)
+    })
+    it('must be an id, not free text, even from a super_admin', () => {
+      for (const bad of ['hello', 'C01ABCDEF2', '<script>', 'u01abcdef2', 12345])
+        expect(write({ actor: ADMIN, collection: 'users', id: 'them', existing: them, data: { slackUserId: bad } })).toBe(false)
+    })
+  })
+
   describe('a person editing themselves', () => {
     it('may change ordinary profile fields', () => {
       expect(write({ actor: me, collection: 'users', id: 'me', existing: mine, data: { nickname: 'New' } })).toBe(true)

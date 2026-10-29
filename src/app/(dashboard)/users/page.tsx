@@ -18,6 +18,8 @@ import { DownloadTemplateButton } from '@/components/features/DownloadTemplateBu
 import { EMPLOYEE_TEMPLATE } from '@/lib/utils/csvTemplates'
 import { computeAutoTeamMappings } from '@/lib/users/autoMapTeam'
 import { authedFetch } from '@/lib/api/authedFetch'
+import { patch } from '@/lib/data/collection'
+import { parseSlackMemberId } from '@/lib/slack/memberId'
 import { alertError, alertSuccess, alertWarning, confirmAction } from '@/lib/ui/alert'
 import { ImportAssessmentModal } from '@/components/features/ImportAssessmentModal'
 import { OrgBoard, isRosterRole, PHASE1_DEPARTMENTS } from '@/components/features/OrgBoard'
@@ -1397,6 +1399,7 @@ function UserPanel({
                     <span className="text-sm text-gray-700">{profile.nickname}</span>
                   </InfoRow>
                 )}
+                <SlackRow userId={userId} slackUserId={profile?.slackUserId} />
               </div>
             </section>
 
@@ -1588,6 +1591,76 @@ function UserPanel({
 }
 
 // ── Info row (label + value inside a divided card) ────────────────────────────
+// Slack link of this person, so the Slack app can message them directly (a team lead is
+// told when a learner submits; a learner is told when their visit is reviewed).
+// Paste the profile link from Slack ("Copy link" on their profile); only the member id
+// is stored. Only a super_admin can save: the server refuses anyone else.
+function SlackRow({ userId, slackUserId }: { userId: string; slackUserId?: string }) {
+  const { user } = useAuth()
+  const canEdit = user?.role === 'super_admin'
+  const [value, setValue] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Another person selected, or the saved id changed: start the box clean.
+  useEffect(() => { setValue(''); setError(null) }, [userId, slackUserId])
+
+  async function save(next: string | null) {
+    setSaving(true)
+    setError(null)
+    try {
+      await patch('users', userId, { slackUserId: next }, { mustExist: true })
+      setValue('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function submit() {
+    const id = parseSlackMemberId(value)
+    if (!id) { setError('ไม่พบ Slack member ID ในลิงก์นี้ — ใช้ลิงก์โปรไฟล์ เช่น https://…slack.com/team/U01ABCDEF'); return }
+    void save(id)
+  }
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-xs text-gray-500 shrink-0 w-28">Slack</span>
+        <div className="flex-1 flex justify-end">
+          {slackUserId
+            ? <span className="font-mono text-xs bg-freshket-100 text-freshket-700 px-2.5 py-0.5 rounded-full">{slackUserId}</span>
+            : <span className="text-sm text-gray-400">ยังไม่ได้ตั้งค่า</span>}
+        </div>
+      </div>
+      {canEdit && (
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+            disabled={saving}
+            placeholder="วางลิงก์โปรไฟล์ Slack ของคนนี้"
+            className="flex-1 min-w-0 px-3 py-1.5 text-xs text-gray-900 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-400 disabled:opacity-60"
+          />
+          <button type="button" onClick={submit} disabled={saving || !value.trim()}
+            className="px-3 py-1.5 text-xs font-bold rounded-lg bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-60 disabled:cursor-not-allowed">
+            {saving ? 'กำลังบันทึก...' : 'บันทึก'}
+          </button>
+          {slackUserId && (
+            <button type="button" onClick={() => void save(null)} disabled={saving}
+              className="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-60">
+              ลบ
+            </button>
+          )}
+        </div>
+      )}
+      {error && <p className="mt-1.5 text-xs text-rose-600">{error}</p>}
+    </div>
+  )
+}
+
 function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3">

@@ -26,6 +26,10 @@ Status: code complete, **not yet deployed**. `main` still runs on Firestore. Bef
 - **Testing against the real database**: clean up what you create, and know that submitting a quiz notifies the learner's manager — or EVERY team_lead/manager/super_admin when the learner has no `managerId` (22 people). A test learner with no manager spams real inboxes; delete those notifications afterwards.
 - **Migrations** are run by the user in the Supabase SQL Editor (the Supabase MCP refuses statements containing `drop`). Keep each file idempotent.
 
+## Slack DMs (private notifications)
+
+Slack app manifest + setup in `docs/slack/`. `src/lib/notifications/slackDm.ts` sends DMs with `SLACK_BOT_TOKEN` (server-only) to a person's `users.slack_user_id`, which only a super_admin sets (Admin → Employees → Slack row; policy validates the id). Triggers: quiz submit and Shadow submit → `leadsOf` (line manager + team leads/managers, no everyone-fallback); Shadow review → the visit's observer (looked up server-side from `recordId` + the caller's own review, never from client text). Migration 008 must be run before deploying.
+
 ## Commands
 
 - `npx vitest run` — unit tests (stand-in REST server, no DB needed) · `npx tsc --noEmit -p .` · `npx eslint src tests` · `npx next build`

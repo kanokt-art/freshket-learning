@@ -142,7 +142,13 @@ const superWrites: Pick<Policy, 'create' | 'update' | 'delete'> = {
 const SERVER_OWNED_RECORD_FIELDS = ['score', 'passScore', 'attemptCount']
 
 /** Fields only a super_admin may change on a user. */
-const SELF_PROTECTED_USER_FIELDS = ['role', 'teamId', 'managerId', 'visibleTeamIds']
+const SELF_PROTECTED_USER_FIELDS = ['role', 'teamId', 'managerId', 'visibleTeamIds', 'slackUserId']
+
+/** A Slack member id is stored as an id, never free text: it decides who a DM goes to. */
+const slackIdOk = (w: WriteRequest) => {
+  const v = w.incoming?.slackUserId
+  return v === undefined || v === null || (typeof v === 'string' && /^[UW][A-Z0-9]{8,14}$/.test(v))
+}
 
 const POLICIES: Record<string, Policy> = {
   // `role` is the privilege boundary of the whole app — ONLY super_admin may
@@ -152,11 +158,12 @@ const POLICIES: Record<string, Policy> = {
   // let a manager set their own role to super_admin.
   users: {
     read: staffRead,
-    create: (w) => isSuper(w.actor) ||
-      (w.id === w.actor.uid && w.incoming?.role === 'sale' && w.incoming?.uid === w.id),
-    update: (w) => isSuper(w.actor) ||
-      (isManagerUp(w.actor) && !w.changed.includes('role')) ||
-      (w.id === w.actor.uid && !touches(w.changed, SELF_PROTECTED_USER_FIELDS)),
+    create: (w) => slackIdOk(w) && (isSuper(w.actor) ||
+      (w.id === w.actor.uid && w.incoming?.role === 'sale' && w.incoming?.uid === w.id && w.incoming?.slackUserId === undefined)),
+    update: (w) => slackIdOk(w) && (isSuper(w.actor) ||
+      // slackUserId decides who a Slack DM goes to, so only a super_admin sets it.
+      (isManagerUp(w.actor) && !w.changed.includes('role') && !w.changed.includes('slackUserId')) ||
+      (w.id === w.actor.uid && !touches(w.changed, SELF_PROTECTED_USER_FIELDS))),
     delete: (w) => isSuper(w.actor),
   },
 

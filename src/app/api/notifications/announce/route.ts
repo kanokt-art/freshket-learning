@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/server/store'
+import { dmPeople, leadsOf } from '@/lib/notifications/slackDm'
+import { reviewId } from '@/lib/shadow/reviews'
 import { requireStaff } from '@/lib/server/auth'
 import type { UserProfile } from '@/types/user'
 import {
@@ -8,6 +10,7 @@ import {
   postShadowSubmittedToSlack,
   postShadowAckedToSlack,
   isSalesDepartment,
+  excerpt,
 } from '@/lib/notifications/slack'
 
 // Announce a training event to the Slack channel.
@@ -124,6 +127,20 @@ export async function POST(req: NextRequest) {
         // with the rest of the app (English name plus nickname).
         const sender = ((await getStore().get('users', gate.uid)) ?? {}) as Partial<UserProfile>
 
+        // The sender's team lead(s) are told privately, whatever the department:
+        // the channel post below is gated to sales, a lead's DM is not.
+        const senderName = (sender.displayNameEN?.trim() || sender.displayName || 'พนักงาน')
+          + (sender.nickname ? ` (${sender.nickname})` : '')
+        const link = appUrl(body.path)
+        await dmPeople(getStore(), await leadsOf(getStore(), sender), {
+          text: `${senderName} ส่ง Shadow Visit ใหม่ — รอการประเมิน`,
+          blocks: [
+            { type: 'section', text: { type: 'mrkdwn', text: `📋 *${senderName}* ส่ง Shadow Visit ใหม่ — _รอการประเมิน_
+${visitSummary}` } },
+            ...(link ? [{ type: 'actions', elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'เข้าไปประเมิน' }, url: link }] }] : []),
+          ],
+        })
+
         // Only sales visits go to the channel — the same gate the old push
         // route applied, kept so this change does not quietly widen who the
         // channel hears about.
@@ -149,6 +166,33 @@ export async function POST(req: NextRequest) {
         const rating = typeof body.rating === 'number' && body.rating >= 1 && body.rating <= 5
           ? body.rating
           : undefined
+        // The person whose visit it was gets the score privately. Who that is and what
+        // was given are read from the database, not from the request: the review must
+        // exist under the caller's own id, so this cannot be used to message someone
+        // with text of the caller's choosing.
+        const recordId = typeof body.recordId === 'string' && body.recordId.length <= 200 ? body.recordId : null
+        if (recordId) {
+          const store = getStore()
+          const [visit, review] = await Promise.all([
+            store.get('shadowRecords', recordId) as Promise<{ observerUid?: string; storeName?: string } | null>,
+            store.get('shadowAcknowledgments', reviewId(recordId, gate.uid)) as Promise<{ rating?: number; comment?: string; reviewerName?: string; reviewerRole?: string } | null>,
+          ])
+          if (visit?.observerUid && review && visit.observerUid !== gate.uid) {
+            const stars = typeof review.rating === 'number' ? `${review.rating}/5 ดาว` : ''
+            const who = review.reviewerName?.trim() || reviewerName
+            const link = appUrl(body.path)
+            await dmPeople(store, [visit.observerUid], {
+              text: `${who} ประเมิน Shadow Visit ของคุณ${stars ? ` — ${stars}` : ''}`,
+              blocks: [
+                { type: 'section', text: { type: 'mrkdwn', text: `⭐ *${who}* ประเมิน Shadow Visit ของคุณ${visit.storeName ? `
+ร้าน ${visit.storeName}` : ''}${stars ? `
+ได้รับ *${stars}*` : ''}` } },
+                ...(review.comment ? [{ type: 'section', text: { type: 'mrkdwn', text: `>${excerpt(review.comment, 300)}` } }] : []),
+                ...(link ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูผลประเมิน' }, url: link }] }] : []),
+              ],
+            })
+          }
+        }
         posted = await postShadowAckedToSlack({
           reviewerName,
           observerName,

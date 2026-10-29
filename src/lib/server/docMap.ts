@@ -329,7 +329,7 @@ export const USERS: TableSpec = {
     email: fText('email'), photoURL: fText('photo_url'), role: fText('role'),
     createdAt: fTs('created_at'), updatedAt: fTs('updated_at'),
     displayName: fText('display_name'), displayNameEN: fText('display_name_en'),
-    nickname: fText('nickname'), employeeId: fText('employee_id'),
+    nickname: fText('nickname'), slackUserId: fText('slack_user_id'), employeeId: fText('employee_id'),
     department: fText('department'), position: fText('position'), rank: fText('rank'),
     lineManager: fText('line_manager'), startDate: fTs('start_date'),
     employmentStatus: fText('employment_status'),
