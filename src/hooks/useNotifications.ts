@@ -5,7 +5,7 @@ import { getDemoMode } from '@/lib/demo/demoMode'
 import { demoStore } from '@/lib/demo/demoStore'
 import type { AppNotification } from '@/types/notification'
 import { useFirestoreList } from '@/hooks/useFirestore'
-import { patch, saveMany } from '@/lib/data/collection'
+import { patch } from '@/lib/data/collection'
 
 const DEMO_MODE = getDemoMode()
 
@@ -68,9 +68,11 @@ export function useNotifications(uid: string | undefined) {
     }
     ;(async () => {
       if (!uid) return
-      await saveMany(
-        `notifications/${uid}/items`,
-        items.filter(n => !n.read).map(n => ({ id: n.id, read: true })),
+      // One field changed on each, so each is a patch. This used to be saveMany WITHOUT
+      // merge, which replaced every unread notification with just `{ read: true }` and
+      // blanked its title, text and link.
+      await Promise.all(
+        items.filter(n => !n.read).map(n => patch(`notifications/${uid}/items`, n.id, { read: true })),
       )
     })()
   }
