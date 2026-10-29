@@ -1,6 +1,7 @@
 'use client'
 
 import { answeredQuestions } from '@/lib/shadow/fields'
+import { NO_TEAM, teamChoices, effectiveTeamChoice, matchesTeam } from '@/lib/users/teamFilter'
 import { useState, useMemo, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
@@ -88,6 +89,8 @@ function toMillis(v: unknown): number {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function ManagerPage() {
   const { user } = useAuth()
+  // A team lead sees one team, so a Team column would repeat the same value on every row.
+  const showTeamColumn = user?.role !== 'team_lead'
   const { data: allUsers } = useAllUsers()
   const { data: teams } = useTeams()
 
@@ -122,6 +125,8 @@ export default function ManagerPage() {
   const memberUids = useMemo(() => users.map(u => u.uid), [users])
   const { data: records, loading } = useTeamTrainingRecords(memberUids)
   const [activeDept, setActiveDept] = useState<string>('all')
+  // 'all', a team id, or NO_TEAM for people not placed in any team.
+  const [activeTeam, setActiveTeam] = useState<string>('all')
   const [userSearch, setUserSearch] = useState('')
   // Seeded from ?user=<uid> so a Slack notification can deep-link straight to
   // the member's card instead of dropping the reader on the team list to go
@@ -151,6 +156,11 @@ export default function ManagerPage() {
     return Array.from(set).sort()
   }, [users])
 
+  // Team filter: only teams that would show someone in the chosen department; a team
+  // picked earlier that is not in it now is read as "all" (see lib/users/teamFilter).
+  const teamOptions = useMemo(() => teamChoices(users, activeDept, teamMap), [users, activeDept, teamMap])
+  const effectiveTeam = effectiveTeamChoice(activeTeam, teamOptions)
+
   // Stat cards. "พนักงานทั้งหมด" = the managed roster (same set the table shows),
   // NOT the count of users who happen to have a training record — the old
   // records-based count read "2 คน" while the roster below listed 11.
@@ -173,14 +183,15 @@ export default function ManagerPage() {
     const q = userSearch.toLowerCase().trim()
     return users.filter(u => {
       const matchDept   = activeDept === 'all' || u.department === activeDept
+      const matchTeam   = !showTeamColumn || matchesTeam(u, effectiveTeam, teamMap)
       const matchSearch = !q ||
         enName(u).toLowerCase().includes(q) ||
         u.displayName.toLowerCase().includes(q) ||
         (u.nickname?.toLowerCase() ?? '').includes(q) ||
         (u.employeeId ?? '').toLowerCase().includes(q)
-      return matchDept && matchSearch
+      return matchDept && matchTeam && matchSearch
     })
-  }, [users, activeDept, userSearch])
+  }, [users, activeDept, effectiveTeam, userSearch, showTeamColumn, teamMap])
 
   // Sorted view of the filtered members — driven by the clickable column headers.
   const sortedUsers = useMemo(() => {
@@ -306,6 +317,18 @@ export default function ManagerPage() {
               className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-400"
             />
           </div>
+          {showTeamColumn && teamOptions.teams.length > 0 && (
+            <select
+              value={effectiveTeam}
+              onChange={e => setActiveTeam(e.target.value)}
+              aria-label="กรองตามทีม"
+              className="px-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-freshket-300"
+            >
+              <option value="all">ทุกทีม</option>
+              {teamOptions.teams.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              {teamOptions.hasUnplaced && <option value={NO_TEAM}>ยังไม่มีทีม</option>}
+            </select>
+          )}
           <div className="flex flex-wrap gap-2">
             <DeptPill label="ทุกแผนก" active={activeDept === 'all'} onClick={() => setActiveDept('all')} />
             {departments.map(d => (
@@ -347,7 +370,9 @@ export default function ManagerPage() {
                     <SortableTh label="ตำแหน่งงาน" field="position" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden sm:table-cell" />
                     <SortableTh label="แผนก" field="department" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell" />
                     <SortableTh label="วันเริ่มงาน" field="startDate" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
-                    <SortableTh label="ทีม" field="team" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
+                    {showTeamColumn && (
+                      <SortableTh label="ทีม" field="team" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
+                    )}
                     <th className="w-8" />
                   </tr>
                 </thead>
@@ -404,11 +429,13 @@ export default function ManagerPage() {
                         <td className="px-4 py-3.5 text-xs text-gray-500 hidden lg:table-cell whitespace-nowrap">
                           {u.startDate ? formatDateEN(u.startDate) : <span className="text-gray-300">—</span>}
                         </td>
-                        <td className="px-4 py-3.5 hidden lg:table-cell">
-                          {teamName
-                            ? <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-full whitespace-nowrap">{teamName}</span>
-                            : <span className="text-gray-300 text-xs">—</span>}
-                        </td>
+                        {showTeamColumn && (
+                          <td className="px-4 py-3.5 hidden lg:table-cell">
+                            {teamName
+                              ? <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-full whitespace-nowrap">{teamName}</span>
+                              : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                        )}
                         <td className="px-4 py-3.5 w-8">
                           <svg className="size-4 text-gray-200 group-hover:text-freshket-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
