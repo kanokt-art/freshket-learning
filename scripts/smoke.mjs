@@ -1,8 +1,8 @@
 /**
  * Post-deploy smoke test — run against the DEPLOYED app, not localhost.
  *
- *   node --env-file=.env.local scripts/smoke.mjs                     # production
- *   node --env-file=.env.local scripts/smoke.mjs https://preview-url # a preview
+ *   SMOKE_EMAIL=you@freshket.co node --env-file=.env.local scripts/smoke.mjs                     # production
+ *   SMOKE_EMAIL=you@freshket.co node --env-file=.env.local scripts/smoke.mjs https://preview-url # a preview
  *
  * Exits non-zero if anything fails, so it can gate a deploy in CI.
  *
@@ -61,8 +61,18 @@ async function timed(name, fn, { slowMs = SLOW_MS } = {}) {
   }
 }
 
-/** A real Firebase ID token for an existing user, so auth-gated paths run for real. */
+/**
+ * A real Firebase ID token for ONE named account, so auth-gated paths run for real.
+ *
+ * The account must be passed in (SMOKE_EMAIL=… — a test account or your own).
+ * This used to take whichever employee Firebase listed first, which signed in as a
+ * colleague who had agreed to nothing (and, on first sign-in, linked their login to
+ * their HR profile).
+ */
 async function mintIdToken() {
+  const email = process.env.SMOKE_EMAIL
+  if (!email) throw new Error('SMOKE_EMAIL is not set — name the account to sign in as (a test account or your own)')
+
   const app = getApps()[0] ?? initializeApp({
     credential: cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
@@ -71,12 +81,8 @@ async function mintIdToken() {
     }),
   })
 
-  // Reuses whichever user happens to be first — the smoke test only needs a
-  // valid identity, not a particular person.
-  const { users } = await getAuth(app).listUsers(1)
-  if (users.length === 0) throw new Error('no users in Firebase Auth to mint a token for')
-
-  const customToken = await getAuth(app).createCustomToken(users[0].uid)
+  const user = await getAuth(app).getUserByEmail(email)
+  const customToken = await getAuth(app).createCustomToken(user.uid)
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}`,
     {
