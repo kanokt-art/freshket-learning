@@ -7,9 +7,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers, useAllTrainingRecords, useUserStats, useMyTrainingRecords, useCourses, useAnnouncements, useTeams } from '@/hooks/useFirestore'
 import { relativeTime } from '@/lib/utils/dateFormatter'
 import { isAnnouncementVisibleTo } from '@/types/announcement'
-import { canViewByLevel } from '@/lib/jobLevel'
+import { managedMembers } from '@/lib/users/managedMembers'
 import { statsAvgScore, type UserStats } from '@/types/stats'
-import { getTeamManagerIds, getTeamLeadIds } from '@/types/user'
 import { CalendarCard } from '@/components/features/CalendarCard'
 
 // Team-lead / manager home — 3-column dashboard:
@@ -35,15 +34,7 @@ export function TeamLeadHome() {
   // Teams this lead/manager oversees — derived from the team docs' managerId /
   // teamLeadId (same source OrgBoard uses), plus any explicit visibleTeamIds and
   // their own teamId. Keeps the dashboard in step with the /manager roster.
-  const members = useMemo(() => {
-    if (!user) return []
-    const managed = new Set<string>()
-    teams.forEach((t) => { if (getTeamManagerIds(t).includes(user.uid) || getTeamLeadIds(t).includes(user.uid)) managed.add(t.id) })
-    ;(user.visibleTeamIds ?? []).forEach((id) => managed.add(id))
-    if (user.teamId) managed.add(user.teamId)
-    // Only members at or below the viewer's level (a team_lead never sees the manager).
-    return allUsers.filter((u) => u.uid !== user.uid && u.teamId && managed.has(u.teamId) && canViewByLevel(user, u))
-  }, [allUsers, teams, user])
+  const members = useMemo(() => managedMembers(user, allUsers, teams), [allUsers, teams, user])
 
   const statsByUid = useMemo(() => {
     const m = new Map<string, UserStats>()
@@ -185,7 +176,7 @@ export function TeamLeadHome() {
             )}
           </div>
 
-          <AllCoursesCard courses={publishedCourses} onOpen={(id) => router.push(`/courses/${id}`)} />
+          <AllCoursesCard courses={publishedCourses} onOpen={(id) => router.push(`/courses/${id}?view=report`)} />
         </div>
 
         {/* ── RIGHT: continue learning ─────────────────────────── */}

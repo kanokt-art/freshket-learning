@@ -9,6 +9,7 @@ import { canAccess, ROLE_HIERARCHY, type UserRole } from '@/types/user'
 import { FRESHKET_LOGO_URL } from '@/lib/demo/demoMode'
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
 import { MbtiBadge } from '@/components/features/MbtiBadge'
+import { englishName } from '@/lib/users/displayName'
 import type { ModuleId } from '@/lib/modules'
 
 // ── Nav item definition ───────────────────────────────────────────────────────
@@ -314,7 +315,7 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={user.photoURL}
-              alt={user.displayName}
+              alt={englishName(user)}
               className="size-10 rounded-full object-cover ring-2 ring-freshket-100 shrink-0"
             />
           ) : (
@@ -323,11 +324,19 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
             </div>
           )}
           <SidebarLabel expanded={expanded} className="min-w-0 flex-1">
-            <span className="block text-sm font-bold text-gray-900 truncate">{user.displayName}</span>
+            <span className="block text-sm font-bold text-gray-900 truncate">{englishName(user)}</span>
             {user.position && (
               <span className="block text-xs font-normal text-gray-400 truncate">{user.position}</span>
             )}
-            <span className="block mt-1"><MbtiBadge uid={user.uid} /></span>
+            {/* Nickname and MBTI as pills under the name */}
+            <span className="mt-1 flex flex-wrap items-center gap-1">
+              {user.nickname?.trim() && (
+                <span className="inline-flex items-center text-xs font-bold px-3 py-1 rounded-full bg-freshket-100 text-freshket-700 border border-freshket-200">
+                  {user.nickname.trim()}
+                </span>
+              )}
+              <MbtiBadge uid={user.uid} />
+            </span>
           </SidebarLabel>
         </Link>
       )}

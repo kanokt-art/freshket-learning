@@ -16,6 +16,11 @@ interface NameParts {
   email?: string
 }
 
+/** The English full name ("Firstname Lastname"), without the nickname. */
+export function englishName(u: NameParts): string {
+  return (u.displayNameEN ?? '').trim() || (u.displayName ?? '').trim() || (u.email ?? '').trim()
+}
+
 /**
  * Format a person as "Firstname (Nickname) Lastname".
  *

@@ -5,11 +5,11 @@ import { isActiveEmployee } from '@/lib/users/active'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useCourse, useCourseTrainingRecords, useAllUsers, useTeams, useDepartments } from '@/hooks/useFirestore'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
-import { canAccess } from '@/types/user'
+import { managedMembers } from '@/lib/users/managedMembers'
 import { CATEGORY_LABELS, CATEGORY_COLORS, type Course, type CourseTopic, type CourseLesson, type LessonType } from '@/types/course'
 import { STATUS_LABELS, type TrainingStatus } from '@/types/tracking'
 import type { TrainingRecord } from '@/types/tracking'
@@ -174,7 +174,13 @@ export default function CourseDetailPage() {
   const { data: allRecords } = useCourseTrainingRecords(id)
   const { allowedModules, loading: moduleLoading } = useModuleAccess(user?.role, user?.department)
 
-  const isAdmin = canAccess(user?.role ?? 'sale', 'team_lead')
+  // Who sees the results report instead of the lesson: super_admin always; a team lead
+  // or manager only when they came from Home (?view=report) to look at their team.
+  // Through My Course they learn like anyone else.
+  const search = useSearchParams()
+  const isSuperAdmin = user?.role === 'super_admin'
+  const isLead = user?.role === 'team_lead' || user?.role === 'manager'
+  const isAdmin = isSuperAdmin || (isLead && search.get('view') === 'report')
 
   // These three are consumed ONLY by <CourseResultsDashboard>, which renders just
   // for admins. Ungated, every learner opening any course pulled the entire users
@@ -184,6 +190,11 @@ export default function CourseDetailPage() {
   const { data: teams }       = useTeams(isAdmin)
   const { data: departments } = useDepartments(isAdmin)
   const [tab, setTab] = useState<'results' | 'content'>('results')
+  // A lead's report covers only the people they look after.
+  const teamUids = useMemo(
+    () => (isLead ? new Set(managedMembers(user, allUsers, teams).map((m) => m.uid)) : null),
+    [isLead, user, allUsers, teams],
+  )
 
   const [progress, setProgress] = useState<Progress>(EMPTY_PROG)
   const [activeStep, setActiveStep] = useState<StepId>('slide')
@@ -361,7 +372,7 @@ export default function CourseDetailPage() {
           the title (or caret-browsing) drops a blinking text caret in the heading,
           which looks like the title is editable. */}
       <div className="bg-white border-b border-gray-100 px-6 py-4 flex items-center gap-4 shrink-0 select-none">
-        <button onClick={() => router.push('/courses')}
+        <button onClick={() => router.push(isAdmin && isLead ? '/sale' : '/courses')}
           className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors shrink-0">
           <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -412,13 +423,25 @@ export default function CourseDetailPage() {
         )}
       </div>
 
+      {/* A lead came here from Home: say this is their team's report, not their own lesson */}
+      {isAdmin && isLead && (
+        <div className="flex items-center justify-between gap-3 bg-freshket-50 border-b border-freshket-200 px-6 py-2.5">
+          <p className="text-sm text-freshket-700">
+            <span className="font-bold">รายงานของทีมคุณ</span> — ผลการเรียนของ user ใต้บังคับบัญชาในหลักสูตรนี้ ไม่ใช่การเรียนของคุณเอง
+          </p>
+          <Link href={`/courses/${id}`} className="shrink-0 text-xs font-bold text-freshket-700 hover:underline">
+            เข้าเรียนหลักสูตรนี้
+          </Link>
+        </div>
+      )}
+
       {/* ── Results dashboard tab ───────────────────────────────────────── */}
       {isAdmin && tab === 'results' && (
         <CourseResultsDashboard
           courseId={id}
           course={course}
           allRecords={allRecords}
-          allUsers={allUsers}
+          allUsers={teamUids ? allUsers.filter((u) => teamUids.has(u.uid)) : allUsers}
           teams={teams}
           departments={departments}
         />
