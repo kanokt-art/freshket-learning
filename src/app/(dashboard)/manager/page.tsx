@@ -794,41 +794,15 @@ function EmployeeSidebar({
         {tab === 'assess' && (
           <div className="p-4 space-y-3">
             {assessBySubject.map(({ subject, pre, post }) => {
-              const delta = pre && post ? post.pct - pre.pct : null
               return (
                 <div key={subject} className="border border-gray-100 rounded-xl p-4">
                   <p className="font-bold text-sm text-gray-800 mb-3">{subject}</p>
-                  <div className="flex items-center gap-3">
-                    {/* Pre */}
-                    <div className="flex-1 rounded-xl bg-slate-50 border border-gray-100 p-3 text-center">
-                      <p className="text-xs text-gray-400 mb-1">Pre-Test</p>
-                      {pre ? (
-                        <>
-                          <p className={`text-xl font-black ${scoreTextColor(pre.pct)}`}>{pre.pct}%</p>
-                          <p className="text-xs text-gray-400 mt-0.5">{pre.score}/{pre.total}</p>
-                        </>
-                      ) : <p className="text-sm text-gray-300 py-2">—</p>}
-                    </div>
-                    {/* Arrow + delta */}
-                    <div className="flex flex-col items-center shrink-0">
-                      <svg className="size-4 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12h15m0 0l-6-6m6 6l-6 6" /></svg>
-                      {delta != null && (
-                        <span className={`text-xs font-bold mt-1 ${delta > 0 ? 'text-freshket-600' : delta < 0 ? 'text-rose-600' : 'text-gray-400'}`}>
-                          {delta > 0 ? `+${delta}` : delta}%
-                        </span>
-                      )}
-                    </div>
-                    {/* Post */}
-                    <div className="flex-1 rounded-xl bg-freshket-50 border border-freshket-100 p-3 text-center">
-                      <p className="text-xs text-freshket-600 mb-1">Post-Test</p>
-                      {post ? (
-                        <>
-                          <p className={`text-xl font-black ${scoreTextColor(post.pct)}`}>{post.pct}%</p>
-                          <p className="text-xs text-gray-400 mt-0.5">{post.score}/{post.total}</p>
-                        </>
-                      ) : <p className="text-sm text-gray-300 py-2">—</p>}
-                    </div>
-                  </div>
+                  <PrePostBars
+                    pre={pre?.pct} post={post?.pct}
+                    preNote={pre ? `${pre.score}/${pre.total}` : undefined}
+                    postNote={post ? `${post.score}/${post.total}` : undefined}
+                    unit="%"
+                  />
                   <p className="text-xs text-gray-400 mt-2.5">
                     {pre && `Pre ${ddmmyyyy(pre.takenAt)}`}{pre && post ? ' · ' : ''}{post && `Post ${ddmmyyyy(post.takenAt)}`}
                   </p>
@@ -1035,31 +1009,66 @@ function ReflectionModal({ courseTitle, text, onClose }: {
 // CourseLesson.quizRole. The delta is the point of the row: a post-test that
 // barely moved (or went backwards) is the case a manager should coach on.
 function PrePostRow({ pre, post }: { pre?: number; post?: number }) {
-  const delta = pre != null && post != null ? post - pre : null
   return (
-    <div className="mb-2.5 flex items-center gap-2">
-      <div className="flex-1 rounded-xl bg-slate-50 border border-gray-100 px-3 py-2 text-center">
-        <p className="text-xs text-gray-400 mb-0.5">Pre-Test</p>
-        {pre != null
-          ? <p className={`text-sm font-black ${scoreTextColor(pre)}`}>{pre}</p>
-          : <p className="text-sm text-gray-300">—</p>}
+    <div className="mb-2.5">
+      <PrePostBars pre={pre} post={post} />
+    </div>
+  )
+}
+
+/**
+ * Before and after as two horizontal bars on the same 0–100 scale, so the gain (or the
+ * drop) is read by comparing lengths, with the change written beside them.
+ * `note` is a small line under a value, e.g. the 8/10 behind a percentage.
+ */
+function PrePostBars({ pre, post, preNote, postNote, unit = '' }: {
+  pre?: number; post?: number; preNote?: string; postNote?: string; unit?: string
+}) {
+  const delta = pre != null && post != null ? post - pre : null
+  const rows = [
+    { key: 'pre',  label: 'Pre-Test',  value: pre,  note: preNote },
+    { key: 'post', label: 'Post-Test', value: post, note: postNote },
+  ]
+  return (
+    <div className="rounded-xl bg-slate-50 border border-gray-100 px-4 py-3">
+      <div className="space-y-2.5">
+        {rows.map(r => {
+          const width = r.value != null ? Math.max(0, Math.min(100, r.value)) : 0
+          return (
+            <div key={r.key} className="flex items-center gap-3">
+              <span className="w-16 shrink-0 text-xs text-gray-500">{r.label}</span>
+              <div
+                className="flex-1 h-3 rounded-full bg-gray-200/70 overflow-hidden"
+                role="img"
+                aria-label={r.value != null ? `${r.label} ${r.value}${unit}` : `${r.label} ไม่มีข้อมูล`}
+              >
+                {r.value != null && (
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${width}%`, background: scoreBarColor(r.value) }}
+                  />
+                )}
+              </div>
+              <div className="w-20 shrink-0 text-right">
+                {r.value != null ? (
+                  <>
+                    <span className={`text-sm font-black tabular-nums ${scoreTextColor(r.value)}`}>{r.value}{unit}</span>
+                    {r.note && <span className="block text-xs text-gray-400 leading-tight">{r.note}</span>}
+                  </>
+                ) : <span className="text-sm text-gray-300">—</span>}
+              </div>
+            </div>
+          )
+        })}
       </div>
-      <div className="flex flex-col items-center shrink-0 w-12">
-        <svg className="size-4 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12h15m0 0l-6-6m6 6l-6 6" />
-        </svg>
-        {delta != null && (
-          <span className={`text-xs font-bold mt-0.5 ${delta > 0 ? 'text-freshket-600' : delta < 0 ? 'text-rose-600' : 'text-gray-400'}`}>
-            {delta > 0 ? `+${delta}` : delta}
+      {delta != null && (
+        <p className="mt-2.5 pt-2 border-t border-gray-200/70 text-xs text-gray-500 flex items-center gap-1.5">
+          การเปลี่ยนแปลง
+          <span className={`font-bold ${delta > 0 ? 'text-freshket-600' : delta < 0 ? 'text-rose-600' : 'text-gray-400'}`}>
+            {delta > 0 ? `+${delta}` : delta}{unit}
           </span>
-        )}
-      </div>
-      <div className="flex-1 rounded-xl bg-slate-50 border border-gray-100 px-3 py-2 text-center">
-        <p className="text-xs text-gray-400 mb-0.5">Post-Test</p>
-        {post != null
-          ? <p className={`text-sm font-black ${scoreTextColor(post)}`}>{post}</p>
-          : <p className="text-sm text-gray-300">—</p>}
-      </div>
+        </p>
+      )}
     </div>
   )
 }
