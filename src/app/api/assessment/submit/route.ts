@@ -3,6 +3,7 @@ import { getStore, type Store } from '@/lib/server/store'
 import { requireStaff } from '@/lib/server/auth'
 import { newId } from '@/lib/server/dataApi'
 import { refreshUserStats } from '@/lib/server/userStats'
+import { statusAfterPostTest } from '@/lib/courses/completion'
 import { gradeSubmission, type GivenAnswers } from '@/lib/assessment/grade'
 import { postCompletionToSlack, isSalesDepartment } from '@/lib/notifications/slack'
 import type { Assessment, Question } from '@/types/assessment'
@@ -306,7 +307,16 @@ export async function POST(req: NextRequest) {
       // (CourseLesson.quizRole) also lands in its own column, so the learner
       // roster can show the before/after pair. Untagged quizzes set neither.
       if (step === 'pre') payload.preTestScore = graded.score
-      if (step === 'post') payload.postTestScore = graded.score
+      if (step === 'post') {
+        payload.postTestScore = graded.score
+        // Passing the post-test is what finishes the course. The browser cannot say so
+        // itself (lib/courses/completion.ts); this is where it is decided.
+        const verdict = statusAfterPostTest(existingRecord?.status as string | undefined, passed)
+        if (verdict) {
+          payload.status = verdict
+          if (verdict === 'completed' && !existingRecord?.completedAt) payload.completedAt = new Date()
+        }
+      }
       // First touch stamps only — never move an existing startedAt.
       if (!existingRecord?.startedAt) {
         payload.startedAt = new Date()

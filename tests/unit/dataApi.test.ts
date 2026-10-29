@@ -428,6 +428,174 @@ describe('runWrite', () => {
   })
 })
 
+// A course with a graded post-test is finished by the server grading it. The
+// per-document rules cannot see the course, so the door looks it up.
+describe('runWrite: finishing a course', () => {
+  const graded = { id: 'graded', title: 'Graded', topics: [{ lessons: [{ type: 'video' }, { type: 'quiz', quizRole: 'post_test' }] }] }
+  const lessonsOnly = { id: 'plain', title: 'Plain', topics: [{ lessons: [{ type: 'video' }] }] }
+  const rec = (courseId: string, status: string) => doc(`me_${courseId}`, { userId: 'me', courseId, status })
+  const setStatus = (courseId: string, status: string) =>
+    ({ ops: [{ op: 'set', path: 'trainingRecords', id: `me_${courseId}`, data: { userId: 'me', courseId, status } }] })
+
+  it('refuses a learner declaring "completed" on a course with a graded test', async () => {
+    const m = memStore({ courses: [graded], trainingRecords: [rec('graded', 'in_progress')] })
+    const r = await runWrite(m.store, sale('me'), setStatus('graded', 'completed'))
+    expect(r.ok).toBe(false)
+    expect(r.ok === false && r.status).toBe(403)
+    expect(m.docs('trainingRecords')[0].status).toBe('in_progress')
+  })
+
+  it('refuses it when the record does not exist yet', async () => {
+    const m = memStore({ courses: [graded] })
+    const r = await runWrite(m.store, sale('me'), setStatus('graded', 'completed'))
+    expect(r.ok).toBe(false)
+    expect(m.docs('trainingRecords')).toHaveLength(0)
+  })
+
+  it('refuses "failed" as well', async () => {
+    const m = memStore({ courses: [graded], trainingRecords: [rec('graded', 'in_progress')] })
+    expect((await runWrite(m.store, sale('me'), setStatus('graded', 'failed'))).ok).toBe(false)
+  })
+
+  it('refuses it even for a super_admin — the override route is how an admin corrects a result', async () => {
+    const m = memStore({ courses: [graded], trainingRecords: [{ ...rec('graded', 'in_progress'), userId: 'admin' }] })
+    const r = await runWrite(m.store, admin, { ops: [{ op: 'set', path: 'trainingRecords', id: 'me_graded', data: { userId: 'admin', courseId: 'graded', status: 'completed' } }] })
+    expect(r.ok).toBe(false)
+  })
+
+  it('lets a learner report progress', async () => {
+    const m = memStore({ courses: [graded] })
+    const r = await runWrite(m.store, sale('me'), setStatus('graded', 'in_progress'))
+    expect(r.ok).toBe(true)
+    expect(m.docs('trainingRecords')[0].status).toBe('in_progress')
+  })
+
+  it('lets a learner re-save a record the server already completed', async () => {
+    // Lesson ticks after the pass: the status is not changing, so nothing is refused.
+    const m = memStore({ courses: [graded], trainingRecords: [rec('graded', 'completed')] })
+    const r = await runWrite(m.store, sale('me'), {
+      ops: [{ op: 'set', path: 'trainingRecords', id: 'me_graded', data: { userId: 'me', courseId: 'graded', status: 'completed', completedLessonIds: ['l1'] } }],
+    })
+    expect(r.ok).toBe(true)
+  })
+
+  it('lets a course with no graded test finish by lessons, as before', async () => {
+    const m = memStore({ courses: [lessonsOnly] })
+    const r = await runWrite(m.store, sale('me'), setStatus('plain', 'completed'))
+    expect(r.ok).toBe(true)
+    expect(m.docs('trainingRecords')[0].status).toBe('completed')
+  })
+
+  it('does not stop a learner finishing a course the door cannot find', async () => {
+    const m = memStore()
+    expect((await runWrite(m.store, sale('me'), setStatus('ghost', 'completed'))).ok).toBe(true)
+  })
+
+  it('judges the whole request first: a refused completion leaves the other writes undone', async () => {
+    const m = memStore({ courses: [graded] })
+    const r = await runWrite(m.store, sale('me'), { ops: [
+      { op: 'set', path: 'trainingRecords', id: 'me_other', data: { userId: 'me', courseId: 'other', status: 'in_progress' } },
+      ...setStatus('graded', 'completed').ops,
+    ] })
+    expect(r.ok).toBe(false)
+    expect(m.docs('trainingRecords')).toHaveLength(0)
+  })
+})
+
+// A learner may read the employee list but not everything HR holds about a
+// colleague. The cut is made here, on the server: hiding a field on the page would
+// leave it in the response.
+describe('what a learner gets of the employee list', () => {
+  const person = (id: string) => doc(id, {
+    displayName: `Name ${id}`, displayNameEN: `En ${id}`, nickname: `Nick ${id}`, photoURL: 'p.png',
+    department: 'Sales Management', position: 'Sale', teamId: 't1', role: 'sale', employmentStatus: 'Active',
+    email: `${id}@freshket.co`, employeeId: `E-${id}`, managerId: 'boss', lineManager: 'Some Boss',
+    rank: 'JG5', startDate: '2020-01-01T00:00:00.000Z', visibleTeamIds: ['t1'], mandatoryLastDepartments: ['x'],
+  })
+  const HIDDEN = ['email', 'employeeId', 'managerId', 'lineManager', 'rank', 'startDate', 'visibleTeamIds', 'mandatoryLastDepartments']
+  const m = () => memStore({ users: [person('me'), person('colleague')] })
+  const find = (docs: Array<{ id: string }>, id: string) => docs.find((d) => d.id === id) as Record<string, unknown>
+
+  it('shows a colleague without the withheld fields', async () => {
+    const r = await runQuery(m().store, sale('me'), { path: 'users' })
+    const colleague = find(r.ok ? r.value.docs : [], 'colleague')
+    for (const f of HIDDEN) expect(colleague).not.toHaveProperty(f)
+  })
+
+  it('still shows a colleague what the screens need', async () => {
+    const r = await runQuery(m().store, sale('me'), { path: 'users' })
+    expect(find(r.ok ? r.value.docs : [], 'colleague')).toMatchObject({
+      displayName: 'Name colleague', nickname: 'Nick colleague', department: 'Sales Management',
+      teamId: 't1', role: 'sale', employmentStatus: 'Active', photoURL: 'p.png',
+    })
+  })
+
+  it('shows a learner their OWN profile in full', async () => {
+    const r = await runQuery(m().store, sale('me'), { path: 'users' })
+    expect(find(r.ok ? r.value.docs : [], 'me')).toMatchObject({ email: 'me@freshket.co', employeeId: 'E-me', rank: 'JG5' })
+  })
+
+  it('applies the same cut to a single read', async () => {
+    const other = await runGet(m().store, sale('me'), { path: 'users', id: 'colleague' })
+    expect(other.ok && other.value.doc).not.toHaveProperty('email')
+    const own = await runGet(m().store, sale('me'), { path: 'users', id: 'me' })
+    expect(own.ok && own.value.doc).toHaveProperty('email', 'me@freshket.co')
+  })
+
+  it.each([['team_lead', lead], ['manager', mgr], ['super_admin', admin]])('shows a %s everything', async (_n, actor) => {
+    const r = await runQuery(m().store, actor, { path: 'users' })
+    expect(find(r.ok ? r.value.docs : [], 'colleague')).toMatchObject({ email: 'colleague@freshket.co', employeeId: 'E-colleague' })
+  })
+
+  it('does not let a learner filter on a field they cannot see — that would confirm who has it', async () => {
+    const byEmail = await runQuery(m().store, sale('me'), { path: 'users', constraints: [{ type: 'where', field: 'email', op: '==', value: 'colleague@freshket.co' }] })
+    expect(byEmail.ok).toBe(false)
+    expect(byEmail.ok === false && byEmail.status).toBe(403)
+    const byEmpId = await runQuery(m().store, sale('me'), { path: 'users', constraints: [{ type: 'where', field: 'employeeId', op: '==', value: 'E-colleague' }] })
+    expect(byEmpId.ok).toBe(false)
+    const sorted = await runQuery(m().store, sale('me'), { path: 'users', constraints: [{ type: 'orderBy', field: 'startDate' }] })
+    expect(sorted.ok).toBe(false)
+  })
+
+  it('does let a learner filter on what they can see', async () => {
+    const r = await runQuery(m().store, sale('me'), { path: 'users', constraints: [{ type: 'where', field: 'teamId', op: '==', value: 't1' }] })
+    expect(r.ok && r.value.docs).toHaveLength(2)
+  })
+
+  it('does not restrict a team lead filtering by email', async () => {
+    const r = await runQuery(m().store, lead, { path: 'users', constraints: [{ type: 'where', field: 'email', op: '==', value: 'colleague@freshket.co' }] })
+    expect(r.ok && r.value.docs).toHaveLength(1)
+  })
+
+  it('leaves the other collections alone for a learner', async () => {
+    const mm = memStore({ teams: [doc('t1', { name: 'Team One', leadUid: 'lead' })] })
+    const r = await runQuery(mm.store, sale('me'), { path: 'teams' })
+    expect(r.ok && r.value.docs[0]).toMatchObject({ name: 'Team One', leadUid: 'lead' })
+  })
+})
+
+describe('imported scores: a learner sees only their own', () => {
+  const scores = () => memStore({ assessmentScores: [
+    doc('s1', { uid: 'me', subject: 'A', pct: 80 }),
+    doc('s2', { uid: 'someone-else', subject: 'A', pct: 95 }),
+  ] })
+
+  it('returns the learner their own and no one else’s', async () => {
+    const r = await runQuery(scores().store, sale('me'), { path: 'assessmentScores' })
+    expect(r.ok && r.value.docs.map((d) => d.id)).toEqual(['s1'])
+  })
+
+  it('refuses a single read of someone else’s score by returning nothing', async () => {
+    const r = await runGet(scores().store, sale('me'), { path: 'assessmentScores', id: 's2' })
+    expect(r.ok && r.value.doc).toBeNull()
+  })
+
+  it('shows a team lead and above everyone’s', async () => {
+    const r = await runQuery(scores().store, lead, { path: 'assessmentScores' })
+    expect(r.ok && r.value.docs).toHaveLength(2)
+  })
+})
+
 describe('newId', () => {
   it('makes twenty letters and digits, and not the same one twice', () => {
     const ids = new Set(Array.from({ length: 200 }, newId))

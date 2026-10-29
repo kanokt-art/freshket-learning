@@ -27,10 +27,11 @@ import {
   resolveCollection, dateFieldsOf, type Doc,
 } from './docMap'
 import {
-  canRead, canWrite, classify, changedKeys, resultingDoc, validId,
+  canRead, canWrite, classify, changedKeys, resultingDoc, validId, viewOf, queryFieldsAllowed,
   type Actor, type WriteOp,
 } from './policies'
 import { StoreError, type Store, type Query } from './store'
+import { refusesClientStatus } from '@/lib/courses/completion'
 
 // ── Results ─────────────────────────────────────────────────────────────────
 
@@ -102,9 +103,12 @@ export async function runQuery(store: Store, actor: Actor, body: unknown): Promi
 
   const query = toQuery(b.constraints)
   if (!query) return fail(400, 'Bad request')
+  const fieldsUsed = [...(query.where ?? []).map((w) => w.field), ...(query.orderBy ?? []).map((o) => o.field)]
+  if (!queryFieldsAllowed(actor, target.spec.source, fieldsUsed)) return fail(403, 'Forbidden')
 
   try {
-    const docs = await store.query(b.path, query)
+    const found = await store.query(b.path, query)
+    const docs = found.map((d) => viewOf(actor, target.spec.source, d)).filter((d): d is Doc => d !== null)
     return { ok: true, value: { docs, dateFields: dateFieldsOf(target.spec) } }
   } catch (e) {
     return fromStoreError(e)
@@ -122,7 +126,9 @@ export async function runGet(
   if (!canRead({ actor, collection: target.spec.source, parentUid: target.parentUid })) return fail(403, 'Forbidden')
 
   try {
-    return { ok: true, value: { doc: await store.get(b.path, b.id), dateFields: dateFieldsOf(target.spec) } }
+    const found = await store.get(b.path, b.id)
+    const doc = found ? viewOf(actor, target.spec.source, found) : null
+    return { ok: true, value: { doc, dateFields: dateFieldsOf(target.spec) } }
   } catch (e) {
     return fromStoreError(e)
   }
@@ -277,6 +283,23 @@ export async function runWrite(store: Store, actor: Actor, body: unknown): Promi
     // Not saying which rule, or even which document: that would be a map for
     // someone probing what they can get away with.
     if (!allowed) return fail(403, 'Forbidden')
+
+    // A course with a graded post-test is finished by the server grading it, not by
+    // the browser saying so (lib/courses/completion.ts). This needs the course, which
+    // the per-document rules above cannot see.
+    if (p.collection === 'trainingRecords' && p.kind !== 'delete' && incoming) {
+      const before = existing?.status
+      const after = incoming.status
+      if (after !== before && (after === 'completed' || after === 'failed')) {
+        const courseId = String(incoming.courseId ?? existing?.courseId ?? '')
+        try {
+          const course = courseId ? await store.get('courses', courseId) : null
+          if (refusesClientStatus(course as Parameters<typeof refusesClientStatus>[0], before, after)) return fail(403, 'Forbidden')
+        } catch (e) {
+          return fromStoreError(e)
+        }
+      }
+    }
 
     state.set(keyOf(p.path, p.id), incoming)
   }

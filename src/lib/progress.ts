@@ -16,6 +16,7 @@ import type { TrainingStatus } from '@/types/tracking'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { recomputeMyStats } from '@/lib/stats'
 import { get, save } from '@/lib/data/collection'
+import { statusTheBrowserMayWrite } from '@/lib/courses/completion'
 
 const DEMO_MODE = getDemoMode()
 
@@ -52,7 +53,6 @@ export async function syncTrainingRecord(
       memberName: displayName ?? '',
       courseId: course.id,
       courseTitle: course.title,
-      status: snap.status,
       completedLessonIds: snap.completedLessonIds,
       totalLessons: snap.totalLessons,
       source: 'manual',
@@ -69,10 +69,17 @@ export async function syncTrainingRecord(
     // already stored.
     const prev = await get<Record<string, unknown>>('trainingRecords', recordId)
     const now = new Date()
+
+    // On a course with a graded post-test the browser cannot declare "completed":
+    // the server sets that when the test is graded and passed. So it reports
+    // progress only, and leaves a recorded result as it is.
+    const status = statusTheBrowserMayWrite(course, prev?.status as string | undefined, snap.status)
+    if (status !== undefined) payload.status = status
+
     if (snap.status !== 'not_started' && !prev?.startedAt) {
       payload.startedAt = now
     }
-    if (snap.status === 'completed' && !prev?.completedAt) {
+    if (status === 'completed' && !prev?.completedAt) {
       payload.completedAt = now
     }
 
@@ -91,7 +98,7 @@ export async function syncTrainingRecord(
     // rollup itself after grading), so only a new record or a status change can
     // invalidate the summary from this path.
     const isNewRecord = prev === null
-    const statusChanged = prev?.status !== snap.status
+    const statusChanged = status !== undefined && prev?.status !== status
     if (isNewRecord || statusChanged) {
       await recomputeMyStats(uid)
     }
