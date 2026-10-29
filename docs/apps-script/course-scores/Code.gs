@@ -15,10 +15,33 @@
  * 4. รัน setupTriggers() — sync ทุกเที่ยงคืน + ทุกครั้งที่มีคนส่งฟอร์ม
  *
  * แท็บที่ยังไม่อยู่ใน COURSE_BY_TAB จะถูกข้ามและรายงานให้เห็น ไม่เดา
+ *
+ * แท็บ "Shadow" (บันทึก visit ของ sale จาก Google Form) ส่งไป /api/sheets/shadow-sync เป็นบันทึก Shadow Visit
+ * โดยไม่ผ่านคอร์ส: ส่งซ้ำได้ ไม่เกิดบันทึกซ้ำ ยึดค่าจากชีต และไม่แจ้งเตือนใคร
  */
 
 var SPREADSHEET_ID = '1n0cn6ig1STi04nA4zX4doeF1Ro7P2qQu2aRKptQEcbo' // ชีต HR ที่มีแท็บ assessment_*
 var SYNC_URL = 'https://freshket-learning.vercel.app/api/sheets/course-scores-sync'
+var SHADOW_URL = 'https://freshket-learning.vercel.app/api/sheets/shadow-sync'
+var SHADOW_TAB = 'shadow'   // ชื่อแท็บ ไม่สนตัวพิมพ์
+
+// หัวคอลัมน์ของฟอร์ม Shadow (ไม่สนตัวพิมพ์) → ฟิลด์ที่ส่งไประบบ  (Slack Status ไม่ส่ง)
+var SHADOW_COLUMNS = {
+  'timestamp': 'timestamp',
+  'observer email': 'observerEmail',
+  'mentor fullname': 'mentorFullname',
+  'mentor name': 'mentorName',
+  'mentor position': 'mentorPosition',
+  'mentor email': 'mentorEmail',
+  'store name': 'storeName',
+  'segment': 'segment',
+  'persona': 'persona',
+  'opening/hook': 'opening',
+  'interest point': 'interestPoint',
+  'customer pain': 'customerPain',
+  'diagnostic approach': 'diagnosticApproach',
+  'closing/next step': 'closingNextStep',
+}
 
 // ชื่อแท็บ (ตัดคำว่า assessment_ ออก, ไม่สนตัวพิมพ์) → รหัสหลักสูตรในระบบ
 // ใส่เฉพาะที่แน่ใจ แท็บที่ไม่อยู่ในนี้จะไม่ถูกส่ง
@@ -146,9 +169,76 @@ function runSync_(onlyTab) {
       lines.push('ผิดพลาด "' + name + '" — ' + e.message)
     }
   })
+  if (!onlyTab) {
+    var sh = syncShadow_()
+    lines.push(sh.line)
+    failed += sh.failed
+  }
   PropertiesService.getScriptProperties().setProperty('LAST_SYNC', JSON.stringify({ at: new Date().toISOString(), ok: failed === 0, lines: lines }))
   Logger.log(lines.join('\n'))
   return { lines: lines, failed: failed }
+}
+
+function isShadowTab_(name) {
+  return String(name).trim().toLowerCase() === SHADOW_TAB
+}
+
+/** อ่านแท็บ Shadow → { rows, problem } โดยจับคู่จากหัวคอลัมน์ ไม่ใช่ตำแหน่ง */
+function readShadow_(sheet) {
+  var lastRow = sheet.getLastRow()
+  var lastCol = sheet.getLastColumn()
+  if (lastRow < 2 || lastCol < 1) return { rows: [], problem: null }
+
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim().toLowerCase() })
+  var field = {}
+  headers.forEach(function (h, i) { if (SHADOW_COLUMNS[h] && field[SHADOW_COLUMNS[h]] === undefined) field[SHADOW_COLUMNS[h]] = i })
+  var need = ['timestamp', 'observerEmail']
+  var missing = need.filter(function (f) { return field[f] === undefined })
+  if (missing.length) return { rows: [], problem: 'ไม่พบคอลัมน์ ' + missing.join(', ') }
+
+  var n = lastRow - 1
+  var shown = sheet.getRange(2, 1, n, lastCol).getDisplayValues()
+  var values = sheet.getRange(2, 1, n, lastCol).getValues()
+  var rows = []
+  for (var r = 0; r < n; r++) {
+    var email = String(shown[r][field.observerEmail]).trim()
+    if (!email || email.indexOf('#ref!') !== -1) continue
+    var row = {}
+    Object.keys(field).forEach(function (f) { row[f] = String(shown[r][field[f]]).trim() })
+    var ts = values[r][field.timestamp]
+    row.timestamp = ts instanceof Date ? ts.toISOString() : ''
+    rows.push(row)
+  }
+  return { rows: rows, problem: null }
+}
+
+function syncShadow_() {
+  var sheet = null
+  spreadsheet_().getSheets().forEach(function (s) { if (isShadowTab_(s.getName())) sheet = s })
+  if (!sheet) return { line: 'ไม่พบแท็บ "Shadow"', failed: 0 }
+
+  var read = readShadow_(sheet)
+  if (read.problem) return { line: 'ผิดพลาด "Shadow" — ' + read.problem, failed: 1 }
+  if (!read.rows.length) return { line: '"Shadow" — ยังไม่มีข้อมูล', failed: 0 }
+
+  try {
+    var res = UrlFetchApp.fetch(SHADOW_URL, {
+      method: 'post', contentType: 'application/json', headers: { 'x-sync-secret': secret_() },
+      payload: JSON.stringify({ rows: read.rows }), muteHttpExceptions: true,
+    })
+    var code = res.getResponseCode()
+    var json = null
+    try { json = JSON.parse(res.getContentText()) } catch (e) { /* ไม่ใช่ JSON */ }
+    if (code < 200 || code >= 300) return { line: 'ผิดพลาด "Shadow" — HTTP ' + code + ': ' + ((json && json.error) || res.getContentText().slice(0, 120)), failed: 1 }
+    var line = '"Shadow" → ' + json.written + ' visit (ใหม่ ' + json.created + ')'
+    var failed = 0
+    if (json.unmatched && json.unmatched.length) line += ', ไม่พบอีเมลผู้สังเกต ' + json.unmatched.length + ' (' + json.unmatched.slice(0, 5).join(', ') + ')'
+    if (json.unknownChoices && json.unknownChoices.length) line += ', ค่า Segment/Persona ที่ระบบไม่มีในรายการ: ' + json.unknownChoices.slice(0, 5).join(', ')
+    if (json.errorCount) { line += ', แถวที่ใช้ไม่ได้ ' + json.errorCount; failed = 1 }
+    return { line: line, failed: failed }
+  } catch (e) {
+    return { line: 'ผิดพลาด "Shadow" — ' + e.message, failed: 1 }
+  }
 }
 
 function syncNow() {
@@ -160,7 +250,14 @@ function syncNow() {
 /** ทำงานเมื่อมีคนส่งฟอร์ม: ส่งเฉพาะแท็บที่เพิ่งมีแถวใหม่ (ทั้งแท็บ — ส่งซ้ำได้ ผลไม่เปลี่ยน) */
 function onFormSubmit(e) {
   var name = e && e.range ? e.range.getSheet().getName() : null
-  if (!name || !isAssessmentTab_(name)) return
+  if (!name) return
+  if (isShadowTab_(name)) {
+    var sh = syncShadow_()
+    Logger.log(sh.line)
+    if (sh.failed) throw new Error(sh.line)
+    return
+  }
+  if (!isAssessmentTab_(name)) return
   var out = runSync_(tabKey_(name))
   if (out.failed) throw new Error(out.lines.join(' | '))
 }
@@ -176,6 +273,11 @@ function checkSetup() {
     var course = COURSE_BY_TAB[tabKey_(name)]
     lines.push('"' + name + '": ' + (course ? 'map → ' + course : 'ยังไม่ map (จะถูกข้าม)') +
       (read.problem ? ' · ' + read.problem : ' · ' + read.rows.length + ' แถว'))
+  })
+  spreadsheet_().getSheets().forEach(function (sheet) {
+    if (!isShadowTab_(sheet.getName())) return
+    var read = readShadow_(sheet)
+    lines.push('"' + sheet.getName() + '": ส่งเป็น Shadow Visit' + (read.problem ? ' · ' + read.problem : ' · ' + read.rows.length + ' แถว'))
   })
   var t = ScriptApp.getProjectTriggers().map(function (x) { return x.getHandlerFunction() })
   lines.push('trigger: ' + (t.length ? t.join(', ') : 'ยังไม่ได้ตั้ง'))
