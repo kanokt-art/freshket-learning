@@ -502,6 +502,100 @@ describe('runWrite: finishing a course', () => {
   })
 })
 
+// A learner may read the employee list but not everything HR holds about a
+// colleague. The cut is made here, on the server: hiding a field on the page would
+// leave it in the response.
+describe('what a learner gets of the employee list', () => {
+  const person = (id: string) => doc(id, {
+    displayName: `Name ${id}`, displayNameEN: `En ${id}`, nickname: `Nick ${id}`, photoURL: 'p.png',
+    department: 'Sales Management', position: 'Sale', teamId: 't1', role: 'sale', employmentStatus: 'Active',
+    email: `${id}@freshket.co`, employeeId: `E-${id}`, managerId: 'boss', lineManager: 'Some Boss',
+    rank: 'JG5', startDate: '2020-01-01T00:00:00.000Z', visibleTeamIds: ['t1'], mandatoryLastDepartments: ['x'],
+  })
+  const HIDDEN = ['email', 'employeeId', 'managerId', 'lineManager', 'rank', 'startDate', 'visibleTeamIds', 'mandatoryLastDepartments']
+  const m = () => memStore({ users: [person('me'), person('colleague')] })
+  const find = (docs: Array<{ id: string }>, id: string) => docs.find((d) => d.id === id) as Record<string, unknown>
+
+  it('shows a colleague without the withheld fields', async () => {
+    const r = await runQuery(m().store, sale('me'), { path: 'users' })
+    const colleague = find(r.ok ? r.value.docs : [], 'colleague')
+    for (const f of HIDDEN) expect(colleague).not.toHaveProperty(f)
+  })
+
+  it('still shows a colleague what the screens need', async () => {
+    const r = await runQuery(m().store, sale('me'), { path: 'users' })
+    expect(find(r.ok ? r.value.docs : [], 'colleague')).toMatchObject({
+      displayName: 'Name colleague', nickname: 'Nick colleague', department: 'Sales Management',
+      teamId: 't1', role: 'sale', employmentStatus: 'Active', photoURL: 'p.png',
+    })
+  })
+
+  it('shows a learner their OWN profile in full', async () => {
+    const r = await runQuery(m().store, sale('me'), { path: 'users' })
+    expect(find(r.ok ? r.value.docs : [], 'me')).toMatchObject({ email: 'me@freshket.co', employeeId: 'E-me', rank: 'JG5' })
+  })
+
+  it('applies the same cut to a single read', async () => {
+    const other = await runGet(m().store, sale('me'), { path: 'users', id: 'colleague' })
+    expect(other.ok && other.value.doc).not.toHaveProperty('email')
+    const own = await runGet(m().store, sale('me'), { path: 'users', id: 'me' })
+    expect(own.ok && own.value.doc).toHaveProperty('email', 'me@freshket.co')
+  })
+
+  it.each([['team_lead', lead], ['manager', mgr], ['super_admin', admin]])('shows a %s everything', async (_n, actor) => {
+    const r = await runQuery(m().store, actor, { path: 'users' })
+    expect(find(r.ok ? r.value.docs : [], 'colleague')).toMatchObject({ email: 'colleague@freshket.co', employeeId: 'E-colleague' })
+  })
+
+  it('does not let a learner filter on a field they cannot see — that would confirm who has it', async () => {
+    const byEmail = await runQuery(m().store, sale('me'), { path: 'users', constraints: [{ type: 'where', field: 'email', op: '==', value: 'colleague@freshket.co' }] })
+    expect(byEmail.ok).toBe(false)
+    expect(byEmail.ok === false && byEmail.status).toBe(403)
+    const byEmpId = await runQuery(m().store, sale('me'), { path: 'users', constraints: [{ type: 'where', field: 'employeeId', op: '==', value: 'E-colleague' }] })
+    expect(byEmpId.ok).toBe(false)
+    const sorted = await runQuery(m().store, sale('me'), { path: 'users', constraints: [{ type: 'orderBy', field: 'startDate' }] })
+    expect(sorted.ok).toBe(false)
+  })
+
+  it('does let a learner filter on what they can see', async () => {
+    const r = await runQuery(m().store, sale('me'), { path: 'users', constraints: [{ type: 'where', field: 'teamId', op: '==', value: 't1' }] })
+    expect(r.ok && r.value.docs).toHaveLength(2)
+  })
+
+  it('does not restrict a team lead filtering by email', async () => {
+    const r = await runQuery(m().store, lead, { path: 'users', constraints: [{ type: 'where', field: 'email', op: '==', value: 'colleague@freshket.co' }] })
+    expect(r.ok && r.value.docs).toHaveLength(1)
+  })
+
+  it('leaves the other collections alone for a learner', async () => {
+    const mm = memStore({ teams: [doc('t1', { name: 'Team One', leadUid: 'lead' })] })
+    const r = await runQuery(mm.store, sale('me'), { path: 'teams' })
+    expect(r.ok && r.value.docs[0]).toMatchObject({ name: 'Team One', leadUid: 'lead' })
+  })
+})
+
+describe('imported scores: a learner sees only their own', () => {
+  const scores = () => memStore({ assessmentScores: [
+    doc('s1', { uid: 'me', subject: 'A', pct: 80 }),
+    doc('s2', { uid: 'someone-else', subject: 'A', pct: 95 }),
+  ] })
+
+  it('returns the learner their own and no one else’s', async () => {
+    const r = await runQuery(scores().store, sale('me'), { path: 'assessmentScores' })
+    expect(r.ok && r.value.docs.map((d) => d.id)).toEqual(['s1'])
+  })
+
+  it('refuses a single read of someone else’s score by returning nothing', async () => {
+    const r = await runGet(scores().store, sale('me'), { path: 'assessmentScores', id: 's2' })
+    expect(r.ok && r.value.doc).toBeNull()
+  })
+
+  it('shows a team lead and above everyone’s', async () => {
+    const r = await runQuery(scores().store, lead, { path: 'assessmentScores' })
+    expect(r.ok && r.value.docs).toHaveLength(2)
+  })
+})
+
 describe('newId', () => {
   it('makes twenty letters and digits, and not the same one twice', () => {
     const ids = new Set(Array.from({ length: 200 }, newId))

@@ -304,6 +304,51 @@ export function canWrite(w: WriteRequest): boolean {
   return rule ? rule(w) : false
 }
 
+// ── What a reader gets to see of a document they may read ───────────────────
+//
+// canRead says whether a collection can be read at all. A learner (role `sale`) may
+// read the employee list — leaderboards, picking a mentor — but not everything HR
+// holds about their colleagues, so what comes back is cut down on the server. Hiding
+// a field in the page would leave it in the response.
+
+/** What a learner sees of someone else. Everything else on the profile is withheld. */
+export const COLLEAGUE_PROFILE_FIELDS = [
+  'id', 'uid', 'displayName', 'displayNameEN', 'nickname', 'photoURL',
+  'department', 'position', 'teamId', 'role', 'employmentStatus',
+] as const
+
+const isLearner = (a: Actor) => a.role === 'sale'
+
+/**
+ * The view of one document this actor may have, or null when they may not have it.
+ * Teams, courses and the rest pass through untouched.
+ */
+export function viewOf(actor: Actor, collection: string, doc: Record<string, unknown> & { id: string }): (Record<string, unknown> & { id: string }) | null {
+  if (!isLearner(actor)) return doc
+
+  if (collection === 'users' && doc.id !== actor.uid) {
+    const slim: Record<string, unknown> = {}
+    for (const f of COLLEAGUE_PROFILE_FIELDS) if (doc[f] !== undefined) slim[f] = doc[f]
+    return slim as Record<string, unknown> & { id: string }
+  }
+
+  // Imported scores: a learner sees only their own.
+  if (collection === 'assessmentScores') return doc.uid === actor.uid ? doc : null
+
+  return doc
+}
+
+/**
+ * Can this actor filter or sort a query on these fields? For a learner reading the
+ * employee list, only on what they can see: otherwise `email == x` would confirm
+ * who has an address they are not allowed to read.
+ */
+export function queryFieldsAllowed(actor: Actor, collection: string, fields: string[]): boolean {
+  if (!isLearner(actor) || collection !== 'users') return true
+  const visible = new Set<string>(COLLEAGUE_PROFILE_FIELDS)
+  return fields.every((f) => visible.has(f))
+}
+
 /** A document id is a path segment and a key: refuse anything that could be neither. */
 export function validId(id: unknown): id is string {
   return typeof id === 'string' && id.length > 0 && id.length <= 300 &&

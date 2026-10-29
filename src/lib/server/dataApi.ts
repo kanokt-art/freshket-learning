@@ -27,7 +27,7 @@ import {
   resolveCollection, dateFieldsOf, type Doc,
 } from './docMap'
 import {
-  canRead, canWrite, classify, changedKeys, resultingDoc, validId,
+  canRead, canWrite, classify, changedKeys, resultingDoc, validId, viewOf, queryFieldsAllowed,
   type Actor, type WriteOp,
 } from './policies'
 import { StoreError, type Store, type Query } from './store'
@@ -103,9 +103,12 @@ export async function runQuery(store: Store, actor: Actor, body: unknown): Promi
 
   const query = toQuery(b.constraints)
   if (!query) return fail(400, 'Bad request')
+  const fieldsUsed = [...(query.where ?? []).map((w) => w.field), ...(query.orderBy ?? []).map((o) => o.field)]
+  if (!queryFieldsAllowed(actor, target.spec.source, fieldsUsed)) return fail(403, 'Forbidden')
 
   try {
-    const docs = await store.query(b.path, query)
+    const found = await store.query(b.path, query)
+    const docs = found.map((d) => viewOf(actor, target.spec.source, d)).filter((d): d is Doc => d !== null)
     return { ok: true, value: { docs, dateFields: dateFieldsOf(target.spec) } }
   } catch (e) {
     return fromStoreError(e)
@@ -123,7 +126,9 @@ export async function runGet(
   if (!canRead({ actor, collection: target.spec.source, parentUid: target.parentUid })) return fail(403, 'Forbidden')
 
   try {
-    return { ok: true, value: { doc: await store.get(b.path, b.id), dateFields: dateFieldsOf(target.spec) } }
+    const found = await store.get(b.path, b.id)
+    const doc = found ? viewOf(actor, target.spec.source, found) : null
+    return { ok: true, value: { doc, dateFields: dateFieldsOf(target.spec) } }
   } catch (e) {
     return fromStoreError(e)
   }
