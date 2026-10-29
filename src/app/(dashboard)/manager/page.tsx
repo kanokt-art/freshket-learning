@@ -1,5 +1,6 @@
 'use client'
 
+import { answeredQuestions } from '@/lib/shadow/fields'
 import { useState, useMemo, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
@@ -461,6 +462,8 @@ function EmployeeSidebar({
   onClose: () => void
 }) {
   const [tab, setTab] = useState<'info' | 'history' | 'assess' | 'shadow' | 'radar'>('info')
+  // Which Shadow visit is open to read in full (one at a time).
+  const [openVisitId, setOpenVisitId] = useState<string | null>(null)
 
   // Opening the ประวัติการเรียน tab is the "read" that clears both the tab dot
   // and the member's row dot. The isUnread guard in onReadTraining makes the
@@ -815,30 +818,69 @@ function EmployeeSidebar({
               <p className="text-xs text-gray-400 text-center py-12">ยังไม่มีประวัติ Shadow Visit</p>
             ) : shadowRecords.map(rec => {
               const rating = rec.ratingScore ?? null
+              const isOpen = openVisitId === rec.id
+              const answers = isOpen ? answeredQuestions(rec) : []
               return (
-                <div key={rec.id} className="border border-gray-100 rounded-xl p-4">
-                  <div className="flex items-start justify-between gap-2 mb-1.5">
-                    <div className="min-w-0">
-                      <p className="font-bold text-sm text-gray-800 leading-snug truncate">{rec.storeName}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {rec.mentorName ? `พี่เลี้ยง ${rec.mentorName}` : '—'}{rec.mentorPosition ? ` · ${rec.mentorPosition}` : ''}
-                      </p>
+                <div key={rec.id} className={`border rounded-xl transition-colors ${isOpen ? 'border-freshket-200 bg-freshket-50/30' : 'border-gray-100 hover:border-gray-200'}`}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenVisitId(isOpen ? null : rec.id)}
+                    aria-expanded={isOpen}
+                    className="w-full text-left p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-freshket-300 rounded-xl"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm text-gray-800 leading-snug truncate">{rec.storeName}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {rec.mentorName ? (
+                            <>
+                              Shadow with:{' '}
+                              <span className="font-bold text-freshket-700 bg-freshket-100 px-1.5 py-0.5 rounded-md">{rec.mentorName}</span>
+                            </>
+                          ) : '—'}
+                          {rec.mentorName && rec.mentorPosition ? ` · ${rec.mentorPosition}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {rating != null && (
+                          <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${scorePastel(rating * 20)}`}>
+                            {rating}/5
+                          </span>
+                        )}
+                        <svg className={`size-4 text-gray-300 transition-transform duration-150 ${isOpen ? 'rotate-90 text-freshket-500' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                        </svg>
+                      </div>
                     </div>
-                    {rating != null && (
-                      <span className={`shrink-0 text-xs font-bold px-2.5 py-0.5 rounded-full ${scorePastel(rating * 20)}`}>
-                        {rating}/5
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">{rec.segment}</span>
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{rec.persona}</span>
-                    <span className="text-xs text-gray-400 ml-auto">{ddmmyyyy(rec.createdAt)}</span>
-                  </div>
-                  {rec.evaluationFeedback && (
-                    <p className="text-xs text-gray-500 leading-relaxed border-t border-gray-50 pt-2 mt-1 whitespace-pre-wrap">
-                      {rec.evaluationFeedback}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">{rec.segment}</span>
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{rec.persona}</span>
+                      <span className="text-xs text-gray-400 ml-auto">{ddmmyyyy(rec.createdAt)}</span>
+                    </div>
+                  </button>
+
+                  {isOpen && (
+                    <div className="px-4 pb-4 space-y-3 border-t border-gray-100 pt-3">
+                      {answers.length === 0 && !rec.evaluationFeedback && (
+                        <p className="text-xs text-gray-400">ไม่มีรายละเอียดที่บันทึกไว้</p>
+                      )}
+                      {answers.map(a => (
+                        <div key={a.label}>
+                          <p className="text-xs font-bold text-gray-400 mb-1.5">{a.label}</p>
+                          <div className="bg-white border border-gray-100 rounded-xl p-3">
+                            {a.value.split('\n').map((line, i) => (
+                              <p key={i} className="text-sm text-gray-700 leading-relaxed">{line || ' '}</p>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                      {rec.evaluationFeedback && (
+                        <div>
+                          <p className="text-xs font-bold text-gray-400 mb-1.5">ความเห็นจากผู้ประเมิน</p>
+                          <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{rec.evaluationFeedback}</p>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               )
