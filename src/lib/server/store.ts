@@ -243,6 +243,27 @@ export function createStore(config: StoreConfig) {
     return transformDoc(spec, id, input, identityRemap).row
   }
 
+  /**
+   * Like toRow, for a write that CHANGES a document rather than replacing it: a field
+   * set to null becomes NULL in its column.
+   *
+   * transformDoc leaves a null out of the row, which is right for a full write (the
+   * column falls back to its default). In a partial write it made null a no-op, so
+   * "clear this field" — take someone out of a team, remove a mistaken score, clear a
+   * completion date — silently did nothing and the old value stayed. A column that
+   * cannot be NULL refuses it (HTTP 400) instead of ignoring it.
+   */
+  function toPartialRow(spec: TableSpec, parentUid: string | undefined, id: string, data: Record<string, unknown>): Row {
+    const row = toRow(spec, parentUid, id, data)
+    for (const [field, value] of Object.entries(data)) {
+      if (value !== null) continue
+      const f = spec.fields[field]
+      if (!f || spec.selfIdFields?.includes(field) || spec.keyColumns.includes(f.column)) continue
+      row[f.column] = null
+    }
+    return row
+  }
+
   const keyFilter = (spec: TableSpec, parentUid: string | undefined, id: string): Params => [
     ...(parentUid !== undefined ? ([['uid', `eq.${parentUid}`]] as Params) : []),
     [spec.keyColumns[spec.keyColumns.length - 1], `eq.${id}`],
@@ -275,7 +296,7 @@ export function createStore(config: StoreConfig) {
   async function set(path: string, id: string, data: Record<string, unknown>, opts: WriteOptions = {}): Promise<void> {
     const { spec, parentUid } = resolve(path)
     const merge = opts.merge ?? true
-    let row = toRow(spec, parentUid, id, data)
+    let row = merge ? toPartialRow(spec, parentUid, id, data) : toRow(spec, parentUid, id, data)
 
     if (merge && spec.asJson) {
       // A config document merges deeply, like Firestore's setDoc(..., {merge:true}).
@@ -323,7 +344,7 @@ export function createStore(config: StoreConfig) {
       return set(path, id, data, { merge: true })
     }
 
-    let row = toRow(spec, parentUid, id, data)
+    let row = toPartialRow(spec, parentUid, id, data)
     row = await foldIntoExtra(path, spec, id, row)
     if (!(await patchExisting(path, spec, parentUid, id, row))) {
       throw new StoreError('not-found', `${path}/${id} does not exist`)
@@ -373,7 +394,7 @@ export function createStore(config: StoreConfig) {
   ): Promise<void> {
     const { spec, parentUid } = resolve(path)
     const merge = opts.merge ?? false
-    const rows = docs.map((d) => toRow(spec, parentUid, d.id, d.data))
+    const rows = docs.map((d) => (merge ? toPartialRow(spec, parentUid, d.id, d.data) : toRow(spec, parentUid, d.id, d.data)))
 
     if (!merge) {
       const columns = allColumns(spec)

@@ -703,6 +703,72 @@ describe('merging part of a document into one that exists', () => {
   })
 })
 
+// "Clear this field" must clear it. A null in a partial write used to be dropped on
+// the way to the database, so taking someone out of a team (teamId: null), removing a
+// mistaken score, or clearing a completion date silently did nothing.
+describe('clearing a field with null', () => {
+  const person = () => ({ uid: 'u1', email: 'a@x', display_name: 'A', team_id: 't1', nickname: 'Nick', visible_team_ids: ['t1'] })
+
+  it('merge: sets the column to NULL and leaves the others', async () => {
+    const { tables, store } = make()
+    tables.users = [person()]
+    await store.set('users', 'u1', { teamId: null }, { merge: true })
+    expect(tables.users[0].team_id).toBeNull()
+    expect(tables.users[0]).toMatchObject({ display_name: 'A', nickname: 'Nick' })
+  })
+
+  it('update: sets the column to NULL', async () => {
+    const { tables, store } = make()
+    tables.users = [person()]
+    await store.update('users', 'u1', { teamId: null, visibleTeamIds: null })
+    expect(tables.users[0].team_id).toBeNull()
+    expect(tables.users[0].visible_team_ids).toBeNull()   // null = "sees every team", not "sees none"
+    expect(tables.users[0].nickname).toBe('Nick')
+  })
+
+  it('setMany with merge: clears per document', async () => {
+    const { tables, store } = make()
+    tables.users = [person(), { ...person(), uid: 'u2' }]
+    await store.setMany('users', [
+      { id: 'u1', data: { email: 'a@x', teamId: null } },
+      { id: 'u2', data: { email: 'a@x', nickname: 'Changed' } },
+    ], { merge: true })
+    const byId = Object.fromEntries(tables.users.map((u) => [u.uid, u]))
+    expect(byId.u1.team_id).toBeNull()
+    expect(byId.u2.team_id).toBe('t1')          // not mentioned, so untouched
+    expect(byId.u2.nickname).toBe('Changed')
+  })
+
+  it('clears a date and a score on a training record', async () => {
+    const { tables, store } = make()
+    tables.training_records = [{ id: 'u_c', user_id: 'u', course_id: 'c', status: 'completed', score: 90, completed_at: '2026-01-01T00:00:00Z', extra: {} }]
+    await store.set('trainingRecords', 'u_c', { userId: 'u', courseId: 'c', status: 'failed', completedAt: null, score: null }, { merge: true })
+    expect(tables.training_records[0]).toMatchObject({ status: 'failed', completed_at: null, score: null })
+  })
+
+  it('a value that is not null still replaces as before', async () => {
+    const { tables, store } = make()
+    tables.users = [person()]
+    await store.set('users', 'u1', { teamId: 't2' }, { merge: true })
+    expect(tables.users[0].team_id).toBe('t2')
+  })
+
+  it('a full replace is unchanged: a null falls back to the default, it is not sent', async () => {
+    const { requests, store } = make()
+    await store.set('users', 'u1', { email: 'a@x', teamId: null }, { merge: false })
+    const post = requests.find((r) => r.method === 'POST')!
+    expect(JSON.stringify(post.body)).not.toContain('"team_id":null')
+  })
+
+  it('does not null a key column, whatever the document says', async () => {
+    const { tables, store } = make()
+    tables.users = [person()]
+    await store.update('users', 'u1', { uid: null, teamId: 't3' } as Record<string, unknown>)
+    expect(tables.users[0].uid).toBe('u1')
+    expect(tables.users[0].team_id).toBe('t3')
+  })
+})
+
 describe('claim', () => {
   it('creates the document and says it was the one that did', async () => {
     const { tables, store } = make()

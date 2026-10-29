@@ -106,18 +106,23 @@ export const ASSESSMENT_SCORE_TEMPLATE: CsvTemplate = {
  * Per-course results — CourseResultsImport (the admin picks the course in the
  * UI, so the file carries no course id).
  *
- * NAMED columns, parsed by parseCourseScoreText. Email is the only required
- * one; score, status and completedAt may be blank or absent entirely. Score
+ * NAMED columns, parsed by parseCourseScoreText. Email and type are required:
+ * type is `pre` (before the course) or `post` (after), one row per sitting, so a
+ * person normally has two rows. Score, status and completedAt may be blank. Score
  * takes a plain 0–100 or an N/M fraction. Status must be one of the four
- * TrainingStatus values, and blank means completed.
+ * TrainingStatus values, and blank means completed — but only a `post` row sets
+ * the course status; a `pre` row never finishes a course.
+ *
+ * Uploading the file again replaces the stored values with the file's.
  */
 export const COURSE_RESULT_TEMPLATE: CsvTemplate = {
   filename: 'freshket-course-results-template.csv',
   label: 'ดาวน์โหลดเทมเพลต CSV',
-  headers: ['employeeEmail', 'score', 'status', 'completedAt'],
+  headers: ['employeeEmail', 'type', 'score', 'status', 'completedAt'],
   sampleRows: [
-    ['example@freshket.co', '85', 'completed', '01/01/2026'],
-    ['test@freshket.co', '', 'in_progress', ''],
+    ['example@freshket.co', 'pre', '60', '', '01/01/2026'],
+    ['example@freshket.co', 'post', '85', 'completed', '01/20/2026'],
+    ['test@freshket.co', 'post', '', 'in_progress', ''],
   ],
 }
 

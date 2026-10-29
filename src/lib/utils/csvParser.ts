@@ -32,12 +32,27 @@ export interface ParseResult<T> {
 // course in the UI, so the file itself carries no courseId — just who got what.
 export interface ParsedCourseScore {
   email: string
+  type: 'pre' | 'post'   // which sitting this row is: before the course, or after
   score?: number          // 0–100, optional (some courses are pass/fail only)
   status: string          // TrainingStatus; blank defaults to 'completed'
   completedAt?: string    // raw date string, optional
 }
 
 const COURSE_SCORE_STATUSES = new Set(['not_started', 'in_progress', 'completed', 'failed'])
+
+/**
+ * Before or after the course, from how people actually write it: `pre`, `post`,
+ * `pre_test`, `ก่อนเรียน`, `หลังเรียน`, or a Google Forms value such as
+ * `แบบทดสอบหลังเรียน (Post Test)`. Null when it is neither (or blank).
+ */
+export function parseScoreType(raw: string): 'pre' | 'post' | null {
+  const v = raw.trim().toLowerCase()
+  if (!v) return null
+  const pre = v.includes('pre') || v.includes('ก่อน')
+  const post = v.includes('post') || v.includes('หลัง')
+  if (pre === post) return null   // neither, or both: do not guess
+  return pre ? 'pre' : 'post'
+}
 
 // Operates on raw CSV TEXT (not a File) so it runs identically in the browser
 // and inside a Node route handler (Papa's File input needs FileReader, which
@@ -48,7 +63,8 @@ const COURSE_SCORE_STATUSES = new Set(['not_started', 'in_progress', 'completed'
 // template (employeeEmail, score, status, completedAt) AND a raw Google-Forms
 // export (Email Address, Score, ...), which is what admins actually have on
 // hand. The email column is the only hard requirement; score/status/completedAt
-// are optional. Score accepts a plain 0–100 number OR an "N/M" fraction
+// are optional. A `type` column (pre / post) is required, because without it a
+// person's before and after cannot be told apart. Score accepts a plain 0–100 number OR an "N/M" fraction
 // (6/10 → 60) — the latter is how a quiz export writes it, and also the shape a
 // spreadsheet loves to auto-mangle into a date (handled via parseScoreFraction).
 export function parseCourseScoreText(text: string): ParseResult<ParsedCourseScore> {
@@ -68,6 +84,7 @@ export function parseCourseScoreText(text: string): ParseResult<ParsedCourseScor
   const emailCol = resolveColumn(headers, 'email') ?? resolveColumn(headers, 'e-mail')
   const scoreCol = resolveColumn(headers, 'score')
   const statusCol = resolveColumn(headers, 'status')
+  const typeCol = resolveColumn(headers, 'type')
   // Google Forms exports carry a "Timestamp" column — treat it as the completion
   // date when there's no explicit completedAt/date column.
   const dateCol = resolveColumn(headers, 'completed') ?? resolveColumn(headers, 'date') ?? resolveColumn(headers, 'timestamp')
@@ -85,6 +102,18 @@ export function parseCourseScoreText(text: string): ParseResult<ParsedCourseScor
     return { data: [], errors: csvErrors }
   }
 
+  // Same reasoning as the email column: one clear message about the header, not an
+  // identical error on every row.
+  if (!typeCol) {
+    csvErrors.push({
+      row: 0,
+      field: 'header',
+      message: `ไม่พบคอลัมน์ type (pre = ก่อนเรียน, post = หลังเรียน) — ต้องมี เพื่อแยกคะแนนก่อนและหลังเรียนของแต่ละคน · คอลัมน์ที่พบจริง: ${headers.join(', ') || '(ไม่มี)'}`,
+      rawValue: '',
+    })
+    return { data: [], errors: csvErrors }
+  }
+
   const rows: ParsedCourseScore[] = []
   data.forEach((row, idx) => {
     const rowNum = idx + 2 // 1-based + header row
@@ -92,6 +121,12 @@ export function parseCourseScoreText(text: string): ParseResult<ParsedCourseScor
     const email = (row[emailCol] ?? '').trim().toLowerCase()
     if (!email || !email.includes('@')) {
       csvErrors.push({ row: rowNum, field: 'email', message: 'ต้องกรอกอีเมลพนักงาน', rawValue: row[emailCol] ?? '' })
+      return
+    }
+
+    const type = parseScoreType(row[typeCol] ?? '')
+    if (!type) {
+      csvErrors.push({ row: rowNum, field: 'type', message: 'type ต้องเป็น pre (ก่อนเรียน) หรือ post (หลังเรียน)', rawValue: row[typeCol] ?? '' })
       return
     }
 
@@ -137,7 +172,7 @@ export function parseCourseScoreText(text: string): ParseResult<ParsedCourseScor
       return
     }
 
-    rows.push({ email, score, status, completedAt })
+    rows.push({ email, type, score, status, completedAt })
   })
 
   return { data: rows, errors: csvErrors }
