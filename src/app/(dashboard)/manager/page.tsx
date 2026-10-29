@@ -1,5 +1,7 @@
 'use client'
 
+import { StarsDisplay, StarsInput } from '@/components/common/Stars'
+import { toStars } from '@/lib/feedback/stars'
 import { answeredQuestions } from '@/lib/shadow/fields'
 import { NO_TEAM, teamChoices, effectiveTeamChoice, matchesTeam } from '@/lib/users/teamFilter'
 import { useState, useMemo, useEffect } from 'react'
@@ -855,18 +857,12 @@ function EmployeeSidebar({
                     aria-expanded={isOpen}
                     className="w-full text-left p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-freshket-300 rounded-xl"
                   >
-                    <div className="flex items-start justify-between gap-2 mb-1.5">
-                      <div className="min-w-0">
-                        <p className="font-bold text-sm text-gray-800 leading-snug truncate">{rec.storeName}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {rec.mentorName ? (
-                            <>
-                              Shadow with:{' '}
-                              <span className="font-bold text-freshket-700 bg-freshket-100 px-1.5 py-0.5 rounded-md">{rec.mentorName}</span>
-                            </>
-                          ) : '—'}
-                          {rec.mentorName && rec.mentorPosition ? ` · ${rec.mentorPosition}` : ''}
-                        </p>
+                    {/* Line 1: the store, who the sale met there, and the type of restaurant */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <p className="font-bold text-sm text-gray-900 leading-snug">{rec.storeName}</p>
+                        {rec.persona && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{rec.persona}</span>}
+                        {rec.segment && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">{rec.segment}</span>}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         {rating != null && (
@@ -879,10 +875,18 @@ function EmployeeSidebar({
                         </svg>
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">{rec.segment}</span>
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{rec.persona}</span>
-                      <span className="text-xs text-gray-400 ml-auto">{ddmmyyyy(rec.createdAt)}</span>
+                    {/* Line 2: who the sale followed, and when */}
+                    <div className="flex items-center justify-between gap-2 mt-1.5">
+                      <p className="text-xs text-gray-900">
+                        {rec.mentorName ? (
+                          <>
+                            <span className="text-gray-500">Shadow with:</span>{' '}
+                            <span className="font-bold">{rec.mentorName}</span>
+                            {rec.mentorPosition ? <span className="text-gray-500">{` · ${rec.mentorPosition}`}</span> : null}
+                          </>
+                        ) : '—'}
+                      </p>
+                      <span className="text-xs text-gray-400 shrink-0">{ddmmyyyy(rec.createdAt)}</span>
                     </div>
                   </button>
 
@@ -1084,19 +1088,18 @@ function FeedbackBlock({ courseId, existing, canEdit, onSave }: {
 }) {
   const [editing, setEditing] = useState(false)
   const [comment, setComment] = useState(existing?.comment ?? '')
-  const [score, setScore] = useState<string>(existing?.score != null ? String(existing.score) : '')
+  const [stars, setStars] = useState<number | null>(toStars(existing?.score))
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     setComment(existing?.comment ?? '')
-    setScore(existing?.score != null ? String(existing.score) : '')
+    setStars(toStars(existing?.score))
   }, [existing])
 
   async function submit() {
     setSaving(true)
-    const n = score.trim() === '' ? null : Math.max(0, Math.min(100, Number(score) || 0))
     try {
-      await onSave(courseId, comment.trim(), n)
+      await onSave(courseId, comment.trim(), stars)
       setEditing(false)
     } finally {
       setSaving(false)
@@ -1107,13 +1110,11 @@ function FeedbackBlock({ courseId, existing, canEdit, onSave }: {
   if (!editing) {
     return (
       <>
-        {existing && (existing.comment || existing.score != null) ? (
+        {existing && (existing.comment || toStars(existing.score) != null) ? (
           <div className="rounded-xl bg-blue-50 border border-blue-100 p-3">
             <div className="flex items-center justify-between gap-2 mb-1">
               <p className="text-xs font-bold text-blue-700">ความเห็นหัวหน้า{existing.leadName ? ` · ${existing.leadName}` : ''}</p>
-              {existing.score != null && (
-                <span className={`text-xs font-black ${scoreTextColor(existing.score)}`}>{existing.score}/100</span>
-              )}
+              {toStars(existing.score) != null && <StarsDisplay value={toStars(existing.score) as number} />}
             </div>
             {existing.comment && <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{existing.comment}</p>}
             {canEdit && (
@@ -1122,7 +1123,7 @@ function FeedbackBlock({ courseId, existing, canEdit, onSave }: {
           </div>
         ) : canEdit ? (
           <button onClick={() => setEditing(true)} className="text-xs font-bold text-freshket-600 hover:text-freshket-700">
-            + ให้คะแนน / คอมเมนต์
+            + ให้ดาว / คอมเมนต์
           </button>
         ) : (
           <p className="text-xs text-gray-300 italic">ยังไม่มีความเห็นจากหัวหน้า</p>
@@ -1141,17 +1142,8 @@ function FeedbackBlock({ courseId, existing, canEdit, onSave }: {
         placeholder="คอมเมนต์ถึงพนักงาน..."
         className="w-full px-2.5 py-2 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
       />
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5">
-          <input
-            type="number" min={0} max={100}
-            value={score}
-            onChange={(e) => setScore(e.target.value)}
-            placeholder="คะแนน"
-            className="w-20 px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
-          />
-          <span className="text-xs text-gray-400">/ 100</span>
-        </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <StarsInput value={stars} onChange={setStars} disabled={saving} />
         <div className="ml-auto flex gap-2">
           <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">ยกเลิก</button>
           <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs font-bold rounded-lg bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-60">
