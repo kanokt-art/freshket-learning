@@ -284,6 +284,13 @@ export function createStore(config: StoreConfig) {
       row = { id, [spec.asJson]: normalize(merged) ?? {} }
     } else if (merge) {
       row = await foldIntoExtra(path, spec, id, row)
+      // UPDATE when the row exists. The REST layer's upsert is INSERT … ON CONFLICT
+      // DO UPDATE, and Postgres checks NOT NULL on the INSERT half BEFORE it looks
+      // for the conflict — so merging one field into a row that exists (closing a
+      // session, publishing a course) was refused for want of a column the row
+      // already had. Only when there is nothing to update does it INSERT, and then
+      // the document must be complete on its own, as a create has to be.
+      if (await patchExisting(path, spec, parentUid, id, row)) return
     }
 
     await post(spec, [row], merge ? Object.keys(row) : allColumns(spec))
@@ -318,22 +325,28 @@ export function createStore(config: StoreConfig) {
 
     let row = toRow(spec, parentUid, id, data)
     row = await foldIntoExtra(path, spec, id, row)
-    // The key itself is what the filter selects on; it is not a column to change.
-    for (const k of spec.keyColumns) delete row[k]
-    if (Object.keys(row).length === 0) {
-      if ((await get(path, id)) === null) throw new StoreError('not-found', `${path}/${id} does not exist`)
-      return
+    if (!(await patchExisting(path, spec, parentUid, id, row))) {
+      throw new StoreError('not-found', `${path}/${id} does not exist`)
     }
+  }
+
+  /**
+   * Apply a partial row to the row with this key. Returns whether there was one.
+   * Never creates a row.
+   */
+  async function patchExisting(path: string, spec: TableSpec, parentUid: string | undefined, id: string, row: Row): Promise<boolean> {
+    // The key itself is what the filter selects on; it is not a column to change.
+    const fields = { ...row }
+    for (const k of spec.keyColumns) delete fields[k]
+    if (Object.keys(fields).length === 0) return (await get(path, id)) !== null
 
     const res = await call(`${spec.table}?${toQueryString(keyFilter(spec, parentUid, id))}`, {
       method: 'PATCH',
       headers: headers({ 'Content-Type': 'application/json', Prefer: 'return=representation' }),
-      body: JSON.stringify(row),
+      body: JSON.stringify(fields),
     })
     if (!res.ok) await fail(res, `update ${spec.table}`)
-    if (((await res.json()) as unknown[]).length === 0) {
-      throw new StoreError('not-found', `${path}/${id} does not exist`)
-    }
+    return ((await res.json()) as unknown[]).length > 0
   }
 
   async function remove(path: string, id: string): Promise<void> {

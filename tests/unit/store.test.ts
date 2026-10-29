@@ -31,6 +31,14 @@ const DEFAULTS: Record<string, Row> = {
   app_config: { value: {} },
 }
 
+// Columns declared NOT NULL with no default. Postgres checks the row an upsert
+// PROPOSES against these BEFORE it looks for a conflict, so an upsert that leaves
+// one out is refused even when the row it would have updated already exists.
+const NOT_NULL: Record<string, string[]> = {
+  courses: ['title'],
+  assessment_sessions: ['uid'],
+}
+
 function parseList(s: string): string[] {
   // in.("a","b,c") — items are quoted, and a backslash escapes a quote or backslash.
   const out: string[] = []
@@ -121,6 +129,12 @@ function makeServer(opts: { maxRows?: number; failReadsOnce?: number } = {}) {
       const conflict = (params.on_conflict ?? '').split(',').filter(Boolean)
       const inserted: Row[] = []
       for (const row of body as Row[]) {
+        for (const c of NOT_NULL[path] ?? []) {
+          const proposed = columns.includes(c) && c in row ? row[c] : DEFAULTS[path]?.[c]
+          if (proposed == null) {
+            return reply({ code: '23502', message: `null value in column "${c}" of relation "${path}" violates not-null constraint` }, 400)
+          }
+        }
         const existing = rows.find((r) => conflict.every((c) => r[c] === row[c]))
         // users.auth_uid is unique: one login belongs to one person.
         if (path === 'users' && row.auth_uid != null && rows.some((r) => r !== existing && r.auth_uid === row.auth_uid)) {
@@ -367,7 +381,10 @@ describe('set', () => {
     await store.set('users', 'u1', { displayName: 'Renamed' }, { merge: true })
 
     expect(tables.users[0]).toMatchObject({ display_name: 'Renamed', nickname: 'Nick', department: 'Sales' })
-    expect(requests[0].params.columns.split(',').sort()).toEqual(['display_name', 'uid'])
+    // An update of the row that is there, naming only what changed — not an upsert.
+    expect(requests[0].method).toBe('PATCH')
+    expect(Object.keys(requests[0].body as object)).toEqual(['display_name'])
+    expect(requests.some((r) => r.method === 'POST')).toBe(false)
   })
 
   it('a replace reverts every field it does not mention to its default', async () => {
@@ -404,7 +421,11 @@ describe('set', () => {
     const { tables, store, requests } = make()
     await store.set('notifications/u1/items', 'new_course_c1', { type: 'new_course', title: 'x' })
     await store.set('notifications/u2/items', 'new_course_c1', { type: 'new_course', title: 'x' })
-    expect(requests[0].params.on_conflict).toBe('uid,id')
+    // First the update is tried, addressed by owner AND id…
+    const patch = requests.find((r) => r.method === 'PATCH')!
+    expect([patch.params.uid, patch.params.id]).toEqual(['eq.u1', 'eq.new_course_c1'])
+    // …and with nothing to update, the insert is keyed on both.
+    expect(requests.find((r) => r.method === 'POST')!.params.on_conflict).toBe('uid,id')
     // The same notification id for two people is two rows, not one overwritten.
     expect(tables.notifications).toHaveLength(2)
     expect(tables.notifications.map((n) => n.uid).sort()).toEqual(['u1', 'u2'])
@@ -627,6 +648,58 @@ describe('createUser', () => {
     await store.createUser({ uid: 'fb-new', email: 'n@x', role: 'sale' }, 'fb-new')
     expect(tables.users).toHaveLength(1)
     expect(tables.users[0].role).toBe('manager')
+  })
+})
+
+// A partial merge onto a row that exists. The REST layer implements an upsert as
+// INSERT … ON CONFLICT DO UPDATE, and Postgres checks NOT NULL on the INSERT half
+// first — so "set submittedAt on this session" was refused with a null-uid error
+// even though the session, and its uid, were right there. Every quiz submission
+// failed at the step that closes the session.
+describe('merging part of a document into one that exists', () => {
+  it('changes only the fields given, and leaves the rest', async () => {
+    const { tables, store } = make()
+    tables.assessment_sessions = [{ id: 's1', uid: 'u1', assessment_id: 'a1', submitted_at: null, extra: {} }]
+    await store.set('assessmentSessions', 's1', { submittedAt: new Date('2026-03-01T00:00:00Z'), timedOut: false }, { merge: true })
+    expect(tables.assessment_sessions).toHaveLength(1)
+    expect(tables.assessment_sessions[0]).toMatchObject({ id: 's1', uid: 'u1', assessment_id: 'a1' })
+    expect(tables.assessment_sessions[0].submitted_at).toBeTruthy()
+  })
+
+  it('works for any table with a required column, not only sessions', async () => {
+    const { tables, store } = make()
+    tables.courses = [{ id: 'c1', title: 'Keep me', description: 'd', assigned_user_ids: [], extra: {} }]
+    await store.set('courses', 'c1', { isPublished: true }, { merge: true })
+    expect(tables.courses).toHaveLength(1)
+    expect(tables.courses[0]).toMatchObject({ title: 'Keep me', is_published: true })
+  })
+
+  it('does not clobber a column it was not given', async () => {
+    const { tables, store } = make()
+    tables.courses = [{ id: 'c1', title: 'Keep me', description: 'Keep this too', assigned_user_ids: ['a'], extra: {} }]
+    await store.set('courses', 'c1', { isPublished: true }, { merge: true })
+    expect(tables.courses[0]).toMatchObject({ description: 'Keep this too', assigned_user_ids: ['a'] })
+  })
+
+  it('still creates a document that does not exist when it is complete', async () => {
+    const { tables, store } = make()
+    await store.set('courses', 'c-new', { title: 'Brand new', category: 'sales_skill' }, { merge: true })
+    expect(tables.courses).toHaveLength(1)
+    expect(tables.courses[0]).toMatchObject({ id: 'c-new', title: 'Brand new' })
+  })
+
+  it('refuses to invent a half-made document when it is not', async () => {
+    // A merge onto a missing id used to be the way ghost profiles got made.
+    const { tables, store } = make()
+    await expect(store.set('courses', 'c-ghost', { isPublished: true }, { merge: true }))
+      .rejects.toMatchObject({ code: 'rejected' })
+    expect(tables.courses ?? []).toHaveLength(0)
+  })
+
+  it('a full replace is unaffected', async () => {
+    const { tables, store } = make()
+    await store.set('courses', 'c1', { title: 'T', category: 'x' }, { merge: false })
+    expect(tables.courses[0]).toMatchObject({ id: 'c1', title: 'T' })
   })
 })
 
