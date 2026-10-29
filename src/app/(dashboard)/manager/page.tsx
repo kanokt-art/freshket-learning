@@ -861,7 +861,7 @@ function EmployeeSidebar({
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1">
                         <p className="font-bold text-sm text-gray-900 leading-snug">{rec.storeName}</p>
-                        {rec.persona && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{rec.persona}</span>}
+                        {rec.persona && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-100">{rec.persona}</span>}
                         {rec.segment && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">{rec.segment}</span>}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -886,7 +886,12 @@ function EmployeeSidebar({
                           </>
                         ) : '—'}
                       </p>
-                      <span className="text-xs text-gray-400 shrink-0">{ddmmyyyy(rec.createdAt)}</span>
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-gray-700 shrink-0" title="วันที่ไป visit">
+                        <svg className="size-3.5 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                        </svg>
+                        ไป visit {ddmmyyyy(rec.createdAt)}
+                      </span>
                     </div>
                   </button>
 
@@ -897,18 +902,18 @@ function EmployeeSidebar({
                       )}
                       {answers.map(a => (
                         <div key={a.label}>
-                          <p className="text-xs font-bold text-gray-400 mb-1.5">{a.label}</p>
+                          <p className="text-xs font-bold text-freshket-700 mb-1.5">{a.label}</p>
                           <div className="bg-white border border-gray-100 rounded-xl p-3">
                             {a.value.split('\n').map((line, i) => (
-                              <p key={i} className="text-sm text-gray-700 leading-relaxed">{line || ' '}</p>
+                              <p key={i} className="text-sm text-gray-900 leading-relaxed">{line || ' '}</p>
                             ))}
                           </div>
                         </div>
                       ))}
                       {rec.evaluationFeedback && (
                         <div>
-                          <p className="text-xs font-bold text-gray-400 mb-1.5">ความเห็นจากผู้ประเมิน</p>
-                          <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{rec.evaluationFeedback}</p>
+                          <p className="text-xs font-bold text-freshket-700 mb-1.5">ความเห็นจากผู้ประเมิน</p>
+                          <p className="text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">{rec.evaluationFeedback}</p>
                         </div>
                       )}
                     </div>
