@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTeamTrainingRecords, useAllUsers, useTeams } from '@/hooks/useFirestore'
 import { STATUS_LABELS, STATUS_COLORS, type TrainingRecord } from '@/types/tracking'
 import { formatDate } from '@/lib/utils/dateFormatter'
+import { formatPersonName } from '@/lib/users/displayName'
 import { canAccess, ROLE_LABELS, getTeamLeadIds, type UserProfile } from '@/types/user'
 import { getDemoMode } from '@/lib/demo/demoMode'
 
@@ -395,8 +396,10 @@ function MemberPanel({
   )
 }
 
-// ── Member Card (grid item) ────────────────────────────────────────────────────────
-function MemberCard({
+// ── Member row (table) ─────────────────────────────────────────────────────────
+// One line per member: name as "Firstname (Nickname) Lastname", start date, how far
+// through their courses they are, and how those went. Click opens the member panel.
+function MemberRow({
   member,
   records,
   onClick,
@@ -405,71 +408,72 @@ function MemberCard({
   records: TrainingRecord[]
   onClick: () => void
 }) {
-  const total     = records.length
-  const completed = records.filter(r => r.status === 'completed').length
+  const total      = records.length
+  const completed  = records.filter(r => r.status === 'completed').length
   const inProgress = records.filter(r => r.status === 'in_progress').length
-  const failed    = records.filter(r => r.status === 'failed').length
-  const rate      = total > 0 ? Math.round((completed / total) * 100) : 0
-  const scores    = records.filter(r => r.score != null).map(r => r.score!)
-  const avgScore  = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null
-  const barColor  = rate >= 80 ? '#00ce7c' : rate >= 50 ? '#fbbf24' : '#f87171'
+  const failed     = records.filter(r => r.status === 'failed').length
+  const rate       = total > 0 ? Math.round((completed / total) * 100) : 0
+  const scores     = records.filter(r => r.score != null).map(r => r.score!)
+  const avgScore   = scores.length > 0 ? Math.round(scores.reduce((x, y) => x + y, 0) / scores.length) : null
+  const barColor   = rate >= 80 ? '#00ce7c' : rate >= 50 ? '#fbbf24' : '#f87171'
+  const name       = formatPersonName(member)
 
   return (
-    <button
+    <tr
       onClick={onClick}
-      className="bg-white rounded-2xl border border-gray-100 p-4 text-left hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 hover:border-freshket-200 transition-all group w-full"
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
+      tabIndex={0}
+      className="cursor-pointer hover:bg-gray-50 focus:bg-gray-50 focus:outline-none transition-colors"
     >
-      {/* Avatar + name */}
-      <div className="flex items-center gap-3 mb-3">
-        <div className="size-10 rounded-xl bg-freshket-100 border border-freshket-200 flex items-center justify-center text-freshket-700 font-bold text-base shrink-0">
-          {member.displayName.charAt(0)}
+      <td className="px-5 py-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="size-8 rounded-xl bg-freshket-100 border border-freshket-200 flex items-center justify-center text-freshket-700 font-bold text-sm shrink-0">
+            {(name || '?').charAt(0)}
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-sm text-gray-900 truncate">{name}</p>
+            {member.position && <p className="text-xs text-gray-400 truncate">{member.position}</p>}
+          </div>
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="font-bold text-sm text-gray-900 truncate leading-tight">{member.displayName}</p>
-          {member.nickname
-            ? <p className="text-xs text-gray-400 truncate">{member.nickname}</p>
-            : member.position && <p className="text-xs text-gray-400 truncate">{member.position}</p>
-          }
-        </div>
-        <svg className="size-4 text-gray-300 group-hover:text-freshket-500 transition-colors shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
-      </div>
-
-      {/* Progress bar */}
-      <div className="mb-3">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-gray-400">ผ่านแล้ว {completed}/{total}</span>
+      </td>
+      <td className="px-3 py-3 text-xs text-gray-600 whitespace-nowrap">{member.startDate ? formatDate(member.startDate) : '-'}</td>
+      <td className="px-3 py-3 min-w-[160px]">
+        <div className="flex items-center justify-between mb-1 gap-2">
+          <span className="text-xs text-gray-400 whitespace-nowrap">ผ่านแล้ว {completed}/{total}</span>
           <span className="text-xs font-bold" style={{ color: barColor }}>{rate}%</span>
         </div>
         <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-          <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{ width: `${rate}%`, background: barColor }}
-          />
+          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${rate}%`, background: barColor }} />
         </div>
-      </div>
-
-      {/* Stats row */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="flex items-center gap-1 text-xs text-gray-500">
-          <span className="size-1.5 rounded-full bg-freshket-400 inline-block" />{completed} ผ่าน
-        </span>
-        {inProgress > 0 && (
-          <span className="flex items-center gap-1 text-xs text-amber-600">
-            <span className="size-1.5 rounded-full bg-amber-400 inline-block" />{inProgress} เรียนอยู่
+      </td>
+      <td className="px-3 py-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="flex items-center gap-1 text-xs text-gray-500">
+            <span className="size-1.5 rounded-full bg-freshket-400 inline-block" />{completed} ผ่าน
           </span>
-        )}
-        {failed > 0 && (
-          <span className="flex items-center gap-1 text-xs text-rose-500">
-            <span className="size-1.5 rounded-full bg-rose-400 inline-block" />{failed} ไม่ผ่าน
-          </span>
-        )}
-        {avgScore != null && (
-          <span className={`ml-auto text-xs font-bold ${scoreColor(avgScore)}`}>{avgScore} pts</span>
-        )}
-      </div>
-    </button>
+          {inProgress > 0 && (
+            <span className="flex items-center gap-1 text-xs text-amber-600">
+              <span className="size-1.5 rounded-full bg-amber-400 inline-block" />{inProgress} เรียนอยู่
+            </span>
+          )}
+          {failed > 0 && (
+            <span className="flex items-center gap-1 text-xs text-rose-500">
+              <span className="size-1.5 rounded-full bg-rose-400 inline-block" />{failed} ไม่ผ่าน
+            </span>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-3 text-right whitespace-nowrap">
+        {avgScore != null
+          ? <span className={`text-xs font-bold ${scoreColor(avgScore)}`}>{avgScore} pts</span>
+          : <span className="text-xs text-gray-300">—</span>}
+      </td>
+      <td className="pr-4 py-3 w-6">
+        <svg className="size-4 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+      </td>
+    </tr>
   )
 }
 
@@ -632,7 +636,7 @@ export default function TeamLeadPage() {
           </div>
         )}
 
-        {/* Member Cards */}
+        {/* Members */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-bold text-gray-900">สมาชิกในทีม</h2>
@@ -646,15 +650,31 @@ export default function TeamLeadPage() {
               <span className="inline-block size-6 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : displayMembers.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {displayMembers.map(member => (
-                <MemberCard
-                  key={member.uid}
-                  member={member}
-                  records={recordsByMember[member.uid] ?? []}
-                  onClick={() => setSelectedMemberId(member.uid)}
-                />
-              ))}
+            <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      <th className="text-left text-xs font-bold text-gray-400 px-5 py-3">ชื่อ</th>
+                      <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 whitespace-nowrap">วันเริ่มงาน</th>
+                      <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">ความก้าวหน้า</th>
+                      <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">สถานะ</th>
+                      <th className="text-right text-xs font-bold text-gray-400 px-3 py-3">คะแนนเฉลี่ย</th>
+                      <th className="w-6" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {displayMembers.map(member => (
+                      <MemberRow
+                        key={member.uid}
+                        member={member}
+                        records={recordsByMember[member.uid] ?? []}
+                        onClick={() => setSelectedMemberId(member.uid)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : (
             <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400">
