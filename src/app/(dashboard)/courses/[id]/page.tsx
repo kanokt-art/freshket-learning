@@ -1,6 +1,7 @@
 'use client'
 
-import { courseAudience } from '@/lib/courses/audience'
+import { resultsRoster } from '@/lib/courses/audience'
+import { isActiveEmployee } from '@/lib/users/active'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
@@ -1299,10 +1300,13 @@ function CourseResultsDashboard({
   const [filterTeam, setFilterTeam]     = useState('all')
   const [filterStatus, setFilterStatus] = useState<'all' | TrainingStatus>('all')
   const [search, setSearch]             = useState('')
+  // People who have resigned stay on file (their training records are kept) but are
+  // left out of the list and the numbers unless asked for.
+  const [includeResigned, setIncludeResigned] = useState(false)
 
-  // Build rows: the course's audience + their record for this course
-  const rows = useMemo<UserRow[]>(() => {
-    const targetUsers = courseAudience(course, allUsers)
+  // Build rows: the course's audience + anyone with a record for it
+  const allRows = useMemo<UserRow[]>(() => {
+    const targetUsers = resultsRoster(course, allUsers, allRecords, courseId)
     return targetUsers.map(u => {
       const record = allRecords.find(r => r.userId === u.uid && r.courseId === courseId) ?? null
       const team = teams.find(t => t.id === u.teamId)
@@ -1314,6 +1318,12 @@ function CourseResultsDashboard({
       }
     })
   }, [allUsers, allRecords, teams, course, courseId])
+
+  const resignedCount = useMemo(() => allRows.filter(r => !isActiveEmployee(r.user)).length, [allRows])
+  const rows = useMemo(
+    () => (includeResigned ? allRows : allRows.filter(r => isActiveEmployee(r.user))),
+    [allRows, includeResigned],
+  )
 
   // Stats
   const stats = useMemo(() => {
@@ -1484,6 +1494,22 @@ function CourseResultsDashboard({
             ))}
           </div>
 
+          {/* Resigned people: hidden by default, shown (and counted) on request */}
+          {resignedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setIncludeResigned(v => !v)}
+              aria-pressed={includeResigned}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all duration-150 ${
+                includeResigned
+                  ? 'bg-gray-900 text-white border-gray-900'
+                  : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              รวมคนที่ลาออก ({resignedCount})
+            </button>
+          )}
+
           {/* Result count */}
           <span className="text-xs text-gray-400 ml-auto shrink-0">
             {filtered.length} คน
@@ -1532,7 +1558,14 @@ function CourseResultsDashboard({
                             {(row.user.nickname ?? row.user.displayName).charAt(0)}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-bold text-gray-900 truncate">{row.user.displayName}</p>
+                            <p className="text-sm font-bold text-gray-900 truncate">
+                              {row.user.displayName}
+                              {!isActiveEmployee(row.user) && (
+                                <span className="ml-2 align-middle text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
+                                  ลาออก
+                                </span>
+                              )}
+                            </p>
                             {(row.user.nickname || row.user.employeeId) && (
                               <p className="text-xs text-gray-400 truncate">
                                 {row.user.nickname}{row.user.nickname && row.user.employeeId ? ' · ' : ''}{row.user.employeeId ?? ''}

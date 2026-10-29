@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { courseAudience, isInCourseTarget } from '@/lib/courses/audience'
+import { courseAudience, isInCourseTarget, resultsRoster } from '@/lib/courses/audience'
 
 const users = [
   { uid: 'a', role: 'sale', department: 'Sales Management', teamId: 't1' },
@@ -114,3 +114,39 @@ describe('isInCourseTarget: a new joiner gets the courses already aimed at them'
     expect(isInCourseTarget({ assignedUserIds: ['gone'] }, gone)).toBe(true)
   })
 })
+
+describe('resultsRoster: who the results list, so finished work does not vanish', () => {
+  const people = [
+    { uid: 'a', role: 'sale', department: 'Sales Management' },
+    { uid: 'b', role: 'sale', department: 'Other' },
+    { uid: 'gone', role: 'sale', department: 'Sales Management', employmentStatus: 'Resigned' },
+    { uid: 'off-roster', role: 'sale', department: 'Other' },
+  ]
+  const course = { assignedDepartments: ['Sales Management'] }
+  const ids = (l: Array<{ uid: string }>) => l.map((u) => u.uid)
+
+  it('is the audience when nobody has a record', () => {
+    expect(ids(resultsRoster(course, people, [], 'c1'))).toEqual(['a'])
+  })
+
+  it('adds a resigned person who has a record for THIS course', () => {
+    // A condition alone leaves them out; their completed work keeps them listed.
+    expect(ids(resultsRoster(course, people, [{ userId: 'gone', courseId: 'c1' }], 'c1'))).toEqual(['a', 'gone'])
+  })
+
+  it('adds someone with a record who was never, or is no longer, on the roster', () => {
+    expect(ids(resultsRoster(course, people, [{ userId: 'off-roster', courseId: 'c1' }], 'c1'))).toEqual(['a', 'off-roster'])
+  })
+
+  it('ignores records that belong to a different course', () => {
+    expect(ids(resultsRoster(course, people, [{ userId: 'gone', courseId: 'other-course' }], 'c1'))).toEqual(['a'])
+  })
+
+  it('does not list a record for a person who no longer exists', () => {
+    expect(ids(resultsRoster(course, people, [{ userId: 'deleted', courseId: 'c1' }], 'c1'))).toEqual(['a'])
+  })
+
+  it('lists nobody for a course with no target and no records', () => {
+    expect(resultsRoster({}, people, [], 'c1')).toEqual([])
+  })
+});

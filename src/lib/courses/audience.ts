@@ -69,3 +69,22 @@ export function isInCourseTarget(course: AudienceCourse, user: AudienceUser): bo
   if (user.teamId && (course.assignedTeamIds ?? []).includes(user.teamId)) return true
   return false
 }
+
+/**
+ * Everyone the course's results should list: its audience, plus anyone who has a
+ * training record for it. A person who finished the course and was later taken
+ * off the roster, or resigned, still has that work on file; dropping them would
+ * make completed training vanish from the report.
+ *
+ * Callers decide whether to show the resigned (see isActiveEmployee).
+ */
+export function resultsRoster<U extends AudienceUser>(
+  course: AudienceCourse | null | undefined,
+  users: readonly U[],
+  records: ReadonlyArray<{ userId: string; courseId: string }>,
+  courseId: string,
+): U[] {
+  const inAudience = new Set(courseAudience(course, users).map((u) => u.uid))
+  const hasRecord = new Set(records.filter((r) => r.courseId === courseId).map((r) => r.userId))
+  return users.filter((u) => inAudience.has(u.uid) || hasRecord.has(u.uid))
+}
