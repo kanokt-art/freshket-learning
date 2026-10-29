@@ -87,6 +87,8 @@ function toMillis(v: unknown): number {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function ManagerPage() {
   const { user } = useAuth()
+  // A team lead sees one team, so a Team column would repeat the same value on every row.
+  const showTeamColumn = user?.role !== 'team_lead'
   const { data: allUsers } = useAllUsers()
   const { data: teams } = useTeams()
 
@@ -346,7 +348,9 @@ export default function ManagerPage() {
                     <SortableTh label="ตำแหน่งงาน" field="position" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden sm:table-cell" />
                     <SortableTh label="แผนก" field="department" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell" />
                     <SortableTh label="วันเริ่มงาน" field="startDate" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
-                    <SortableTh label="ทีม" field="team" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
+                    {showTeamColumn && (
+                      <SortableTh label="ทีม" field="team" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
+                    )}
                     <th className="w-8" />
                   </tr>
                 </thead>
@@ -403,11 +407,13 @@ export default function ManagerPage() {
                         <td className="px-4 py-3.5 text-xs text-gray-500 hidden lg:table-cell whitespace-nowrap">
                           {u.startDate ? formatDateEN(u.startDate) : <span className="text-gray-300">—</span>}
                         </td>
-                        <td className="px-4 py-3.5 hidden lg:table-cell">
-                          {teamName
-                            ? <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-full whitespace-nowrap">{teamName}</span>
-                            : <span className="text-gray-300 text-xs">—</span>}
-                        </td>
+                        {showTeamColumn && (
+                          <td className="px-4 py-3.5 hidden lg:table-cell">
+                            {teamName
+                              ? <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-full whitespace-nowrap">{teamName}</span>
+                              : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                        )}
                         <td className="px-4 py-3.5 w-8">
                           <svg className="size-4 text-gray-200 group-hover:text-freshket-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
