@@ -1,5 +1,6 @@
 'use client'
 
+import { rankToRole } from '@/lib/users/rankToRole'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
@@ -1637,16 +1638,6 @@ function parseCSVLine(line: string): string[] {
 }
 
 // Map Job Grade (JGn) to system role — used for new employees only; existing role is preserved
-function rankToRole(rank?: string): UserRole {
-  const m = rank?.match(/JG(\d+)/i)
-  if (!m) return 'sale'
-  const n = parseInt(m[1])
-  if (n >= 11) return 'super_admin' // Head of Dept, VP, C-Level, CEO
-  if (n >= 9)  return 'manager'     // Manager / Senior Manager
-  if (n >= 7)  return 'team_lead'   // Senior Supervisor / Assistant Manager
-  return 'sale'                      // Officer, Staff, Contract and below
-}
-
 // Freshket HR CSV export columns (16 cols):
 // ID(0), Status(1), Emp.ID(2), Title(3), Name-TH(4), Name-Eng(5),
 // Nick(6), Tel(7), Department(8), Rank(9), Position(10), Location(11),
