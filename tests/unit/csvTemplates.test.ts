@@ -119,20 +119,29 @@ describe('COURSE_RESULT_TEMPLATE', () => {
     expect(data.length).toBe(COURSE_RESULT_TEMPLATE.sampleRows.length)
   })
 
-  it('round-trips the values it demonstrates', () => {
+  it('round-trips the values it demonstrates, including which sitting each row is', () => {
     const { data } = parseCourseScoreText(toCsvText(COURSE_RESULT_TEMPLATE))
-    expect(data[0].email).toBe('example@freshket.co')
-    expect(data[0].score).toBe(85)
-    expect(data[0].status).toBe('completed')
+    expect(data[0]).toMatchObject({ email: 'example@freshket.co', type: 'pre', score: 60 })
+    expect(data[1]).toMatchObject({ email: 'example@freshket.co', type: 'post', score: 85, status: 'completed' })
+  })
+
+  it('has the type column the import now requires', () => {
+    expect(COURSE_RESULT_TEMPLATE.headers).toContain('type')
+  })
+
+  it('shows one person with a before row and an after row', () => {
+    const emails = COURSE_RESULT_TEMPLATE.sampleRows.map((r) => r[0])
+    expect(emails.filter((e) => e === 'example@freshket.co')).toHaveLength(2)
   })
 
   it('shows that score and completedAt may be left blank', () => {
-    // The second sample is deliberately sparse: the help text says these are
+    // The last sample is deliberately sparse: the help text says these are
     // optional, and a template where every cell is filled does not show it.
     const { data, errors } = parseCourseScoreText(toCsvText(COURSE_RESULT_TEMPLATE))
     expect(errors).toEqual([])
-    expect(data[1].score).toBeUndefined()
-    expect(data[1].status).toBe('in_progress')
+    const sparse = data[data.length - 1]
+    expect(sparse.score).toBeUndefined()
+    expect(sparse.status).toBe('in_progress')
   })
 })
 

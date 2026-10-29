@@ -25,25 +25,26 @@ import { COURSE_RESULT_TEMPLATE } from '@/lib/utils/csvTemplates'
 //                   this app — an honest "still working," not a fabricated ETA.
 type Phase = 'idle' | 'uploading' | 'processing'
 
-interface DuplicateRow {
+// What is stored against what the file says, for the before-course (pre) and
+// after-course (post) score and the status.
+interface ScoreDiffRow {
   email: string
   displayName: string
-  existingScore: number | null
-  existingStatus: string
-  newScore: number | null
-  newStatus: string
+  existing: { pre: number | null; post: number | null; status: string }
+  next: { pre: number | null; post: number | null; status: string }
 }
 
 interface CheckResult {
-  newRows: { email: string; displayName: string; score: number | null; status: string }[]
-  duplicates: DuplicateRow[]
+  newRows: ScoreDiffRow[]
+  duplicates: ScoreDiffRow[]
   unmatched: string[]
   errors: CSVImportError[]
 }
 
 interface CommitResult {
   written: number
-  skipped: number
+  created: number
+  updated: number
   unmatched: string[]
   errors: CSVImportError[]
 }
@@ -64,7 +65,6 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [check, setCheck] = useState<CheckResult | null>(null)
-  const [strategy, setStrategy] = useState<'overwrite' | 'skip'>('skip')
   const [commit, setCommit] = useState<CommitResult | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -92,7 +92,6 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
     fd.append('courseId', course.id)
     fd.append('courseTitle', course.title)
     fd.append('mode', mode)
-    if (mode === 'commit') fd.append('strategy', strategy)
 
     setPhase('uploading'); setProgress(0)
     const json = await authedUpload<T>(
@@ -193,7 +192,7 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
                 </svg>
                 <p className="text-sm text-gray-700">{file ? file.name : 'ลากไฟล์มาวาง หรือคลิกเพื่อเลือก'}</p>
-                <p className="text-xs text-gray-400">ต้องมีคอลัมน์อีเมล (Email Address หรือ employeeEmail) · คะแนนรองรับ 0-100 หรือ 6/10 · รองรับไฟล์ Google Forms</p>
+                <p className="text-xs text-gray-400">ต้องมีคอลัมน์อีเมล (Email Address หรือ employeeEmail) และ type (ก่อนเรียน/Pre หรือ หลังเรียน/Post) · คะแนนรองรับ 0-100 หรือ 6/10 · รองรับไฟล์ Google Forms · อัปโหลดไฟล์ซ้ำ = ใช้ค่าจากไฟล์ใหม่</p>
                 <input ref={inputRef} type="file" accept=".csv" className="hidden" onChange={onChange} />
               </div>
             </>
@@ -204,7 +203,7 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <PreviewStat label="เพิ่มใหม่" value={check.newRows.length} cls="bg-freshket-100 text-freshket-700" />
-                <PreviewStat label="ข้อมูลซ้ำ" value={check.duplicates.length} cls="bg-amber-100 text-amber-700" />
+                <PreviewStat label="อัปเดตของเดิม" value={check.duplicates.length} cls="bg-amber-100 text-amber-700" />
                 <PreviewStat label="ไม่พบอีเมล" value={check.unmatched.length} cls="bg-rose-100 text-rose-600" />
                 <PreviewStat label="รูปแบบผิด" value={check.errors.length} cls="bg-gray-100 text-gray-600" />
               </div>
@@ -213,7 +212,10 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
                 <div className="rounded-2xl border border-amber-200 bg-amber-50/60 overflow-hidden">
                   <div className="px-4 py-3 border-b border-amber-200/60">
                     <p className="text-sm font-bold text-amber-700">
-                      พบข้อมูลซ้ำ {check.duplicates.length} รายการ — พนักงานเหล่านี้มีผลของหลักสูตรนี้อยู่แล้ว
+                      จะอัปเดตผลของพนักงาน {check.duplicates.length} คน — มีผลของหลักสูตรนี้อยู่แล้ว
+                    </p>
+                    <p className="text-xs text-amber-700/80 mt-0.5">
+                      ใช้ค่าจากไฟล์นี้แทนค่าเดิม · ช่องที่ไฟล์ไม่มี (เช่น ไม่มีแถวก่อนเรียน หรือเว้นคะแนนว่าง) จะคงค่าเดิมไว้
                     </p>
                   </div>
                   <div className="max-h-48 overflow-y-auto">
@@ -221,7 +223,8 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
                       <thead>
                         <tr className="text-left text-xs text-amber-700/70">
                           <th className="px-4 py-2 font-bold">พนักงาน</th>
-                          <th className="px-4 py-2 font-bold whitespace-nowrap">คะแนน เดิม → ใหม่</th>
+                          <th className="px-4 py-2 font-bold whitespace-nowrap">ก่อนเรียน เดิม → ใหม่</th>
+                          <th className="px-4 py-2 font-bold whitespace-nowrap">หลังเรียน เดิม → ใหม่</th>
                           <th className="px-4 py-2 font-bold whitespace-nowrap">สถานะ เดิม → ใหม่</th>
                         </tr>
                       </thead>
@@ -233,25 +236,18 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
                               <p className="text-xs text-gray-400">{d.email}</p>
                             </td>
                             <td className="px-4 py-2 whitespace-nowrap tabular-nums">
-                              {d.existingScore ?? '—'} <span className="text-gray-400">→</span> <span className="font-bold">{d.newScore ?? '—'}</span>
+                              {d.existing.pre ?? '—'} <span className="text-gray-400">→</span> <span className="font-bold">{d.next.pre ?? '—'}</span>
+                            </td>
+                            <td className="px-4 py-2 whitespace-nowrap tabular-nums">
+                              {d.existing.post ?? '—'} <span className="text-gray-400">→</span> <span className="font-bold">{d.next.post ?? '—'}</span>
                             </td>
                             <td className="px-4 py-2 whitespace-nowrap text-xs">
-                              {statusLabel(d.existingStatus)} <span className="text-gray-400">→</span> <span className="font-bold">{statusLabel(d.newStatus)}</span>
+                              {statusLabel(d.existing.status)} <span className="text-gray-400">→</span> <span className="font-bold">{statusLabel(d.next.status)}</span>
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                  </div>
-                  <div className="px-4 py-3 border-t border-amber-200/60 space-y-2">
-                    <label className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input type="radio" name="dup-strategy" checked={strategy === 'skip'} onChange={() => setStrategy('skip')} className="accent-[#00ce7c]" />
-                      <span><b>ข้ามแถวที่ซ้ำ</b> — เก็บผลเดิมไว้ นำเข้าเฉพาะแถวใหม่ {check.newRows.length} รายการ</span>
-                    </label>
-                    <label className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input type="radio" name="dup-strategy" checked={strategy === 'overwrite'} onChange={() => setStrategy('overwrite')} className="accent-[#00ce7c]" />
-                      <span><b>ทับข้อมูลเดิม</b> — ใช้ค่าจากไฟล์นี้แทนทั้ง {check.duplicates.length} รายการที่ซ้ำ</span>
-                    </label>
                   </div>
                 </div>
               )}
@@ -291,7 +287,7 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
               <p className="text-base font-bold text-gray-900">นำเข้าผลคะแนนสำเร็จ</p>
               <p className="text-sm text-gray-500">
                 บันทึก {commit.written} รายการ
-                {commit.skipped > 0 && ` · ข้ามแถวซ้ำ ${commit.skipped} รายการ`}
+                {commit.updated > 0 && ` (ใหม่ ${commit.created} · อัปเดต ${commit.updated})`}
                 {commit.unmatched.length > 0 && ` · ไม่พบอีเมล ${commit.unmatched.length} รายการ`}
               </p>
               <p className="text-xs text-gray-400">สถิติผู้เรียน (userStats) ถูกอัปเดตให้อัตโนมัติแล้ว</p>
@@ -346,12 +342,12 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
               <button onClick={() => { setStep('setup'); setCheck(null) }} className="px-4 py-2 rounded-xl text-sm text-gray-500 hover:bg-gray-100 transition-colors">ย้อนกลับ</button>
               <button
                 onClick={handleCommit}
-                disabled={busy || (check.newRows.length === 0 && !(strategy === 'overwrite' && check.duplicates.length > 0))}
+                disabled={busy || check.newRows.length + check.duplicates.length === 0}
                 className="px-5 py-2 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {busy
                   ? 'กำลังนำเข้า...'
-                  : `ยืนยันนำเข้า ${check.newRows.length + (strategy === 'overwrite' ? check.duplicates.length : 0)} รายการ`}
+                  : `ยืนยันนำเข้า ${check.newRows.length + check.duplicates.length} รายการ`}
               </button>
             </>
           )}
