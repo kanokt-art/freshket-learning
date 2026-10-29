@@ -54,6 +54,22 @@ export function parseScoreType(raw: string): 'pre' | 'post' | null {
   return pre ? 'pre' : 'post'
 }
 
+/**
+ * One Score cell as a 0–100 percentage. Accepts a plain number or "N/M" (also
+ * "9 / 10"); a value a spreadsheet has turned into a date is reported as such
+ * rather than guessed at. Every value goes through parseScoreFraction first so a
+ * mangled date is caught whether or not it still has a slash.
+ */
+export function parseScoreCell(raw: string): { ok: true; score: number } | { ok: false; reason: 'date' | 'range' } {
+  const parsed = parseScoreFraction(raw)
+  if ('reason' in parsed) {
+    if (parsed.reason === 'date') return { ok: false, reason: 'date' }
+    const n = parseFloat(raw)
+    return isNaN(n) || n < 0 || n > 100 ? { ok: false, reason: 'range' } : { ok: true, score: n }
+  }
+  return { ok: true, score: parsed.total > 0 ? Math.round((parsed.score / parsed.total) * 100) : parsed.score }
+}
+
 // Operates on raw CSV TEXT (not a File) so it runs identically in the browser
 // and inside a Node route handler (Papa's File input needs FileReader, which
 // doesn't exist server-side).
@@ -133,31 +149,14 @@ export function parseCourseScoreText(text: string): ParseResult<ParsedCourseScor
     let score: number | undefined
     const scoreRaw = scoreCol ? (row[scoreCol] ?? '').trim() : ''
     if (scoreRaw) {
-      // Route EVERY value through parseScoreFraction first so a spreadsheet-
-      // mangled date is caught whether or not it still has a slash ("6/10/2026"
-      // AND "6-Oct" both flag as date). A plain "85" comes back 'invalid' (not a
-      // fraction, not a date) and falls through to the plain-number path.
-      const parsed = parseScoreFraction(scoreRaw)
-      if ('reason' in parsed) {
-        if (parsed.reason === 'date') {
-          csvErrors.push({
-            row: rowNum,
-            field: 'score',
-            message: `คอลัมน์ Score ถูกแปลงเป็นวันที่อัตโนมัติ (ค่าที่อ่านได้: "${scoreRaw}") — ตั้งรูปแบบคอลัมน์ Score เป็นข้อความ แล้ว export ใหม่`,
-            rawValue: scoreRaw,
-          })
-          return
-        }
-        // Not a fraction — accept a plain 0–100 number.
-        score = parseFloat(scoreRaw)
-        if (isNaN(score) || score < 0 || score > 100) {
-          csvErrors.push({ row: rowNum, field: 'score', message: 'คะแนนต้องอยู่ระหว่าง 0-100 (หรือรูปแบบ 6/10)', rawValue: scoreRaw })
-          return
-        }
-      } else {
-        // Fraction form ("6/10") — convert to a 0–100 percentage.
-        score = parsed.total > 0 ? Math.round((parsed.score / parsed.total) * 100) : parsed.score
+      const cell = parseScoreCell(scoreRaw)
+      if (!cell.ok) {
+        csvErrors.push(cell.reason === 'date'
+          ? { row: rowNum, field: 'score', message: `คอลัมน์ Score ถูกแปลงเป็นวันที่อัตโนมัติ (ค่าที่อ่านได้: "${scoreRaw}") — ตั้งรูปแบบคอลัมน์ Score เป็นข้อความ แล้ว export ใหม่`, rawValue: scoreRaw }
+          : { row: rowNum, field: 'score', message: 'คะแนนต้องอยู่ระหว่าง 0-100 (หรือรูปแบบ 6/10)', rawValue: scoreRaw })
+        return
       }
+      score = cell.score
     }
 
     const status = (statusCol ? (row[statusCol] ?? '').trim().toLowerCase() : '') || 'completed'
