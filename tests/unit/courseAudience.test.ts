@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { courseAudience } from '@/lib/courses/audience'
+import { courseAudience, isInCourseTarget } from '@/lib/courses/audience'
 
 const users = [
   { uid: 'a', role: 'sale', department: 'Sales Management', teamId: 't1' },
@@ -66,5 +66,51 @@ describe('courseAudience: no saved target', () => {
   it('is nobody when the course has not loaded', () => {
     expect(courseAudience(null, users)).toEqual([])
     expect(courseAudience(undefined, users)).toEqual([])
+  })
+})
+
+
+describe('isInCourseTarget: a new joiner gets the courses already aimed at them', () => {
+  const newSale = { uid: 'new', role: 'sale', department: 'Sales Management', teamId: 't1' }
+
+  it('matches a saved department without the person being on the roster yet', () => {
+    // The bug: the roster is a snapshot, so someone who joined after the last
+    // sync was in the target and still did not see the course.
+    expect(isInCourseTarget({ assignedUserIds: ['old'], assignedDepartments: ['Sales Management'] }, newSale)).toBe(true)
+  })
+
+  it('matches a saved team', () => {
+    expect(isInCourseTarget({ assignedTeamIds: ['t1'] }, newSale)).toBe(true)
+  })
+
+  it('matches by being named on the roster', () => {
+    expect(isInCourseTarget({ assignedUserIds: ['new'] }, { uid: 'new', role: 'sale' })).toBe(true)
+  })
+
+  it('matches by role when the course names roles', () => {
+    expect(isInCourseTarget({ targetRoles: ['sale'] }, { uid: 'x', role: 'sale' })).toBe(true)
+  })
+
+  it('does not match someone outside every part of the target', () => {
+    expect(isInCourseTarget(
+      { assignedUserIds: ['old'], assignedDepartments: ['Finance'], assignedTeamIds: ['t9'], targetRoles: ['manager'] },
+      newSale,
+    )).toBe(false)
+  })
+
+  it('does not match a course with no target at all', () => {
+    expect(isInCourseTarget({}, newSale)).toBe(false)
+    expect(isInCourseTarget({ assignedUserIds: [], assignedDepartments: [], assignedTeamIds: [], targetRoles: [] }, newSale)).toBe(false)
+  })
+
+  it('does not match a department by team id or the reverse', () => {
+    expect(isInCourseTarget({ assignedDepartments: ['t1'] }, newSale)).toBe(false)
+    expect(isInCourseTarget({ assignedTeamIds: ['Sales Management'] }, newSale)).toBe(false)
+  })
+
+  it('does not let a resigned person match on a condition, but keeps them if named', () => {
+    const gone = { uid: 'gone', role: 'sale', department: 'Sales Management', employmentStatus: 'Resigned' }
+    expect(isInCourseTarget({ assignedDepartments: ['Sales Management'] }, gone)).toBe(false)
+    expect(isInCourseTarget({ assignedUserIds: ['gone'] }, gone)).toBe(true)
   })
 })

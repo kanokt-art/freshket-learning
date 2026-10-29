@@ -1,5 +1,6 @@
 'use client'
 
+import { isInCourseTarget } from '@/lib/courses/audience'
 import { useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
@@ -81,7 +82,7 @@ export function TeamLeadHome() {
     return courses
       .filter((c) =>
         c.isPublished &&
-        (c.targetRoles.includes(user.role) || (c.assignedUserIds?.includes(user.uid) ?? false)) &&
+        isInCourseTarget(c, user) &&
         recordStatus[c.id] !== 'completed',
       )
       .map((c) => ({ course: c, status: recordStatus[c.id] }))
@@ -98,7 +99,7 @@ export function TeamLeadHome() {
       return isNaN(dt.getTime()) ? null : dt
     }
     return courses
-      .filter((c) => c.isPublished && !myDone.has(c.id) && (c.targetRoles.includes(user.role) || (c.assignedUserIds?.includes(user.uid) ?? false)))
+      .filter((c) => c.isPublished && !myDone.has(c.id) && isInCourseTarget(c, user))
       .map((c) => ({ date: toDate(c.endDate), title: c.title, courseId: c.id }))
       .filter((t): t is { date: Date; title: string; courseId: string } => t.date !== null)
       .sort((a, b) => a.date.getTime() - b.date.getTime())

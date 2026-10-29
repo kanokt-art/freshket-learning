@@ -50,3 +50,22 @@ export function courseAudience<U extends AudienceUser>(course: AudienceCourse | 
   const roles = course.targetRoles ?? []
   return roles.length > 0 ? users.filter((u) => roles.includes(u.role)) : []
 }
+
+/**
+ * Is this ONE person in the course's target? The same rule as {@link courseAudience},
+ * for the learner's own screens (which course shows up for me).
+ *
+ * It matches the saved department/team conditions directly rather than relying on
+ * the roster snapshot. The snapshot only holds people who were there when the
+ * course was published or when someone last pressed sync, so a new sale joining
+ * afterwards was in the target and still did not get the course. Role targeting
+ * still applies when the course names roles.
+ */
+export function isInCourseTarget(course: AudienceCourse, user: AudienceUser): boolean {
+  if ((course.assignedUserIds ?? []).includes(user.uid)) return true
+  if ((course.targetRoles ?? []).includes(user.role)) return true
+  if (!isActive(user)) return false
+  if (user.department && (course.assignedDepartments ?? []).includes(user.department)) return true
+  if (user.teamId && (course.assignedTeamIds ?? []).includes(user.teamId)) return true
+  return false
+}

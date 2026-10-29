@@ -1,5 +1,6 @@
 'use client'
 
+import { isInCourseTarget } from '@/lib/courses/audience'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { announce } from '@/lib/notifications/announce'
@@ -142,7 +143,7 @@ function notifyCoursePublishChanges(
   if (c.isPublished && !wasPublished) {
     // First publish → notify all role-based or individually-assigned targets who aren't already enrolled
     const isNotifyTarget = (u: UserProfile) =>
-      ((c.targetRoles as string[]).includes(u.role) || (c.assignedUserIds?.includes(u.uid) ?? false)) && !alreadyEnrolled.has(u.uid)
+      isInCourseTarget(c, u) && !alreadyEnrolled.has(u.uid)
     const targets = DEMO_MODE
       ? demoStore.getUsers().filter(isNotifyTarget)
       : allUsers.filter(isNotifyTarget)
@@ -254,8 +255,10 @@ export default function CoursesPage() {
   }, [myRecords])
 
   const visible = useMemo(() => {
+    // Includes the saved department/team conditions, so someone who joined after
+    // the course was published still gets it without waiting for a sync.
     const isTargeted = (c: Course) =>
-      c.targetRoles.includes(user?.role ?? 'sale') || (c.assignedUserIds?.includes(user?.uid ?? '') ?? false)
+      isInCourseTarget(c, { uid: user?.uid ?? '', role: user?.role ?? 'sale', department: user?.department, teamId: user?.teamId })
     if (DEMO_MODE) {
       return allCourses.filter((c) =>
         isSuperAdmin ? true : c.isPublished && isTargeted(c),

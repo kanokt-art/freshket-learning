@@ -64,13 +64,15 @@ export default function MandatoryPage() {
   const [viewing, setViewing]         = useState<MandatoryItem | null>(null)
   const [showAdd, setShowAdd]         = useState(false)
   const [editItem, setEditItem]       = useState<MandatoryItem | null>(null)
-  const [showDrafts, setShowDrafts]   = useState(false)
   const [activeKey, setActiveKey]     = useState<string | null>(null)
 
+  // An admin sees every item; an unpublished one is shown greyed out rather than
+  // hidden, so unpublishing never makes a file seem to have vanished. Everyone
+  // else sees published items only.
   const visibleItems = useMemo(() => {
-    if (isAdmin && showDrafts) return items
+    if (isAdmin) return items
     return items.filter(i => i.isPublished)
-  }, [items, isAdmin, showDrafts])
+  }, [items, isAdmin])
 
   const monthGroups = useMemo(() => groupByMonth(visibleItems), [visibleItems])
   const yearGroups = useMemo(() => groupByYear(monthGroups), [monthGroups])
@@ -214,22 +216,6 @@ export default function MandatoryPage() {
         {/* ── Toolbar ──────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => setShowDrafts(v => !v)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
-                  showDrafts
-                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                    : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                </svg>
-                แสดง Draft
-              </button>
-            )}
             <span className="text-xs text-gray-400">{visibleItems.length} รายการ</span>
           </div>
 
@@ -366,8 +352,8 @@ function MandatoryCard({
   onTogglePublish: () => void
 }) {
   return (
-    <div className={`bg-white rounded-2xl border overflow-hidden flex flex-col hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 ${
-      !item.isPublished ? 'border-amber-100' : 'border-gray-100'
+    <div className={`rounded-2xl border overflow-hidden flex flex-col hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 ${
+      !item.isPublished ? 'bg-gray-50 border-gray-200 opacity-60 grayscale' : 'bg-white border-gray-100'
     }`}>
       <div className="p-4 pb-0">
         <SlidePreviewArea isPublished={item.isPublished} weekLabel={item.weekLabel} slidesUrl={item.slidesUrl} />
@@ -440,8 +426,8 @@ function MandatoryRow({
   onTogglePublish: () => void
 }) {
   return (
-    <div className={`flex items-center gap-4 bg-white rounded-xl border px-4 py-4 hover:shadow-sm transition-all duration-150 ${
-      !item.isPublished ? 'border-amber-100' : 'border-gray-100'
+    <div className={`flex items-center gap-4 rounded-xl border px-4 py-4 hover:shadow-sm transition-all duration-150 ${
+      !item.isPublished ? 'bg-gray-50 border-gray-200 opacity-60 grayscale' : 'bg-white border-gray-100'
     }`}>
       {/* A real preview of the deck instead of a generic document icon — same
           embed SlidePreviewArea uses in the card grid, just fixed-width so the
@@ -458,7 +444,7 @@ function MandatoryRow({
             {item.weekLabel}
           </span>
           {!item.isPublished && (
-            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 shrink-0">
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-600 shrink-0">
               Draft
             </span>
           )}

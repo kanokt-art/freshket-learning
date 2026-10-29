@@ -1,5 +1,6 @@
 'use client'
 
+import { isInCourseTarget } from '@/lib/courses/audience'
 import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
@@ -219,13 +220,10 @@ export default function SaleDashboardPage() {
     myRecords.forEach((r) => { m[r.courseId] = r })
     return m
   }, [myRecords])
-  // Targeting must match /courses: role-based OR individually assigned
+  // Targeting must match /courses: role, individually assigned, or a saved department/team
   const forYouCourses = useMemo(
     () => courses.filter((c) =>
-      c.isPublished && (
-        c.targetRoles.includes(user?.role ?? 'sale') ||
-        (c.assignedUserIds?.includes(user?.uid ?? '') ?? false)
-      ),
+      c.isPublished && isInCourseTarget(c, { uid: user?.uid ?? '', role: user?.role ?? 'sale', department: user?.department, teamId: user?.teamId }),
     ),
     [courses, user],
   )
@@ -240,7 +238,7 @@ export default function SaleDashboardPage() {
         if (!c.isPublished || !c.endDate) return false
         const end = c.endDate instanceof Date ? c.endDate : new Date(c.endDate as unknown as string)
         if (isNaN(end.getTime()) || end < now || end > cutoff) return false
-        const isTargeted = c.targetRoles.includes(user.role) || (c.assignedUserIds?.includes(user.uid) ?? false)
+        const isTargeted = isInCourseTarget(c, user)
         if (!isTargeted) return false
         return recordMap[c.id]?.status !== 'completed'
       })
