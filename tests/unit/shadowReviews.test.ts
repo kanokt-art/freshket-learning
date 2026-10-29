@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  reviewId, recordIdOf, groupByRecord, primaryReview, averageRating, reviewerRoleLabel, type ReviewDoc,
+  reviewId, recordIdOf, groupByRecord, primaryReview, averageRating, reviewerRoleLabel, slotOf, type ReviewDoc,
 } from '@/lib/shadow/reviews'
 
 const rv = (over: Partial<ReviewDoc> = {}): ReviewDoc => ({
@@ -105,5 +105,14 @@ describe('reviewerRoleLabel', () => {
   it('is empty for no role or one it does not know', () => {
     expect(reviewerRoleLabel(undefined)).toBe('')
     expect(reviewerRoleLabel('sale')).toBe('')
+  })
+})
+
+describe('slotOf', () => {
+  it('puts managers and super admins in the manager box, team leads (and unknown) in the team lead box', () => {
+    expect(slotOf('manager')).toBe('manager')
+    expect(slotOf('super_admin')).toBe('manager')
+    expect(slotOf('team_lead')).toBe('team_lead')
+    expect(slotOf(undefined)).toBe('team_lead')
   })
 })

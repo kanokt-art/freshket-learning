@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { StarsDisplay, StarsInput } from '@/components/common/Stars'
-import { reviewerRoleLabel, type Review } from '@/lib/shadow/reviews'
+import { reviewerRoleLabel, slotOf, type Review, type ReviewSlot } from '@/lib/shadow/reviews'
 
 // The reviews a Shadow visit has received, and — for a team lead or manager — the form
 // to give their own. Each reviewer has one review of a visit; saving again edits it.
@@ -14,26 +14,47 @@ const dmy = (d: Date | string) => {
   return `${String(t.getDate()).padStart(2, '0')}/${String(t.getMonth() + 1).padStart(2, '0')}/${t.getFullYear()}`
 }
 
-export function ShadowReviews({ reviews, viewerUid, canReview, onSave }: {
+export function ShadowReviews({ reviews, viewerUid, viewerRole, canReview, onSave }: {
   reviews: Review[]
   viewerUid?: string
+  viewerRole?: string
   /** Is the viewer a lead or above, and not the person who made the visit? */
   canReview: boolean
   onSave: (rating: number, comment: string) => Promise<void> | void
 }) {
-  const mine = reviews.find((r) => r.reviewerUid === viewerUid)
+  const mySlot = slotOf(viewerRole)
+  return (
+    <div className="space-y-4">
+      <SlotBox slot="team_lead" title="Team Lead" reviews={reviews} viewerUid={viewerUid} canReview={canReview && mySlot === 'team_lead'} onSave={onSave} />
+      <SlotBox slot="manager" title="Manager" reviews={reviews} viewerUid={viewerUid} canReview={canReview && mySlot === 'manager'} onSave={onSave} />
+    </div>
+  )
+}
+
+// One box per role, each with its own stars and feedback: the team lead's and the
+// manager's are given and shown separately. A viewer can only fill in their own box.
+function SlotBox({ slot, title, reviews, viewerUid, canReview, onSave }: {
+  slot: ReviewSlot
+  title: string
+  reviews: Review[]
+  viewerUid?: string
+  canReview: boolean
+  onSave: (rating: number, comment: string) => Promise<void> | void
+}) {
+  const inBox = reviews.filter((r) => slotOf(r.reviewerRole) === slot)
+  const mine = inBox.find((r) => r.reviewerUid === viewerUid)
   const [editing, setEditing] = useState(false)
   const showForm = canReview && (!mine || editing)
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs font-bold text-freshket-700">Feedback จาก Team Lead / Manager</p>
+    <div className="space-y-2">
+      <p className="text-xs font-bold text-freshket-700">Feedback จาก {title}</p>
 
-      {reviews.length === 0 && !showForm && (
-        <p className="text-xs text-gray-400">ยังไม่มี feedback</p>
+      {inBox.length === 0 && !showForm && (
+        <p className="text-xs text-gray-400 rounded-xl border border-dashed border-gray-200 p-3">ยังไม่มี feedback จาก {title}</p>
       )}
 
-      {reviews.map((r) => {
+      {inBox.map((r) => {
         const isMine = r.reviewerUid === viewerUid
         if (isMine && editing) return null   // being edited below
         return (

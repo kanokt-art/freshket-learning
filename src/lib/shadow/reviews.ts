@@ -66,6 +66,12 @@ const ROLE_LABEL: Record<string, string> = {
   super_admin: 'Super Admin',
 }
 
+/** Which of the two feedback boxes a review belongs in: managers (and above) have one, team leads the other. */
+export type ReviewSlot = 'team_lead' | 'manager'
+export function slotOf(role?: string): ReviewSlot {
+  return role === 'manager' || role === 'super_admin' ? 'manager' : 'team_lead'
+}
+
 export function reviewerRoleLabel(role?: string): string {
   return (role && ROLE_LABEL[role]) || ''
 }

@@ -901,6 +901,7 @@ function EmployeeSidebar({
                       <ShadowReviews
                         reviews={reviews}
                         viewerUid={viewer?.uid}
+                        viewerRole={viewer?.role}
                         canReview={canFeedback && rec.observerUid !== viewer?.uid}
                         onSave={(rating, comment) => submitShadowReview({
                           record: rec,

@@ -289,6 +289,7 @@ function VisitDetailModal({
   record,
   reviews,
   viewerUid,
+  viewerRole,
   canReview,
   onClose,
   onSaveAck,
@@ -296,6 +297,7 @@ function VisitDetailModal({
   record: ShadowRecord
   reviews: ShadowAcknowledgment[]
   viewerUid?: string
+  viewerRole?: string
   canReview: boolean
   onClose: () => void
   onSaveAck: (recordId: string, rating: number, comment: string) => Promise<void> | void
@@ -365,6 +367,7 @@ function VisitDetailModal({
           <ShadowReviews
             reviews={reviews}
             viewerUid={viewerUid}
+            viewerRole={viewerRole}
             canReview={canReview && record.observerUid !== viewerUid}
             onSave={(rating, comment) => onSaveAck(record.id, rating, comment)}
           />
@@ -1662,6 +1665,7 @@ export default function ShadowPage() {
           record={selectedVisit}
           reviews={reviewsByRecord.get(selectedVisit.id) ?? []}
           viewerUid={user?.uid}
+          viewerRole={user?.role}
           canReview={isLead}
           onClose={() => setSelectedVisit(null)}
           onSaveAck={handleSaveAck}
