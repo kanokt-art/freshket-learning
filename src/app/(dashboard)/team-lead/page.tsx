@@ -8,6 +8,7 @@ import { useTeamTrainingRecords, useAllUsers, useTeams } from '@/hooks/useFirest
 import { STATUS_LABELS, STATUS_COLORS, type TrainingRecord } from '@/types/tracking'
 import { formatDate } from '@/lib/utils/dateFormatter'
 import { formatPersonName } from '@/lib/users/displayName'
+import { isActiveEmployee } from '@/lib/users/active'
 import { canAccess, ROLE_LABELS, getTeamLeadIds, type UserProfile } from '@/types/user'
 import { getDemoMode } from '@/lib/demo/demoMode'
 
@@ -417,13 +418,14 @@ function MemberRow({
   const avgScore   = scores.length > 0 ? Math.round(scores.reduce((x, y) => x + y, 0) / scores.length) : null
   const barColor   = rate >= 80 ? '#00ce7c' : rate >= 50 ? '#fbbf24' : '#f87171'
   const name       = formatPersonName(member)
+  const resigned   = !isActiveEmployee(member)
 
   return (
     <tr
       onClick={onClick}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
       tabIndex={0}
-      className="cursor-pointer hover:bg-gray-50 focus:bg-gray-50 focus:outline-none transition-colors"
+      className={`cursor-pointer hover:bg-gray-50 focus:bg-gray-50 focus:outline-none transition-colors ${resigned ? 'opacity-60' : ''}`}
     >
       <td className="px-5 py-3">
         <div className="flex items-center gap-3 min-w-0">
@@ -431,7 +433,12 @@ function MemberRow({
             {(name || '?').charAt(0)}
           </div>
           <div className="min-w-0">
-            <p className="font-bold text-sm text-gray-900 truncate">{name}</p>
+            <p className="font-bold text-sm text-gray-900 truncate">
+              {name}
+              {resigned && (
+                <span className="ml-2 align-middle text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">ลาออก</span>
+              )}
+            </p>
             {member.position && <p className="text-xs text-gray-400 truncate">{member.position}</p>}
           </div>
         </div>
@@ -483,6 +490,8 @@ export default function TeamLeadPage() {
   const { data: allUsers } = useAllUsers()
   const { data: teams } = useTeams()
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
+  // People who have resigned stay on file but are hidden from the list unless asked for.
+  const [showResigned, setShowResigned] = useState(false)
 
   // A team lead can lead more than one team (the same person appears in
   // teamLeadIds on multiple team docs) — this used to only compare against
@@ -603,6 +612,9 @@ export default function TeamLeadPage() {
         return { uid, email: '', displayName: name, photoURL: null, role: 'sale' as const, createdAt: new Date(), updatedAt: new Date() }
       })
 
+  const resignedCount = displayMembers.filter(m => !isActiveEmployee(m)).length
+  const listedMembers = showResigned ? displayMembers : displayMembers.filter(isActiveEmployee)
+
   return (
     <>
       <Header title="ทีมของฉัน" subtitle="ภาพรวมความก้าวหน้าของลูกทีม" />
@@ -640,16 +652,44 @@ export default function TeamLeadPage() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-bold text-gray-900">สมาชิกในทีม</h2>
-            <span className="text-xs text-gray-400 bg-white border border-gray-200 px-2.5 py-0.5 rounded-full shadow-sm">
-              {displayMembers.length} คน
-            </span>
+            <div className="flex items-center gap-2">
+              {resignedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowResigned(v => !v)}
+                  aria-pressed={showResigned}
+                  title={showResigned ? 'ซ่อนพนักงานที่ลาออก' : `แสดงพนักงานที่ลาออก (${resignedCount})`}
+                  aria-label={showResigned ? 'ซ่อนพนักงานที่ลาออก' : 'แสดงพนักงานที่ลาออก'}
+                  className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-bold shadow-sm transition-all duration-150 ${
+                    showResigned
+                      ? 'bg-gray-900 text-white border-gray-900'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  {showResigned ? (
+                    <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  ) : (
+                    <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                    </svg>
+                  )}
+                  ลาออก {resignedCount}
+                </button>
+              )}
+              <span className="text-xs text-gray-400 bg-white border border-gray-200 px-2.5 py-0.5 rounded-full shadow-sm">
+                {listedMembers.length} คน
+              </span>
+            </div>
           </div>
 
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <span className="inline-block size-6 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
             </div>
-          ) : displayMembers.length > 0 ? (
+          ) : listedMembers.length > 0 ? (
             <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -664,7 +704,7 @@ export default function TeamLeadPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {displayMembers.map(member => (
+                    {listedMembers.map(member => (
                       <MemberRow
                         key={member.uid}
                         member={member}
