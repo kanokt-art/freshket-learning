@@ -31,6 +31,7 @@ import {
   type Actor, type WriteOp,
 } from './policies'
 import { StoreError, type Store, type Query } from './store'
+import { refusesClientStatus } from '@/lib/courses/completion'
 
 // ── Results ─────────────────────────────────────────────────────────────────
 
@@ -277,6 +278,23 @@ export async function runWrite(store: Store, actor: Actor, body: unknown): Promi
     // Not saying which rule, or even which document: that would be a map for
     // someone probing what they can get away with.
     if (!allowed) return fail(403, 'Forbidden')
+
+    // A course with a graded post-test is finished by the server grading it, not by
+    // the browser saying so (lib/courses/completion.ts). This needs the course, which
+    // the per-document rules above cannot see.
+    if (p.collection === 'trainingRecords' && p.kind !== 'delete' && incoming) {
+      const before = existing?.status
+      const after = incoming.status
+      if (after !== before && (after === 'completed' || after === 'failed')) {
+        const courseId = String(incoming.courseId ?? existing?.courseId ?? '')
+        try {
+          const course = courseId ? await store.get('courses', courseId) : null
+          if (refusesClientStatus(course as Parameters<typeof refusesClientStatus>[0], before, after)) return fail(403, 'Forbidden')
+        } catch (e) {
+          return fromStoreError(e)
+        }
+      }
+    }
 
     state.set(keyOf(p.path, p.id), incoming)
   }

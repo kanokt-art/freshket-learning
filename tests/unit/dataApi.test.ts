@@ -428,6 +428,80 @@ describe('runWrite', () => {
   })
 })
 
+// A course with a graded post-test is finished by the server grading it. The
+// per-document rules cannot see the course, so the door looks it up.
+describe('runWrite: finishing a course', () => {
+  const graded = { id: 'graded', title: 'Graded', topics: [{ lessons: [{ type: 'video' }, { type: 'quiz', quizRole: 'post_test' }] }] }
+  const lessonsOnly = { id: 'plain', title: 'Plain', topics: [{ lessons: [{ type: 'video' }] }] }
+  const rec = (courseId: string, status: string) => doc(`me_${courseId}`, { userId: 'me', courseId, status })
+  const setStatus = (courseId: string, status: string) =>
+    ({ ops: [{ op: 'set', path: 'trainingRecords', id: `me_${courseId}`, data: { userId: 'me', courseId, status } }] })
+
+  it('refuses a learner declaring "completed" on a course with a graded test', async () => {
+    const m = memStore({ courses: [graded], trainingRecords: [rec('graded', 'in_progress')] })
+    const r = await runWrite(m.store, sale('me'), setStatus('graded', 'completed'))
+    expect(r.ok).toBe(false)
+    expect(r.ok === false && r.status).toBe(403)
+    expect(m.docs('trainingRecords')[0].status).toBe('in_progress')
+  })
+
+  it('refuses it when the record does not exist yet', async () => {
+    const m = memStore({ courses: [graded] })
+    const r = await runWrite(m.store, sale('me'), setStatus('graded', 'completed'))
+    expect(r.ok).toBe(false)
+    expect(m.docs('trainingRecords')).toHaveLength(0)
+  })
+
+  it('refuses "failed" as well', async () => {
+    const m = memStore({ courses: [graded], trainingRecords: [rec('graded', 'in_progress')] })
+    expect((await runWrite(m.store, sale('me'), setStatus('graded', 'failed'))).ok).toBe(false)
+  })
+
+  it('refuses it even for a super_admin — the override route is how an admin corrects a result', async () => {
+    const m = memStore({ courses: [graded], trainingRecords: [{ ...rec('graded', 'in_progress'), userId: 'admin' }] })
+    const r = await runWrite(m.store, admin, { ops: [{ op: 'set', path: 'trainingRecords', id: 'me_graded', data: { userId: 'admin', courseId: 'graded', status: 'completed' } }] })
+    expect(r.ok).toBe(false)
+  })
+
+  it('lets a learner report progress', async () => {
+    const m = memStore({ courses: [graded] })
+    const r = await runWrite(m.store, sale('me'), setStatus('graded', 'in_progress'))
+    expect(r.ok).toBe(true)
+    expect(m.docs('trainingRecords')[0].status).toBe('in_progress')
+  })
+
+  it('lets a learner re-save a record the server already completed', async () => {
+    // Lesson ticks after the pass: the status is not changing, so nothing is refused.
+    const m = memStore({ courses: [graded], trainingRecords: [rec('graded', 'completed')] })
+    const r = await runWrite(m.store, sale('me'), {
+      ops: [{ op: 'set', path: 'trainingRecords', id: 'me_graded', data: { userId: 'me', courseId: 'graded', status: 'completed', completedLessonIds: ['l1'] } }],
+    })
+    expect(r.ok).toBe(true)
+  })
+
+  it('lets a course with no graded test finish by lessons, as before', async () => {
+    const m = memStore({ courses: [lessonsOnly] })
+    const r = await runWrite(m.store, sale('me'), setStatus('plain', 'completed'))
+    expect(r.ok).toBe(true)
+    expect(m.docs('trainingRecords')[0].status).toBe('completed')
+  })
+
+  it('does not stop a learner finishing a course the door cannot find', async () => {
+    const m = memStore()
+    expect((await runWrite(m.store, sale('me'), setStatus('ghost', 'completed'))).ok).toBe(true)
+  })
+
+  it('judges the whole request first: a refused completion leaves the other writes undone', async () => {
+    const m = memStore({ courses: [graded] })
+    const r = await runWrite(m.store, sale('me'), { ops: [
+      { op: 'set', path: 'trainingRecords', id: 'me_other', data: { userId: 'me', courseId: 'other', status: 'in_progress' } },
+      ...setStatus('graded', 'completed').ops,
+    ] })
+    expect(r.ok).toBe(false)
+    expect(m.docs('trainingRecords')).toHaveLength(0)
+  })
+})
+
 describe('newId', () => {
   it('makes twenty letters and digits, and not the same one twice', () => {
     const ids = new Set(Array.from({ length: 200 }, newId))
