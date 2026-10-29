@@ -4,6 +4,7 @@ import { useSyncExternalStore } from 'react'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { getDocument } from '@/lib/data/client'
 import { attachLive } from '@/lib/data/live'
+import { pollIntervalFor } from '@/lib/data/pollInterval'
 import { ALL_MODULE_IDS, DEFAULT_MODULES, type ModuleId, type ModuleAccessConfig } from '@/lib/modules'
 
 const DEMO = getDemoMode()
@@ -37,7 +38,6 @@ let refCount = 0
 let idleTimer: ReturnType<typeof setTimeout> | undefined
 const listeners = new Set<() => void>()
 const GRACE_MS = 300_000 // match useFirestore's LISTENER_GRACE_MS
-const POLL_MS = 60_000
 
 function notify() {
   version++
@@ -48,7 +48,7 @@ function ensureListener() {
   if (unsub || DEMO) return
   unsub = attachLive({
     path: 'appConfig',
-    pollMs: POLL_MS,
+    pollMs: pollIntervalFor('appConfig'),
     load: () => getDocument('appConfig', 'moduleAccess'),
     apply: (doc) => {
       const next = doc ? ((doc as unknown as ModuleAccessConfig).departments ?? null) : null

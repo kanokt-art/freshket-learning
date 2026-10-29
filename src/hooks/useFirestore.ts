@@ -25,6 +25,7 @@ import { computeUserStats, type UserStats } from '@/types/stats'
 import { save, patch as patchDoc, remove, removeMany, saveMany } from '@/lib/data/collection'
 import { queryDocs, getDocument } from '@/lib/data/client'
 import { attachLive } from '@/lib/data/live'
+import { pollIntervalFor } from '@/lib/data/pollInterval'
 
 // ── Local imported-user overlay (persists CSV-imported users in localStorage) ──
 /**
@@ -343,12 +344,9 @@ const liveListeners = new Map<string, LiveListener>()
 // navigation away-and-back reuses it instead of reading again. 5 min.
 const LISTENER_GRACE_MS = 300_000
 
-// How often to look for OTHER people's changes. A person's own saves do not wait
-// for this — they invalidate. Notifications are the one thing someone else
-// produces that a person is waiting to see, so they are checked more often.
-const POLL_MS = 60_000
-const NOTIFICATION_POLL_MS = 30_000
-const pollFor = (path: string) => (path.startsWith('notifications/') ? NOTIFICATION_POLL_MS : POLL_MS)
+// How often to look for OTHER people's changes is chosen per collection (see
+// lib/data/pollInterval.ts). A person's own saves do not wait for it — they invalidate.
+const pollFor = pollIntervalFor
 
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
