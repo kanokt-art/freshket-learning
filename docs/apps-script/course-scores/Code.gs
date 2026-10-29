@@ -198,15 +198,16 @@ function readShadow_(sheet) {
 
   var n = lastRow - 1
   var shown = sheet.getRange(2, 1, n, lastCol).getDisplayValues()
-  var values = sheet.getRange(2, 1, n, lastCol).getValues()
   var rows = []
   for (var r = 0; r < n; r++) {
     var email = String(shown[r][field.observerEmail]).trim()
     if (!email || email.indexOf('#ref!') !== -1) continue
     var row = {}
     Object.keys(field).forEach(function (f) { row[f] = String(shown[r][field[f]]).trim() })
-    var ts = values[r][field.timestamp]
-    row.timestamp = ts instanceof Date ? ts.toISOString() : ''
+    // เวลาส่งเป็นข้อความตามที่ชีตแสดง (เช่น 04/03/2569 21:15:57 = วัน/เดือน/ปี พ.ศ.) ไม่ใช้ค่า Date ของเซลล์:
+    // Sheets อ่าน 04/03 เป็นเดือน/วัน และ 2569 เป็นปี ค.ศ. ทำให้ผิด ส่วนวันที่ > 12 เป็นข้อความอยู่แล้ว
+    // ฝั่งระบบเป็นคนแปลง (พ.ศ. → ค.ศ.)
+    row.timestamp = String(shown[r][field.timestamp]).trim()
     rows.push(row)
   }
   return { rows: rows, problem: null }
