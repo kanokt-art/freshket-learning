@@ -1,5 +1,7 @@
 'use client'
 
+import { formatPersonName } from '@/lib/users/displayName'
+import { isActiveEmployee } from '@/lib/users/active'
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
@@ -320,12 +322,14 @@ function LiveImpersonator() {
   const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
-  // Group real users by role once.
+  // Group real users by the role they hold, once. Only people still employed: someone
+  // who has resigned keeps their role on file but is not someone to view the app as.
+  // Sorted by the name as it is shown (Firstname (Nickname) Lastname, in English).
   const usersByRole = useMemo(() => {
     const map: Record<string, UserProfile[]> = {}
-    for (const u of allUsers) (map[u.role] ??= []).push(u)
+    for (const u of allUsers) if (isActiveEmployee(u)) (map[u.role] ??= []).push(u)
     for (const k of Object.keys(map)) {
-      map[k].sort((a, b) => (a.displayName ?? '').localeCompare(b.displayName ?? ''))
+      map[k].sort((a, b) => formatPersonName(a).localeCompare(formatPersonName(b)))
     }
     return map
   }, [allUsers])
@@ -362,6 +366,7 @@ function LiveImpersonator() {
         const q = query.trim().toLowerCase()
         const filtered = q
           ? pool.filter((u) =>
+              formatPersonName(u).toLowerCase().includes(q) ||
               (u.displayName ?? '').toLowerCase().includes(q) ||
               (u.nickname ?? '').toLowerCase().includes(q) ||
               (u.department ?? '').toLowerCase().includes(q))
@@ -427,11 +432,11 @@ function LiveImpersonator() {
                           <div className={`size-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden ${selected ? r.activeClass : 'bg-gray-100 text-gray-500'}`}>
                             {u.photoURL
                               // eslint-disable-next-line @next/next/no-img-element
-                              ? <img src={u.photoURL} alt={u.displayName} className="size-full object-cover" />
-                              : (u.nickname?.charAt(0) ?? u.displayName?.charAt(0) ?? '?')}
+                              ? <img src={u.photoURL} alt={formatPersonName(u)} className="size-full object-cover" />
+                              : (formatPersonName(u).charAt(0) || '?')}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className={`text-xs font-bold leading-tight truncate ${selected ? 'text-gray-900' : 'text-gray-700'}`}>{u.displayName}</p>
+                            <p className={`text-xs font-bold leading-tight truncate ${selected ? 'text-gray-900' : 'text-gray-700'}`}>{formatPersonName(u)}</p>
                             <p className="text-xs text-gray-400 truncate leading-tight mt-0.5">{u.department ?? 'ไม่ระบุแผนก'}</p>
                           </div>
                           {selected && (
