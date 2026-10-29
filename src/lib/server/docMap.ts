@@ -625,6 +625,7 @@ export const SHADOW_RECORDS: TableSpec = {
 export const SHADOW_ACKNOWLEDGMENTS: TableSpec = {
   source: 'shadowAcknowledgments', table: 'shadow_acknowledgments', keyColumns: ['id'], hasExtra: true,
   fields: {
+    recordId: fText('record_id'), reviewerRole: fText('reviewer_role'),
     reviewerUid: fText('reviewer_uid'), reviewerName: fText('reviewer_name'),
     rating: fInt('rating'), comment: fText('comment'), reviewedAt: fTs('reviewed_at'),
   },

@@ -1,6 +1,9 @@
 'use client'
 
 import { StarsDisplay, StarsInput } from '@/components/common/Stars'
+import { ShadowReviews } from '@/components/features/ShadowReviews'
+import { groupByRecord, averageRating, type ReviewDoc } from '@/lib/shadow/reviews'
+import { submitShadowReview } from '@/lib/shadow/submitReview'
 import { toStars } from '@/lib/feedback/stars'
 import { answeredQuestions } from '@/lib/shadow/fields'
 import { NO_TEAM, teamChoices, effectiveTeamChoice, matchesTeam } from '@/lib/users/teamFilter'
@@ -10,7 +13,7 @@ import { Header } from '@/components/layout/Header'
 import { save } from '@/lib/data/collection'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
-import { useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList } from '@/hooks/useFirestore'
+import { useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAllShadowAcknowledgments, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList } from '@/hooks/useFirestore'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { RoleplayRadar } from '@/components/features/RoleplayRadar'
 import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
@@ -508,6 +511,9 @@ function EmployeeSidebar({
   const { allowedModules, loading: moduleLoading } = useModuleAccess(user.role, user.department)
   const showShadow = !moduleLoading && allowedModules.has('shadow')
   const { data: shadowRecords } = useShadowRecordsByUser(showShadow ? user.uid : undefined)
+  // The reviews of this member's visits, from every team lead and manager who gave one.
+  const { data: allReviews } = useAllShadowAcknowledgments(showShadow)
+  const reviewsByRecord = useMemo(() => groupByRecord(allReviews as unknown as ReviewDoc[]), [allReviews])
 
   // Imported Pre/Post assessment scores, grouped by subject with the latest
   // pre → latest post and the improvement between them.
@@ -846,7 +852,9 @@ function EmployeeSidebar({
             {shadowRecords.length === 0 ? (
               <p className="text-xs text-gray-400 text-center py-12">ยังไม่มีประวัติ Shadow Visit</p>
             ) : shadowRecords.map(rec => {
-              const rating = rec.ratingScore ?? null
+              const reviews = reviewsByRecord.get(rec.id) ?? []
+              // The average of the reviews given; a score written on the visit itself (older) otherwise.
+              const rating = averageRating(reviews) ?? rec.ratingScore ?? null
               const isOpen = openVisitId === rec.id
               const answers = isOpen ? answeredQuestions(rec) : []
               return (
@@ -867,7 +875,7 @@ function EmployeeSidebar({
                       <div className="flex items-center gap-2 shrink-0">
                         {rating != null && (
                           <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${scorePastel(rating * 20)}`}>
-                            {rating}/5
+                            {rating}/5 ★
                           </span>
                         )}
                         <svg className={`size-4 text-gray-300 transition-transform duration-150 ${isOpen ? 'rotate-90 text-freshket-500' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -910,12 +918,23 @@ function EmployeeSidebar({
                           </div>
                         </div>
                       ))}
-                      {rec.evaluationFeedback && (
+                      {reviews.length === 0 && rec.evaluationFeedback && (
                         <div>
                           <p className="text-xs font-bold text-freshket-700 mb-1.5">ความเห็นจากผู้ประเมิน</p>
                           <p className="text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">{rec.evaluationFeedback}</p>
                         </div>
                       )}
+                      <ShadowReviews
+                        reviews={reviews}
+                        viewerUid={viewer?.uid}
+                        canReview={canFeedback && rec.observerUid !== viewer?.uid}
+                        onSave={(rating, comment) => submitShadowReview({
+                          record: rec,
+                          reviewer: { uid: viewer?.uid ?? '', name: viewer?.displayName ?? '', role: viewer?.role ?? '' },
+                          rating,
+                          comment,
+                        })}
+                      />
                     </div>
                   )}
                 </div>

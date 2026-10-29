@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { Header } from '@/components/layout/Header'
 import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
 import { useAuth } from '@/hooks/useAuth'
-import { useAllUsers, useTeams, useAllShadowRecords, useAllShadowAcknowledgments, saveShadowRecord, saveShadowAcknowledgment } from '@/hooks/useFirestore'
+import { useAllUsers, useTeams, useAllShadowRecords, useAllShadowAcknowledgments, saveShadowRecord } from '@/hooks/useFirestore'
 import { alertError } from '@/lib/ui/alert'
 import { canAccess, getTeamManagerIds } from '@/types/user'
 import type { UserProfile } from '@/types/user'
@@ -13,6 +13,9 @@ import { announce } from '@/lib/notifications/announce'
 import { pushNotification } from '@/lib/notifications/push'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { getDemoMode } from '@/lib/demo/demoMode'
+import { ShadowReviews } from '@/components/features/ShadowReviews'
+import { groupByRecord, primaryReview, averageRating, type ReviewDoc } from '@/lib/shadow/reviews'
+import { submitShadowReview } from '@/lib/shadow/submitReview'
 
 const DEMO_MODE = getDemoMode()
 
@@ -284,18 +287,18 @@ function DetailBlock({ label, value }: { label: string; value: string }) {
 
 function VisitDetailModal({
   record,
-  ack,
+  reviews,
+  viewerUid,
   canReview,
-  reviewerName,
   onClose,
   onSaveAck,
 }: {
   record: ShadowRecord
-  ack?: ShadowAcknowledgment
+  reviews: ShadowAcknowledgment[]
+  viewerUid?: string
   canReview: boolean
-  reviewerName: string
   onClose: () => void
-  onSaveAck: (recordId: string, rating: number, comment: string) => void
+  onSaveAck: (recordId: string, rating: number, comment: string) => Promise<void> | void
 }) {
   return (
     <div
@@ -358,132 +361,14 @@ function VisitDetailModal({
             <DetailBlock key={key} label={label} value={record[key] as string} />
           ))}
 
-          {/* Acknowledge / Feedback section */}
-          {canReview ? (
-            <AcknowledgeSection
-              ack={ack}
-              reviewerName={reviewerName}
-              onSave={(rating, comment) => onSaveAck(record.id, rating, comment)}
-            />
-          ) : ack ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-bold text-amber-700">Feedback จาก TL / Manager</p>
-                <StarRating score={ack.rating} />
-              </div>
-              <p className="text-xs text-amber-600">{ack.reviewerName} · {formatThaiDate(ack.reviewedAt)}</p>
-              {ack.comment && <p className="text-sm text-amber-800 leading-relaxed">{ack.comment}</p>}
-            </div>
-          ) : null}
+          {/* Feedback from the team lead and the manager — each gives their own */}
+          <ShadowReviews
+            reviews={reviews}
+            viewerUid={viewerUid}
+            canReview={canReview && record.observerUid !== viewerUid}
+            onSave={(rating, comment) => onSaveAck(record.id, rating, comment)}
+          />
         </div>
-      </div>
-    </div>
-  )
-}
-
-// ── AcknowledgeSection ────────────────────────────────────────────────────────
-
-function AcknowledgeSection({
-  ack,
-  reviewerName,
-  onSave,
-}: {
-  ack?: ShadowAcknowledgment
-  reviewerName: string
-  onSave: (rating: number, comment: string) => void
-}) {
-  const [editing, setEditing] = useState(!ack)
-  const [rating, setRating]   = useState(ack?.rating ?? 0)
-  const [comment, setComment] = useState(ack?.comment ?? '')
-
-  if (!editing && ack) {
-    return (
-      <div className="rounded-2xl bg-freshket-50 p-4 space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <svg className="size-4 text-freshket-500" viewBox="0 0 24 24" fill="currentColor">
-              <path fillRule="evenodd" d="M19.916 4.626a.75.75 0 01.208 1.04l-9 13.5a.75.75 0 01-1.154.114l-6-6a.75.75 0 011.06-1.06l5.353 5.353 8.493-12.739a.75.75 0 011.04-.208z" clipRule="evenodd" />
-            </svg>
-            <p className="text-xs font-bold text-freshket-700">Acknowledged</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <StarRating score={ack.rating} />
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="text-xs text-freshket-600 font-bold hover:underline ml-2"
-            >
-              แก้ไข
-            </button>
-          </div>
-        </div>
-        <p className="text-xs text-freshket-600">{ack.reviewerName} · {formatThaiDate(ack.reviewedAt)}</p>
-        {ack.comment && <p className="text-sm text-freshket-800 leading-relaxed">{ack.comment}</p>}
-      </div>
-    )
-  }
-
-  return (
-    <div className="rounded-2xl bg-freshket-50 p-4 space-y-4">
-      <p className="text-xs font-bold text-freshket-700">
-        {ack ? 'แก้ไข Feedback' : 'Acknowledge & ให้ Feedback'}
-      </p>
-
-      {/* Star picker */}
-      <div>
-        <p className="text-xs text-gray-600 mb-2">Rating <span className="text-rose-400">*</span></p>
-        <div className="flex gap-1">
-          {[1, 2, 3, 4, 5].map(i => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => setRating(i)}
-              className="transition-transform hover:scale-110"
-            >
-              <svg
-                className={`size-8 transition-colors ${i <= rating ? 'text-amber-400' : 'text-gray-200 hover:text-amber-200'}`}
-                viewBox="0 0 24 24"
-                fill="currentColor"
-              >
-                <path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" />
-              </svg>
-            </button>
-          ))}
-          {rating > 0 && (
-            <span className="text-sm font-bold text-amber-600 self-center ml-1">{rating}/5</span>
-          )}
-        </div>
-      </div>
-
-      {/* Comment */}
-      <div>
-        <p className="text-xs text-gray-600 mb-1.5">Comment / Feedback</p>
-        <textarea
-          value={comment}
-          onChange={e => setComment(e.target.value)}
-          placeholder="สรุปการ Shadow ได้ครบประเด็นมั้ย? จุดที่ดี? สิ่งที่ควรปรับปรุง?"
-          className="w-full rounded-xl bg-white px-3 py-2.5 text-sm text-gray-900 leading-relaxed resize-none min-h-[80px] placeholder-gray-400 outline-none focus:border-freshket-400 focus:ring-2 focus:ring-freshket-100 transition-all"
-        />
-      </div>
-
-      <div className="flex items-center justify-end gap-2">
-        {ack && (
-          <button
-            type="button"
-            onClick={() => { setRating(ack.rating); setComment(ack.comment); setEditing(false) }}
-            className="px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-normal text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            ยกเลิก
-          </button>
-        )}
-        <button
-          type="button"
-          disabled={rating === 0}
-          onClick={() => { if (rating > 0) { onSave(rating, comment); setEditing(false) } }}
-          className="px-4 py-1.5 rounded-xl bg-freshket-500 hover:bg-freshket-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors shadow-sm"
-        >
-          {ack ? 'บันทึกการแก้ไข' : 'Acknowledge'}
-        </button>
       </div>
     </div>
   )
@@ -495,6 +380,7 @@ function MemberVisitsOverlay({
   member,
   records,
   acknowledgments,
+  myReviewed,
   canReview,
   reviewerName,
   onClose,
@@ -504,6 +390,8 @@ function MemberVisitsOverlay({
   member: UserProfile
   records: ShadowRecord[]
   acknowledgments: Map<string, ShadowAcknowledgment>
+  /** Visits the viewer has already reviewed (the table shows someone's review either way). */
+  myReviewed: Set<string>
   canReview: boolean
   reviewerName: string
   onClose: () => void
@@ -610,7 +498,7 @@ function MemberVisitsOverlay({
                   </button>
 
                   {/* Quick acknowledge row */}
-                  {canReview && !ack && (
+                  {canReview && !myReviewed.has(r.id) && (
                     <QuickAckRow recordId={r.id} onSave={onSaveAck} />
                   )}
                   {ack && (
@@ -1362,13 +1250,34 @@ export default function ShadowPage() {
   // local override on top of the fixed DEMO_ACKS constant; live mode gets the
   // update for free once useAllShadowAcknowledgments' onSnapshot catches up.
   const [localAcks, setLocalAcks] = useState<Map<string, ShadowAcknowledgment>>(new Map())
-  const acknowledgments = useMemo(() => {
-    const base = DEMO_MODE ? DEMO_ACKS : liveAcks.reduce((m, a) => m.set(a.id, a), new Map<string, ShadowAcknowledgment>())
-    if (localAcks.size === 0) return base
-    const merged = new Map<string, ShadowAcknowledgment>(base)
-    localAcks.forEach((ack, id) => merged.set(id, ack))
-    return merged
+  // Every review of every visit (a visit can have one from the team lead and one from
+  // the manager). Demo mode has a fixed set with one review per visit.
+  const reviewsByRecord = useMemo(() => {
+    if (DEMO_MODE) {
+      const demo: ReviewDoc[] = []
+      const all = new Map<string, ShadowAcknowledgment>(DEMO_ACKS)
+      localAcks.forEach((ack, id) => all.set(id, ack))
+      all.forEach((ack, id) => demo.push({ ...ack, id, recordId: id }))
+      return groupByRecord(demo)
+    }
+    return groupByRecord(liveAcks as unknown as ReviewDoc[])
   }, [liveAcks, localAcks])
+
+  // The review to show in a list: the viewer's own, otherwise the latest.
+  const acknowledgments = useMemo(() => {
+    const out = new Map<string, ShadowAcknowledgment>()
+    reviewsByRecord.forEach((list, recordId) => {
+      const pick = primaryReview(list, user?.uid)
+      if (pick) out.set(recordId, pick)
+    })
+    return out
+  }, [reviewsByRecord, user?.uid])
+
+  const myReviewed = useMemo(() => {
+    const out = new Set<string>()
+    reviewsByRecord.forEach((list, recordId) => { if (list.some(r => r.reviewerUid === user?.uid)) out.add(recordId) })
+    return out
+  }, [reviewsByRecord, user?.uid])
 
   const [showForm, setShowForm]         = useState(false)
   const [overlayMember, setOverlayMember] = useState<UserProfile | null>(null)
@@ -1417,9 +1326,12 @@ export default function ShadowPage() {
     const ratingArr = new Map<string, number[]>()
     for (const r of records) {
       countMap.set(r.observerUid, (countMap.get(r.observerUid) ?? 0) + 1)
-      if (typeof r.ratingScore === 'number' && r.ratingScore > 0) {
+      // The stars the reviewers gave; a score written on the visit itself (older) when nobody has reviewed it.
+      const given = (reviewsByRecord.get(r.id) ?? []).map(v => v.rating)
+      const scores = given.length > 0 ? given : (typeof r.ratingScore === 'number' && r.ratingScore > 0 ? [r.ratingScore] : [])
+      if (scores.length > 0) {
         const arr = ratingArr.get(r.observerUid) ?? []
-        arr.push(r.ratingScore)
+        arr.push(...scores)
         ratingArr.set(r.observerUid, arr)
       }
     }
@@ -1432,7 +1344,7 @@ export default function ShadowPage() {
       result.set(uid, { count, avgRating })
     })
     return result
-  }, [records])
+  }, [records, reviewsByRecord])
 
   // Team name lookup
   const teamNameMap = useMemo(() => {
@@ -1522,36 +1434,27 @@ export default function ShadowPage() {
   }
 
   async function handleSaveAck(recordId: string, rating: number, comment: string) {
-    const ack: ShadowAcknowledgment = {
-      reviewerUid: user?.uid ?? '',
-      reviewerName: user?.displayName ?? '',
+    if (DEMO_MODE) {
+      setLocalAcks(prev => new Map(prev).set(recordId, {
+        reviewerUid: user?.uid ?? '',
+        reviewerName: user?.displayName ?? '',
+        reviewerRole: user?.role,
+        rating,
+        comment,
+        reviewedAt: new Date(),
+      }))
+      return
+    }
+    const rec = records.find(r => r.id === recordId)
+    if (!rec || !user) return
+    // Saved under this reviewer's own id (so a manager's review does not replace the
+    // team lead's), then the person who made the visit is told.
+    await submitShadowReview({
+      record: rec,
+      reviewer: { uid: user.uid, name: user.displayName ?? '', role: user.role },
       rating,
       comment,
-      reviewedAt: new Date(),
-    }
-    if (DEMO_MODE) {
-      setLocalAcks(prev => new Map(prev).set(recordId, ack))
-    } else {
-      await saveShadowAcknowledgment(recordId, ack)
-    }
-
-    const rec = records.find(r => r.id === recordId)
-    if (rec && rec.observerUid !== user?.uid) {
-      pushNotification(rec.observerUid, {
-        type: 'shadow_ack_received',
-        title: `${user?.displayName ?? 'Mentor'} ประเมิน Shadow Visit ของคุณ`,
-        body: `ร้าน ${rec.storeName} · ได้รับ ${rating}/5 ดาว`,
-        refId: recordId,
-        refPath: '/shadow',
-      })
-      void announce({
-        kind: 'shadow_acked',
-        reviewerName: user?.displayName ?? 'Mentor',
-        observerName: rec.observerName || 'พนักงาน',
-        rating,
-        path: '/shadow',
-      })
-    }
+    })
   }
 
   if (!user) return null
@@ -1744,6 +1647,7 @@ export default function ShadowPage() {
           member={overlayMember}
           records={records.filter(r => r.observerUid === overlayMember.uid).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())}
           acknowledgments={acknowledgments}
+          myReviewed={myReviewed}
           canReview={isLead}
           reviewerName={user?.displayName ?? ''}
           onClose={() => setOverlayMember(null)}
@@ -1756,9 +1660,9 @@ export default function ShadowPage() {
       {selectedVisit && (
         <VisitDetailModal
           record={selectedVisit}
-          ack={acknowledgments.get(selectedVisit.id)}
+          reviews={reviewsByRecord.get(selectedVisit.id) ?? []}
+          viewerUid={user?.uid}
           canReview={isLead}
-          reviewerName={user?.displayName ?? ''}
           onClose={() => setSelectedVisit(null)}
           onSaveAck={handleSaveAck}
         />

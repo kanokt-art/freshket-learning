@@ -22,6 +22,7 @@
 // anything a rule does not explicitly allow is refused.
 
 import type { Doc } from './docMap'
+import { reviewId } from '@/lib/shadow/reviews'
 
 export type Role = 'sale' | 'team_lead' | 'manager' | 'super_admin'
 
@@ -114,6 +115,17 @@ interface Policy {
   create?: (w: WriteRequest) => boolean
   update?: (w: WriteRequest) => boolean
   delete?: (w: WriteRequest) => boolean
+}
+
+/** A lead-or-above's review of a visit, in their own name, under the id that names the visit and them. */
+function isOwnShadowReview(w: WriteRequest): boolean {
+  const d = w.incoming
+  if (!d || !isLeadUp(w.actor)) return false
+  const rating = d.rating
+  return d.reviewerUid === w.actor.uid &&
+    typeof d.recordId === 'string' && d.recordId !== '' &&
+    w.id === reviewId(d.recordId, w.actor.uid) &&
+    typeof rating === 'number' && Number.isInteger(rating) && rating >= 1 && rating <= 5
 }
 
 const staffRead = () => true                     // every actor here is already verified staff
@@ -231,10 +243,15 @@ const POLICIES: Record<string, Policy> = {
   // A team_lead/manager's sign-off on a member's shadow visit; the id is the
   // record it acknowledges. The reviewer must stamp themselves as reviewerUid —
   // the same self-attribution guard as observerUid above.
+  //
+  // A visit can have a review from each reviewer (the team lead AND the manager). A
+  // review's id is "<visit>__<reviewer>", and the rule insists on it: it is what lets
+  // two reviewers each have their own review, and what stops one writing over the
+  // other's. Stars are whole numbers from one to five.
   shadowAcknowledgments: {
     read: staffRead,
-    create: (w) => isLeadUp(w.actor) && w.incoming?.reviewerUid === w.actor.uid,
-    update: (w) => isLeadUp(w.actor) && w.incoming?.reviewerUid === w.actor.uid,
+    create: (w) => isOwnShadowReview(w),
+    update: (w) => isOwnShadowReview(w) && w.existing?.reviewerUid === w.actor.uid,
     delete: (w) => isSuper(w.actor),
   },
 

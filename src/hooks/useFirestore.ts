@@ -26,6 +26,7 @@ import { save, patch as patchDoc, remove, removeMany, saveMany } from '@/lib/dat
 import { queryDocs, getDocument } from '@/lib/data/client'
 import { attachLive } from '@/lib/data/live'
 import { pollIntervalFor } from '@/lib/data/pollInterval'
+import { reviewId } from '@/lib/shadow/reviews'
 
 // ── Local imported-user overlay (persists CSV-imported users in localStorage) ──
 /**
@@ -1120,8 +1121,10 @@ export async function saveShadowRecord(record: Omit<ShadowRecord, 'id'>): Promis
   return id
 }
 
+// One review per reviewer per visit: the id names both, so a manager's review does not
+// replace the team lead's, and re-saving edits the reviewer's own.
 export async function saveShadowAcknowledgment(recordId: string, ack: ShadowAcknowledgment): Promise<void> {
-  await save('shadowAcknowledgments', { ...ack, id: recordId }, { replace: true })
+  await save('shadowAcknowledgments', { ...ack, recordId, id: reviewId(recordId, ack.reviewerUid) }, { replace: true })
 }
 
 // ── Roleplay assessments ──────────────────────────────────────────────────────

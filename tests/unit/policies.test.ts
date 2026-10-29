@@ -407,16 +407,72 @@ describe('shadowRecords', () => {
 })
 
 describe('shadowAcknowledgments', () => {
-  it('a sign-off is by a team_lead or above, in their own name', () => {
-    expect(write({ actor: SALE, collection: 'shadowAcknowledgments', id: 's1', data: { reviewerUid: SALE.uid } })).toBe(false)
-    expect(write({ actor: LEAD, collection: 'shadowAcknowledgments', id: 's1', data: { reviewerUid: LEAD.uid } })).toBe(true)
-    expect(write({ actor: LEAD, collection: 'shadowAcknowledgments', id: 's1', data: { reviewerUid: MGR.uid } })).toBe(false)
+  // A visit can have a review from each reviewer; the id names the visit AND the reviewer.
+  const col = 'shadowAcknowledgments'
+  const review = (reviewer: typeof LEAD, over: Record<string, unknown> = {}) => ({
+    recordId: 'v1', reviewerUid: reviewer.uid, reviewerRole: reviewer.role, rating: 4, comment: 'good', ...over,
+  })
+  const idOf = (reviewer: typeof LEAD, recordId = 'v1') => `${recordId}__${reviewer.uid}`
+
+  it('a team lead reviews a visit in their own name', () => {
+    expect(write({ actor: LEAD, collection: col, id: idOf(LEAD), data: review(LEAD) })).toBe(true)
+  })
+
+  it('and so does a manager — a second review of the same visit, not a replacement', () => {
+    expect(write({ actor: MGR, collection: col, id: idOf(MGR), data: review(MGR) })).toBe(true)
+    expect(idOf(MGR)).not.toBe(idOf(LEAD))
+  })
+
+  it('a learner cannot review, not even their own visit', () => {
+    expect(write({ actor: SALE, collection: col, id: idOf(SALE), data: review(SALE) })).toBe(false)
+  })
+
+  it('a reviewer cannot sign as someone else', () => {
+    expect(write({ actor: LEAD, collection: col, id: idOf(MGR), data: review(MGR) })).toBe(false)
+    expect(write({ actor: LEAD, collection: col, id: idOf(LEAD), data: review(LEAD, { reviewerUid: MGR.uid }) })).toBe(false)
+  })
+
+  it('the id must name the reviewer, so one cannot write over another’s review', () => {
+    // Under the old scheme the id was just the visit, which is how a second review replaced the first.
+    expect(write({ actor: MGR, collection: col, id: 'v1', data: review(MGR) })).toBe(false)
+    expect(write({ actor: MGR, collection: col, id: idOf(LEAD), data: review(MGR) })).toBe(false)
+  })
+
+  it('the id must name the visit the review says it is for', () => {
+    expect(write({ actor: LEAD, collection: col, id: idOf(LEAD, 'v2'), data: review(LEAD) })).toBe(false)
+  })
+
+  it('a review must say which visit it is for', () => {
+    expect(write({ actor: LEAD, collection: col, id: idOf(LEAD), data: review(LEAD, { recordId: undefined }) })).toBe(false)
+    expect(write({ actor: LEAD, collection: col, id: idOf(LEAD, ''), data: review(LEAD, { recordId: '' }) })).toBe(false)
+  })
+
+  it.each([0, 6, -1, 3.5, '4', null])('stars must be a whole number from one to five, not %s', (rating) => {
+    expect(write({ actor: LEAD, collection: col, id: idOf(LEAD), data: review(LEAD, { rating }) })).toBe(false)
+  })
+
+  it.each([1, 2, 3, 4, 5])('accepts %s stars', (rating) => {
+    expect(write({ actor: LEAD, collection: col, id: idOf(LEAD), data: review(LEAD, { rating }) })).toBe(true)
+  })
+
+  it('a reviewer edits their own review', () => {
+    const existing = doc(idOf(LEAD), review(LEAD))
+    expect(write({ actor: LEAD, collection: col, id: idOf(LEAD), existing, data: { rating: 5, comment: 'better' } })).toBe(true)
+  })
+
+  it('and cannot edit someone else’s', () => {
+    const existing = doc(idOf(LEAD), review(LEAD))
+    expect(write({ actor: MGR, collection: col, id: idOf(LEAD), existing, data: { rating: 1 } })).toBe(false)
   })
 
   it('only super_admin deletes', () => {
-    const existing = doc('s1', { reviewerUid: LEAD.uid })
-    expect(write({ actor: LEAD, collection: 'shadowAcknowledgments', id: 's1', existing, remove: true })).toBe(false)
-    expect(write({ actor: ADMIN, collection: 'shadowAcknowledgments', id: 's1', existing, remove: true })).toBe(true)
+    const existing = doc(idOf(LEAD), review(LEAD))
+    expect(write({ actor: LEAD, collection: col, id: idOf(LEAD), existing, remove: true })).toBe(false)
+    expect(write({ actor: ADMIN, collection: col, id: idOf(LEAD), existing, remove: true })).toBe(true)
+  })
+
+  it('everyone signed in can read the reviews', () => {
+    for (const a of roles) expect(read(a, col)).toBe(true)
   })
 })
 
