@@ -841,6 +841,8 @@ function firstLessonKey(topics: CourseTopic[]): string | null {
   return null
 }
 
+const FINISH_KEY = '__finish__'
+
 function LessonBrowserStep({
   course, done, onDone, onNext, hasNext, completedLessonIds, onLessonComplete,
 }: {
@@ -961,6 +963,16 @@ function LessonBrowserStep({
 
   const media = selectedLesson?.type === 'video' && selectedLesson.videoUrl ? toEmbedUrl(selectedLesson.videoUrl) : null
 
+  // The "จบการเรียน" tab under the lesson list: where the course is finished. It lists
+  // every lesson with whether it is passed, and the button only works once all are
+  // (canFinish above) — nobody can finish with a lesson outstanding.
+  const showingFinish = selectedKey === FINISH_KEY
+  const allLessons = topics.flatMap((t) => t.lessons.map((l) => ({ topic: t, lesson: l })))
+  const lessonPassed = (l: CourseLesson) => (l.quizRole === 'pre_test'
+    ? completedLessonIds.includes(l.id) && completedLessonIds.includes(`${l.id}:post`)
+    : completedLessonIds.includes(l.id))
+  const passedCount = allLessons.filter(({ lesson }) => lessonPassed(lesson)).length
+
   return (
     <div className="flex flex-col gap-4 h-full">
       <div className="flex items-center gap-3">
@@ -1010,11 +1022,83 @@ function LessonBrowserStep({
               </div>
             </div>
           ))}
+
+          {/* Finish the course — locked until every lesson is passed */}
+          <div className="border-t border-gray-100 pt-2">
+            <button type="button" onClick={() => setSelectedKey(FINISH_KEY)}
+              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-xs font-bold transition-all ${showingFinish ? 'bg-freshket-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
+              <svg className="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v1.5M3 21v-6m0 0l2.77-.693a9 9 0 016.208.682l.108.054a9 9 0 006.086.71l3.114-.732a48.524 48.524 0 01-.005-10.499l-3.11.732a9 9 0 01-6.085-.711l-.108-.054a9 9 0 00-6.208-.682L3 4.5M3 15V4.5" />
+              </svg>
+              <span className="flex-1 truncate">จบการเรียน</span>
+              {done ? (
+                <svg className={`size-3.5 shrink-0 ${showingFinish ? 'text-white' : 'text-freshket-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+              ) : !canFinish && (
+                <svg className="size-3.5 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Right: content viewer */}
         <div className="flex-1 bg-white rounded-2xl border border-gray-100 overflow-y-auto p-6">
-          {!selectedLesson ? (
+          {showingFinish ? (
+            <div className="space-y-4 max-w-2xl">
+              <h3 className="text-base font-bold text-gray-900">จบการเรียน</h3>
+              <p className="text-xs text-gray-500">
+                {done
+                  ? 'คุณเรียนจบหลักสูตรนี้แล้ว'
+                  : canFinish
+                    ? 'คุณผ่านครบทุกบทเรียนแล้ว กดปุ่มด้านล่างเพื่อจบการเรียน'
+                    : `ต้องผ่านครบทุกบทเรียนก่อนจึงจะจบการเรียนได้ (${passedCount}/${allLessons.length})`}
+              </p>
+              <div className="rounded-xl border border-gray-100 divide-y divide-gray-100">
+                {allLessons.map(({ topic, lesson }) => {
+                  const ok = lessonPassed(lesson)
+                  return (
+                    <button key={`${topic.id}:${lesson.id}`} type="button" onClick={() => setSelectedKey(`${topic.id}:${lesson.id}`)}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors">
+                      <span className={`size-5 rounded-full flex items-center justify-center shrink-0 ${ok ? 'bg-freshket-500' : 'border-2 border-gray-200'}`}>
+                        {ok && (
+                          <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                          </svg>
+                        )}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm text-gray-900 truncate">{lesson.title}</span>
+                        <span className="block text-xs text-gray-400 truncate">{topic.title}</span>
+                      </span>
+                      <span className={`text-xs font-bold shrink-0 ${ok ? 'text-freshket-600' : 'text-amber-600'}`}>{ok ? 'ผ่านแล้ว' : 'ยังไม่ผ่าน'}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              {!done && requiredVideoKeys.length > 0 && !allVideosWatched && (
+                <p className="text-xs font-bold text-amber-600">
+                  ดูวิดีโอให้ครบทุกบทเรียนก่อน ({requiredVideoKeys.filter((k) => watchedVideos.has(k)).length}/{requiredVideoKeys.length})
+                </p>
+              )}
+              {!done && !gradedQuizzesDone && (
+                <p className="text-xs font-bold text-amber-600">
+                  ทำแบบทดสอบให้ครบก่อน ({gradedQuizKeys.filter((k) => completedLessonIds.includes(k)).length}/{gradedQuizKeys.length})
+                </p>
+              )}
+              {!done && (
+                <button onClick={onDone} disabled={!canFinish}
+                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-bold bg-freshket-500 text-white hover:bg-freshket-600 transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-freshket-500">
+                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                  จบการเรียน
+                </button>
+              )}
+            </div>
+          ) : !selectedLesson ? (
             <div className="h-full flex items-center justify-center text-gray-400 text-sm">เลือกบทเรียนทางซ้าย</div>
           ) : (
             <div className="space-y-4 max-w-2xl">
@@ -1142,26 +1226,8 @@ function LessonBrowserStep({
       </div>
 
       <div className="flex flex-col gap-2 shrink-0">
-        {!done && requiredVideoKeys.length > 0 && !allVideosWatched && (
-          <p className="text-xs font-bold text-amber-600 text-center">
-            ดูวิดีโอให้ครบทุกบทเรียนก่อนจึงจะจบขั้นตอนนี้ได้ ({requiredVideoKeys.filter((k) => watchedVideos.has(k)).length}/{requiredVideoKeys.length})
-          </p>
-        )}
-        {!done && allVideosWatched && !gradedQuizzesDone && (
-          <p className="text-xs font-bold text-amber-600 text-center">
-            ทำแบบทดสอบให้ครบก่อนจึงจะจบขั้นตอนนี้ได้ ({gradedQuizLessons.filter((l) => completedLessonIds.includes(l.id)).length}/{gradedQuizLessons.length})
-          </p>
-        )}
         <div className="flex gap-3">
-        {!done ? (
-          <button onClick={onDone} disabled={!canFinish}
-            className="flex-1 py-3 rounded-xl text-sm font-bold bg-freshket-500 text-white hover:bg-freshket-600 transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-freshket-500">
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </svg>
-            เรียนจบแล้ว
-          </button>
-        ) : hasNext ? (
+        {!done ? null : hasNext ? (
           <button onClick={onNext}
             className="flex-1 py-3 rounded-xl text-sm font-bold bg-freshket-500 text-white hover:bg-freshket-600 transition-all flex items-center justify-center gap-2 shadow-sm">
             ไปขั้นตอนถัดไป
