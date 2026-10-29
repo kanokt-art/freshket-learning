@@ -184,7 +184,7 @@ function checkSetup() {
   return lines
 }
 
-/** ตั้ง trigger: ทุกเที่ยงคืน (ช่วง 00:00–01:00) + เมื่อส่งฟอร์ม รันซ้ำได้ ไม่ซ้อน */
+/** (สคริปต์นี้แทนสคริปต์เดิมที่เขียน Firestore + ชีต Training-Record ทั้งหมด) ตั้ง trigger: ทุกเที่ยงคืน (ช่วง 00:00–01:00) + เมื่อส่งฟอร์ม รันซ้ำได้ ไม่ซ้อน */
 function setupTriggers() {
   removeTriggers()
   ScriptApp.newTrigger('syncNow').timeBased().atHour(0).nearMinute(0).everyDays(1).create()
@@ -195,6 +195,7 @@ function setupTriggers() {
 function removeTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var f = t.getHandlerFunction()
-    if (f === 'syncNow' || f === 'onFormSubmit') ScriptApp.deleteTrigger(t)
+    // onAssessmentSubmit คือ trigger ของสคริปต์เดิม (เขียนลง Firestore) ซึ่งเลิกใช้แล้ว — ลบทิ้งไม่ให้ error ค้าง
+    if (f === 'syncNow' || f === 'onFormSubmit' || f === 'onAssessmentSubmit') ScriptApp.deleteTrigger(t)
   })
 }
