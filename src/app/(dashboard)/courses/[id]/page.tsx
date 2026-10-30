@@ -16,6 +16,8 @@ import type { TrainingRecord } from '@/types/tracking'
 import type { UserProfile, Team, Department } from '@/types/user'
 import { YouTubeGatedPlayer, youtubeVideoId } from '@/components/features/YouTubeGatedPlayer'
 import { syncTrainingRecord, countCourseLessons } from '@/lib/progress'
+import { lessonLabel, topicLabel } from '@/lib/courses/labels'
+import { readVideoProgress, furthest, videoProgressKey, NO_VIDEO_PROGRESS, type VideoProgress } from '@/lib/courses/videoProgress'
 import { progKey, statusKey, takeawayKey, readScoped } from '@/lib/courseProgressKeys'
 import { save } from '@/lib/data/collection'
 
@@ -850,7 +852,31 @@ function LessonBrowserStep({
   completedLessonIds: string[]; onLessonComplete: (lessonId: string) => void
 }) {
   const router = useRouter()
+  const { user: viewer } = useAuth()
   const topics = course.topics ?? []
+  // How far each YouTube lesson has been watched (browser-side; display and resume only).
+  const [videoProgress, setVideoProgress] = useState<Record<string, VideoProgress>>({})
+  useEffect(() => {
+    if (!viewer?.uid) return
+    const loaded: Record<string, VideoProgress> = {}
+    for (const t of course.topics ?? []) for (const l of t.lessons) {
+      if (l.type === 'video' && youtubeVideoId(l.videoUrl)) {
+        loaded[l.id] = readVideoProgress(localStorage, videoProgressKey(viewer.uid, course.id, l.id))
+      }
+    }
+    setVideoProgress(loaded)
+  }, [viewer?.uid, course.id, course.topics])
+  function recordVideoProgress(lessonId: string, p: VideoProgress) {
+    if (!viewer?.uid) return
+    setVideoProgress((prev) => ({ ...prev, [lessonId]: furthest(prev[lessonId], p) }))
+    try { localStorage.setItem(videoProgressKey(viewer.uid, course.id, lessonId), JSON.stringify(p)) } catch { /* private mode: the bar still moves */ }
+  }
+  /** 0–100 for a YouTube lesson; null for anything whose progress cannot be measured. */
+  function lessonPct(l: CourseLesson): number | null {
+    if (l.type !== 'video' || !youtubeVideoId(l.videoUrl)) return null
+    if (completedLessonIds.includes(l.id)) return 100
+    return (videoProgress[l.id] ?? NO_VIDEO_PROGRESS).pct
+  }
   const [selectedKey, setSelectedKey] = useState<string | null>(() => firstLessonKey(topics))
   const [assignmentDraft, setAssignmentDraft] = useState('')
   // Keys of YouTube video lessons the learner has watched ≥95% without skipping.
@@ -876,6 +902,7 @@ function LessonBrowserStep({
   const onLessonCompleteRef = useRef(onLessonComplete)
   onLessonCompleteRef.current = onLessonComplete
   const selectedLessonId = selectedLesson?.id
+  const selectedLessonIndex = selectedTopic && selectedLesson ? selectedTopic.lessons.indexOf(selectedLesson) : 0
   const selectedLessonType = selectedLesson?.type
   const selectedIsGradedQuiz = selectedLesson?.type === 'quiz' && !!selectedLesson.quizRole
   // A personality questionnaire is completed by SUBMITTING it, not by opening
@@ -967,7 +994,7 @@ function LessonBrowserStep({
   // every lesson with whether it is passed, and the button only works once all are
   // (canFinish above) — nobody can finish with a lesson outstanding.
   const showingFinish = selectedKey === FINISH_KEY
-  const allLessons = topics.flatMap((t) => t.lessons.map((l) => ({ topic: t, lesson: l })))
+  const allLessons = topics.flatMap((t, ti) => t.lessons.map((l, li) => ({ topic: t, lesson: l, index: li, topicIndex: ti })))
   const lessonPassed = (l: CourseLesson) => (l.quizRole === 'pre_test'
     ? completedLessonIds.includes(l.id) && completedLessonIds.includes(`${l.id}:post`)
     : completedLessonIds.includes(l.id))
@@ -998,11 +1025,11 @@ function LessonBrowserStep({
       <div className="flex-1 min-h-0 flex gap-4" style={{ height: 'calc(100dvh - 240px)', minHeight: '380px' }}>
         {/* Left: topic/lesson nav */}
         <div className="w-64 shrink-0 bg-white rounded-2xl border border-gray-100 overflow-y-auto p-2 space-y-2">
-          {topics.map((topic) => (
+          {topics.map((topic, ti) => (
             <div key={topic.id}>
-              <p className="text-xs font-bold text-gray-500 px-2 py-1.5">{topic.title}</p>
+              <p className="text-xs font-bold text-gray-500 px-2 py-1.5">{topicLabel(topic.title, ti)}</p>
               <div className="space-y-0.5">
-                {topic.lessons.map((lesson) => {
+                {topic.lessons.map((lesson, li) => {
                   const key = `${topic.id}:${lesson.id}`
                   const isActive = selectedKey === key
                   const isComplete = completedLessonIds.includes(lesson.id)
@@ -1010,7 +1037,13 @@ function LessonBrowserStep({
                     <button key={lesson.id} type="button" onClick={() => setSelectedKey(key)}
                       className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-xs transition-all ${isActive ? 'bg-freshket-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
                       <LessonTypeIcon type={lesson.type} className="size-3.5 shrink-0" />
-                      <span className="flex-1 truncate">{lesson.title}</span>
+                      <span className="flex-1 truncate">{lessonLabel(lesson.title, li)}</span>
+                      {(() => {
+                        const pct = lessonPct(lesson)
+                        return pct !== null && pct > 0 ? (
+                          <span className={`shrink-0 tabular-nums ${isActive ? 'text-white/80' : 'text-gray-400'}`}>· {pct}%</span>
+                        ) : null
+                      })()}
                       {isComplete && (
                         <svg className={`size-3.5 shrink-0 ${isActive ? 'text-white' : 'text-freshket-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -1057,7 +1090,7 @@ function LessonBrowserStep({
                     : `ต้องผ่านครบทุกบทเรียนก่อนจึงจะจบการเรียนได้ (${passedCount}/${allLessons.length})`}
               </p>
               <div className="rounded-xl border border-gray-100 divide-y divide-gray-100">
-                {allLessons.map(({ topic, lesson }) => {
+                {allLessons.map(({ topic, lesson, index, topicIndex }) => {
                   const ok = lessonPassed(lesson)
                   return (
                     <button key={`${topic.id}:${lesson.id}`} type="button" onClick={() => setSelectedKey(`${topic.id}:${lesson.id}`)}
@@ -1070,10 +1103,10 @@ function LessonBrowserStep({
                         )}
                       </span>
                       <span className="flex-1 min-w-0">
-                        <span className="block text-sm text-gray-900 truncate">{lesson.title}</span>
-                        <span className="block text-xs text-gray-400 truncate">{topic.title}</span>
+                        <span className="block text-sm text-gray-900 truncate">{lessonLabel(lesson.title, index)}</span>
+                        <span className="block text-xs text-gray-400 truncate">{topicLabel(topic.title, topicIndex)}</span>
                       </span>
-                      <span className={`text-xs font-bold shrink-0 ${ok ? 'text-freshket-600' : 'text-amber-600'}`}>{ok ? 'ผ่านแล้ว' : 'ยังไม่ผ่าน'}</span>
+                      <span className={`text-xs font-bold shrink-0 ${ok ? 'text-freshket-600' : 'text-amber-600'}`}>{ok ? 'ผ่านแล้ว' : (() => { const pct = lessonPct(lesson); return pct ? `ยังไม่ผ่าน · ${pct}%` : 'ยังไม่ผ่าน' })()}</span>
                     </button>
                   )
                 })}
@@ -1102,7 +1135,7 @@ function LessonBrowserStep({
             <div className="h-full flex items-center justify-center text-gray-400 text-sm">เลือกบทเรียนทางซ้าย</div>
           ) : (
             <div className="space-y-4 max-w-2xl">
-              <h3 className="text-base font-bold text-gray-900">{selectedLesson.title}</h3>
+              <h3 className="text-base font-bold text-gray-900">{lessonLabel(selectedLesson.title, selectedLessonIndex)}</h3>
               {selectedLesson.description && <p className="text-xs text-gray-400">{selectedLesson.description}</p>}
 
               {selectedLesson.type === 'video' && (
@@ -1111,7 +1144,10 @@ function LessonBrowserStep({
                   <YouTubeGatedPlayer
                     key={selectedKey}
                     videoId={selectedVideoId}
-                    watched={watchedVideos.has(selectedKey!)}
+                    watched={watchedVideos.has(selectedKey!) || completedLessonIds.includes(selectedLesson.id)}
+                    initialSeconds={(videoProgress[selectedLesson.id] ?? NO_VIDEO_PROGRESS).seconds}
+                    initialPct={(videoProgress[selectedLesson.id] ?? NO_VIDEO_PROGRESS).pct}
+                    onProgress={(p) => recordVideoProgress(selectedLesson!.id, p)}
                     onComplete={() => {
                       setWatchedVideos((s) => new Set(s).add(selectedKey!))
                       onLessonComplete(selectedLesson!.id)

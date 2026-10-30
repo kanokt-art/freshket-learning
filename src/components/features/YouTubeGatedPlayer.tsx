@@ -40,16 +40,24 @@ function loadYouTubeApi(): Promise<void> {
 // (`allowed`); any attempt to scrub *forward* past that snaps the video back —
 // so the learner can rewind/rewatch but cannot skip ahead. When they've watched
 // ≥95% linearly, onComplete fires once (marking the lesson passable).
-export function YouTubeGatedPlayer({ videoId, watched, onComplete }: {
+export function YouTubeGatedPlayer({ videoId, watched, onComplete, initialSeconds = 0, initialPct = 0, onProgress }: {
   videoId: string
   watched: boolean
   onComplete: () => void
+  /** Where the learner got to last time: they may scrub up to here, and the bar starts there. */
+  initialSeconds?: number
+  initialPct?: number
+  /** Called (about once a second) as the furthest point watched moves forward. */
+  onProgress?: (p: { seconds: number; pct: number }) => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<YTPlayer | null>(null)
-  const allowedRef = useRef(0)
+  const allowedRef = useRef(initialSeconds)
+  const reportedRef = useRef(initialSeconds)
+  const onProgressRef = useRef(onProgress)
+  onProgressRef.current = onProgress
   const completedRef = useRef(watched)
-  const [pct, setPct] = useState(0)
+  const [pct, setPct] = useState(initialPct)
   const [localDone, setLocalDone] = useState(watched)
   const [seekBlocked, setSeekBlocked] = useState(false)
 
@@ -73,6 +81,10 @@ export function YouTubeGatedPlayer({ videoId, watched, onComplete }: {
       if (t > allowed) allowedRef.current = t
       const watchedPct = dur > 0 ? Math.min(100, Math.round((allowedRef.current / dur) * 100)) : 0
       setPct(watchedPct)
+      if (allowedRef.current - reportedRef.current >= 1) {
+        reportedRef.current = allowedRef.current
+        onProgressRef.current?.({ seconds: allowedRef.current, pct: watchedPct })
+      }
       if (watchedPct >= 95 && !completedRef.current) {
         completedRef.current = true
         setLocalDone(true)

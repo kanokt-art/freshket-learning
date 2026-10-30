@@ -1,5 +1,6 @@
 'use client'
 
+import { lessonLabel, topicLabel, isUnnamedLesson, isUnnamedTopic, defaultLessonLabel } from '@/lib/courses/labels'
 import { isInCourseTarget } from '@/lib/courses/audience'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
@@ -2644,15 +2645,15 @@ function LessonPreviewModal({ topics, assessments, onClose }: {
           <div className="flex-1 flex overflow-hidden">
             {/* Left: topics/lessons list */}
             <div className="w-64 shrink-0 border-r border-gray-100 overflow-y-auto p-3 space-y-3">
-              {sortedTopics.map((t) => (
+              {sortedTopics.map((t, ti) => (
                 <div key={t.id}>
-                  <p className="text-xs font-bold text-gray-400 px-1.5 mb-1 truncate">{t.title}</p>
+                  <p className="text-xs font-bold text-gray-400 px-1.5 mb-1 truncate">{topicLabel(t.title, ti)}</p>
                   <div className="space-y-0.5">
-                    {t.lessons.slice().sort((a, b) => a.order - b.order).map((l) => (
+                    {t.lessons.slice().sort((a, b) => a.order - b.order).map((l, li) => (
                       <button key={l.id} type="button" onClick={() => setSelectedId(l.id)}
                         className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-xs transition-all ${selectedId === l.id ? 'bg-freshket-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
                         <LessonTypeIcon type={l.type} className="size-3.5 shrink-0" />
-                        <span className="flex-1 truncate">{l.title}</span>
+                        <span className="flex-1 truncate">{lessonLabel(l.title, li)}</span>
                       </button>
                     ))}
                   </div>
@@ -3088,7 +3089,9 @@ function AssessmentPreviewContent({ assessment }: { assessment: Assessment }) {
 // Edits video / file / link / assignment lessons with a live preview on the
 // right. Quiz lessons are handled entirely by the "แบบทดสอบ" tab instead
 // (see QuizSettingsTab / QuizStripPreview) and never reach this component.
-function LessonEditor({ lesson, assessments, onChange, onDelete }: {
+function LessonEditor({ lesson, index, assessments, onChange, onDelete }: {
+  /** Position in its topic: what an unnamed lesson is called. */
+  index: number
   lesson: CourseLesson; assessments: Assessment[]
   onChange: (patch: Partial<CourseLesson>) => void
   onDelete: () => void
@@ -3283,9 +3286,9 @@ function LessonEditor({ lesson, assessments, onChange, onDelete }: {
       </div>
 
       <div>
-        <label className="text-xs font-bold text-gray-600 block mb-1.5">ชื่อบทเรียน<span className="text-rose-500">*</span></label>
-        <input type="text" value={lesson.title} onChange={(e) => onChange({ title: e.target.value })}
-          placeholder="เช่น บทเรียน #1"
+        <label className="text-xs font-bold text-gray-600 block mb-1.5">ชื่อบทเรียน <span className="font-normal text-gray-400">(เว้นว่างไว้ = เรียงเลขตามลำดับอัตโนมัติ)</span></label>
+        <input type="text" value={isUnnamedLesson(lesson.title) ? '' : lesson.title} onChange={(e) => onChange({ title: e.target.value })}
+          placeholder={defaultLessonLabel(index)}
           className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
         />
       </div>
@@ -3936,7 +3939,7 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
   const [dropTopic, setDropTopic] = useState<number | null>(null)
 
   function addTopic() {
-    const t: CourseTopic = { id: makeId(), title: `หัวข้อ #${topics.length + 1}`, order: topics.length, lessons: [] }
+    const t: CourseTopic = { id: makeId(), title: '', order: topics.length, lessons: [] }
     onChange([...topics, t])
   }
   function updateTopic(id: string, patch: Partial<CourseTopic>) {
@@ -3953,7 +3956,7 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
     if (topic.lessons.length > 0) {
       const quizCount = topic.lessons.filter((l) => l.type === 'quiz').length
       const ok = await confirmAction({
-        title: `ลบหัวข้อ "${topic.title || 'ไม่มีชื่อ'}"?`,
+        title: `ลบหัวข้อ "${topicLabel(topic.title, topics.indexOf(topic))}"?`,
         text: `บทเรียน ${topic.lessons.length} รายการในหัวข้อนี้จะถูกลบไปด้วย และกู้คืนไม่ได้`
           // Same distinction the lesson prompt draws: the assessment documents
           // themselves live elsewhere and survive.
@@ -3980,7 +3983,7 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
   function addLesson(topicId: string) {
     const topic = topics.find((t) => t.id === topicId)
     if (!topic) return
-    const lesson: CourseLesson = { id: makeId(), title: `บทเรียน #${topic.lessons.length + 1}`, type: 'video', order: topic.lessons.length }
+    const lesson: CourseLesson = { id: makeId(), title: '', type: 'video', order: topic.lessons.length }
     updateTopic(topicId, { lessons: [...topic.lessons, lesson] })
     setSelectedKey(`${topicId}:${lesson.id}`)
   }
@@ -4003,7 +4006,7 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
     if (!lesson) return
 
     const ok = await confirmAction({
-      title: `ลบบทเรียน "${lesson.title || 'ไม่มีชื่อ'}"?`,
+      title: `ลบบทเรียน "${lessonLabel(lesson.title, topic.lessons.indexOf(lesson))}"?`,
       text: lesson.type === 'quiz'
         // The assessment itself lives in its own collection and is reused by
         // other courses, so say plainly that only the link is being removed.
@@ -4083,7 +4086,7 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
                 >
                   <svg className="size-4" viewBox="0 0 24 24" fill="currentColor"><path d="M9 5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm0 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm-1.5 8.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM18 5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm-1.5 8.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM18 19a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" /></svg>
                 </span>
-                <input value={topic.title} onChange={(e) => updateTopic(topic.id, { title: e.target.value })}
+                <input value={isUnnamedTopic(topic.title) ? '' : topic.title} placeholder={topicLabel('', ti)} onChange={(e) => updateTopic(topic.id, { title: e.target.value })}
                   className="flex-1 min-w-0 text-sm font-bold text-gray-800 bg-transparent focus:outline-none focus:ring-1 focus:ring-freshket-300 rounded px-1.5 py-1"
                 />
                 <button type="button" onClick={() => void removeTopic(topic.id)}
@@ -4116,7 +4119,7 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
                       <button type="button" onClick={() => { setSelectedKey(key); setSelectedQuiz(null) }}
                         className={`flex-1 min-w-0 flex items-center gap-2 px-1.5 py-2.5 text-left text-sm ${selected ? 'text-white' : 'text-gray-600'}`}>
                         <LessonTypeIcon type={lesson.type} className="size-4 shrink-0" />
-                        <span className="flex-1 truncate">{lesson.title}</span>
+                        <span className="flex-1 truncate">{lessonLabel(lesson.title, li)}</span>
                       </button>
                       <button type="button" onClick={() => void removeLesson(topic.id, lesson.id)}
                         className={`size-6 flex items-center justify-center rounded shrink-0 mr-1 transition-all ${selected ? 'text-white/70 hover:bg-white/20' : 'text-gray-300 hover:text-rose-600 hover:bg-rose-50'}`}>
@@ -4156,6 +4159,7 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
         ) : selectedLesson && selectedTopic ? (
           <LessonEditor
             lesson={selectedLesson}
+            index={selectedTopic.lessons.indexOf(selectedLesson)}
             assessments={assessments}
             onChange={(patch) => updateLesson(selectedTopic!.id, selectedLesson!.id, patch)}
             onDelete={() => void removeLesson(selectedTopic!.id, selectedLesson!.id)}
