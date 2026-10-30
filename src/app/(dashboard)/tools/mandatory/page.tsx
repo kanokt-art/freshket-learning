@@ -21,6 +21,8 @@ import {
 import { confirmAction, alertError } from '@/lib/ui/alert'
 import { save, remove, patch } from '@/lib/data/collection'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
+import { PHASE1_DEPARTMENTS } from '@/lib/modules'
+import { isActiveEmployee } from '@/lib/users/active'
 
 const DEMO_MODE = getDemoMode()
 
@@ -93,7 +95,10 @@ export default function MandatoryPage() {
     const depts = mandatoryDepartments(item)
     const targets = allUsers.filter(u =>
       u.uid !== user?.uid
-      && (depts.length === 0 || (u.department && depts.includes(u.department))),
+      && isActiveEmployee(u)
+      && (depts.length === 0
+        ? !!u.department && PHASE1_DEPARTMENTS.has(u.department)
+        : !!u.department && depts.includes(u.department)),
     )
     targets.forEach(u => {
       pushNotification(u.uid, {
@@ -528,10 +533,8 @@ function MandatoryFormModal({
   onSave: (form: FormState) => Promise<void>
   formTitle: string
 }) {
-  // Editing an item never touches its title or date — those are fixed at
-  // creation (the title states the week it was created for; changing the date
-  // afterward would also silently move it to a different month in the
-  // archive). Only description, URL, departments and publish state stay editable.
+  // Editing keeps the title as typed. The date can be changed (it also sets the Week badge
+  // and which month the item sits under in the archive), and the form says so.
   const [form, setForm] = useState<FormState>(() => {
     if (initial) {
       return {
@@ -541,9 +544,20 @@ function MandatoryFormModal({
       }
     }
     const base = emptyForm()
-    return { ...base, departmentAccess: lastDepartments.map(department => ({ department, showHistory: false })) }
+    return {
+      ...base,
+      departmentAccess: lastDepartments
+        .filter(department => PHASE1_DEPARTMENTS.has(department))
+        .map(department => ({ department, showHistory: false })),
+    }
   })
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({})
+  // Departments to choose from: only those in the current rollout (PHASE1_DEPARTMENTS), plus any
+  // already on this item, so an older item that names another department can still untick it.
+  const departmentChoices = useMemo(
+    () => allDepartments.filter(d => PHASE1_DEPARTMENTS.has(d) || form.departmentAccess.some(a => a.department === d)),
+    [allDepartments, form.departmentAccess],
+  )
   // Blocks a second click while the first write is still in flight — without
   // it, an impatient double-click wrote the item twice.
   const [saving, setSaving] = useState(false)
@@ -624,9 +638,7 @@ function MandatoryFormModal({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-          {/* Date — drives both the title and the Week Label, so the two can
-              never say different weeks. Locked once created (see the comment
-              on the form's init above). */}
+          {/* Date — sets the Week badge, and the title's default wording for a new item. */}
           <div>
             <label className="block text-xs font-normal text-gray-700 mb-1.5">
               วันที่ <span className="text-rose-400">*</span>
@@ -635,13 +647,14 @@ function MandatoryFormModal({
               type="date"
               value={toDateInputValue(form.publishDate)}
               onChange={e => e.target.value && setPublishDate(fromDateInputValue(e.target.value))}
-              disabled={!!initial}
-              className={`${inputCls()} ${initial ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : ''}`}
+              className={inputCls()}
             />
+            {/* The Week badge on the card is worked out from this date, so changing the
+                date is how the badge is corrected. The title is separate and stays as typed. */}
             <p className="text-xs text-gray-400 mt-1.5">
-              {initial
-                ? 'แก้ไขวันที่ไม่ได้ — ใช้จัดหมวดเดือน/สัปดาห์ในหน้าคลังแล้ว'
-                : `ใช้จัดหมวดในหน้าคลัง — ${weekLabelForDate(form.publishDate)}`}
+              ป้ายสัปดาห์ในการ์ดคำนวณจากวันที่นี้:{' '}
+              <span className="font-bold text-gray-600">{weekLabelForDate(form.publishDate)}</span>
+              {initial && ' — ถ้าเปลี่ยนวันที่ รายการจะย้ายไปอยู่เดือน/สัปดาห์ใหม่ในหน้าคลัง'}
             </p>
           </div>
 
@@ -698,13 +711,13 @@ function MandatoryFormModal({
           <div>
             <label className="text-xs font-bold text-gray-600 mb-1.5 block">แผนกที่เกี่ยวข้อง</label>
             <p className="text-xs text-gray-500 mb-2">
-              ไม่เลือกแผนกใดเลย = ทุกแผนกเห็นและได้รับแจ้งเตือน
+              ไม่เลือกแผนกใดเลย = ทุกแผนกที่เปิดใช้ระบบเห็นและได้รับแจ้งเตือน
             </p>
-            {allDepartments.length === 0 ? (
+            {departmentChoices.length === 0 ? (
               <p className="text-xs text-gray-400">ยังไม่มีข้อมูลแผนกในระบบ</p>
             ) : (
               <div className="flex flex-wrap gap-2 mb-3">
-                {allDepartments.map(dept => {
+                {departmentChoices.map(dept => {
                   const on = form.departmentAccess.some(a => a.department === dept)
                   return (
                     <button

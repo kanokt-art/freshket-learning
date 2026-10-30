@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/server/store'
 import { dmPeople } from '@/lib/notifications/slackDm'
+import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { reviewId } from '@/lib/shadow/reviews'
 import { requireStaff } from '@/lib/server/auth'
 import type { UserProfile } from '@/types/user'
@@ -132,7 +133,7 @@ export async function POST(req: NextRequest) {
                 ...(item.weekLabel ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: item.weekLabel }] }] : []),
                 ...(link ? [{ type: 'actions', elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'เปิดอ่าน' }, url: link }] }] : []),
               ],
-            }, (u) => isActivePerson(u) && (depts.length === 0 || (!!u.department && depts.includes(u.department))))
+            }, (u) => isActivePerson(u) && !!u.department && (depts.length === 0 ? PHASE1_DEPARTMENTS.has(u.department) : depts.includes(u.department)))
           }
         }
         const departments = Array.isArray(body.departments)
