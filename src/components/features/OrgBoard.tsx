@@ -63,6 +63,9 @@ function deptId(name: string) {
 // "Unassigned" list. Managers are included here per request — previously they
 // only appeared via the separate dept/team "Manager" badge, with no way to see
 // or assign them like a regular roster member.
+/** In a department of the current rollout (PHASE1_DEPARTMENTS) — the pickers offer nobody else. */
+const inTargetDept = (u: UserProfile) => !!u.department && PHASE1_DEPARTMENTS.has(u.department)
+
 export function isRosterRole(role: UserProfile['role']): boolean {
   return role === 'sale' || role === 'team_lead' || role === 'manager'
 }
@@ -437,7 +440,7 @@ function AddMemberDropdown({
   }
 
   return (
-    <div className="mt-2 bg-white rounded-xl border border-gray-200 shadow-lg text-sm overflow-hidden">
+    <div className="mt-2 relative z-20 w-[22rem] max-w-[calc(100vw-3rem)] bg-white rounded-xl border border-gray-200 shadow-lg text-sm overflow-hidden">
       <div className="p-2 border-b border-gray-100">
         <input
           autoFocus
@@ -448,7 +451,7 @@ function AddMemberDropdown({
           className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-1 focus:ring-freshket-300"
         />
       </div>
-      <div className="max-h-40 overflow-y-auto py-1">
+      <div className="max-h-56 overflow-y-auto py-1">
         {filtered.map(u => {
           const engName = u.displayNameEN || u.displayName
           // If already on another team, surface that here — this add moves
@@ -465,8 +468,8 @@ function AddMemberDropdown({
                 {u.displayName.charAt(0)}
               </div>
               <div className="flex-1 min-w-0">
-                <span className="text-xs font-bold text-gray-700 truncate block">{engName}</span>
-                {sub && <span className="text-xs text-gray-500 truncate block">{sub}</span>}
+                <span className="text-xs font-bold text-gray-700 break-words block">{engName}</span>
+                {sub && <span className="text-xs text-gray-500 break-words block">{sub}</span>}
               </div>
             </button>
           )
@@ -562,12 +565,13 @@ function TeamCard({
   // team here is a move, not a duplicate assignment — AddMemberDropdown
   // surfaces their current team so that's not a surprise.
   const eligibleSale = useMemo(
-    () => users.filter(u => u.role === 'sale' && u.teamId !== team.id),
+    () => users.filter(u => u.role === 'sale' && u.teamId !== team.id && inTargetDept(u)),
     [users, team.id],
   )
   const availableHigherRoles = useMemo(
     () => users.filter(u =>
       (u.role === 'team_lead' || u.role === 'manager') &&
+      inTargetDept(u) &&
       !(u.visibleTeamIds ?? []).includes(team.id)
     ),
     [users, team.id],
@@ -579,12 +583,12 @@ function TeamCard({
   // Org-wide, same as managerCandidates below — a team can pull in a team lead
   // from anywhere, not just people already parked on this exact team.
   const tlCandidates = useMemo(
-    () => users.filter(u => u.role === 'team_lead'),
+    () => users.filter(u => u.role === 'team_lead' && inTargetDept(u)),
     [users],
   )
   // Manager slot: only manager-level-and-above employees are eligible.
   const managerCandidates = useMemo(
-    () => users.filter(u => canAccess(u.role, 'manager')),
+    () => users.filter(u => canAccess(u.role, 'manager') && inTargetDept(u)),
     [users],
   )
 
@@ -825,11 +829,11 @@ function TeamCard({
           </button>
         )}
         {canEdit && showManagerPicker && (
-          <div className="mt-2 bg-white rounded-xl border border-gray-200 shadow-lg text-xs overflow-hidden">
+          <div className="mt-2 relative z-20 w-[22rem] max-w-[calc(100vw-3rem)] bg-white rounded-xl border border-gray-200 shadow-lg text-xs overflow-hidden">
             <div className="px-3 pt-2.5 pb-1.5 text-xs font-bold text-gray-500 border-b border-gray-100">
               เลือก Manager ได้หลายคน (ระดับ Manager ขึ้นไป)
             </div>
-            <div className="max-h-60 overflow-y-auto py-1">
+            <div className="max-h-72 overflow-y-auto py-1">
               {managerCandidates.length === 0 && (
                 <p className="px-3 py-3 text-gray-400 text-center">ไม่มีพนักงานระดับ Manager ขึ้นไป</p>
               )}
@@ -855,11 +859,11 @@ function TeamCard({
                       {(u.displayNameEN || u.displayName).charAt(0)}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="font-bold text-gray-800 truncate">
+                      <p className="font-bold text-gray-800 break-words">
                         {u.displayNameEN || u.displayName}
                         {u.nickname && <span className="text-gray-400 font-normal ml-1">({u.nickname})</span>}
                       </p>
-                      <p className="text-gray-400 truncate">{u.position || ROLE_LABELS[u.role]}</p>
+                      <p className="text-gray-400 break-words">{u.position || ROLE_LABELS[u.role]}</p>
                     </div>
                   </button>
                 )
@@ -981,11 +985,11 @@ function TeamCard({
           </button>
         )}
         {canEdit && showTLPicker && (
-          <div className="mt-2 bg-white rounded-xl border border-gray-200 shadow-lg text-xs overflow-hidden">
+          <div className="mt-2 relative z-20 w-[22rem] max-w-[calc(100vw-3rem)] bg-white rounded-xl border border-gray-200 shadow-lg text-xs overflow-hidden">
             <div className="px-3 pt-2.5 pb-1.5 text-xs font-bold text-gray-500 border-b border-gray-100">
               เลือก Team Lead ได้หลายคน
             </div>
-            <div className="max-h-60 overflow-y-auto py-1">
+            <div className="max-h-72 overflow-y-auto py-1">
               {tlCandidates.length === 0 && (
                 <p className="px-3 py-3 text-gray-400 text-center">No Team Lead available</p>
               )}
@@ -1011,11 +1015,11 @@ function TeamCard({
                       {(u.displayNameEN || u.displayName).charAt(0)}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="font-bold text-gray-800 truncate">
+                      <p className="font-bold text-gray-800 break-words">
                         {u.displayNameEN || u.displayName}
                         {u.nickname && <span className="text-gray-400 font-normal ml-1">({u.nickname})</span>}
                       </p>
-                      <p className="text-gray-400 truncate">{u.position || ROLE_LABELS[u.role]}</p>
+                      <p className="text-gray-400 break-words">{u.position || ROLE_LABELS[u.role]}</p>
                     </div>
                   </button>
                 )
