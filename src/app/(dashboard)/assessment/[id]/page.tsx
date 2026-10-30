@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { MOCK_ASSESSMENTS } from '@/lib/utils/mockData'
 import { gradeSubmission, sanitizeQuestion } from '@/lib/assessment/grade'
-import type { Question, DragPair } from '@/types/assessment'
+import { get as getDoc } from '@/lib/data/collection'
+import type { Question, DragPair, Assessment } from '@/types/assessment'
 
 const DEMO_MODE = getDemoMode()
 
@@ -76,6 +77,10 @@ export default function TakeAssessmentPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { user } = useAuth()
+  // ?preview=1 (super_admin only): a try-out. The quiz is graded here in the browser against
+  // the key the admin may already read; nothing is started, submitted, recorded or announced.
+  const isPreview = useSearchParams().get('preview') === '1' && user?.role === 'super_admin'
+  const [previewSource, setPreviewSource] = useState<Assessment | null>(null)
 
   // Loaded from the API, not Firestore: the route strips every answer key before
   // it leaves the server, and it enforces isPublished (the old direct-Firestore
@@ -169,6 +174,30 @@ export default function TakeAssessmentPage() {
       return
     }
 
+    if (isPreview) {
+      // Read the full document (with its key) through the data door — super_admin may. The
+      // take route would refuse a draft and strips the key we need to grade locally.
+      setLoading(true)
+      getDoc<Assessment>('assessments', id)
+        .then((full) => {
+          if (cancelled) return
+          if (!full) { setLoadError('ไม่พบแบบทดสอบนี้'); setAssessment(null); return }
+          setPreviewSource(full)
+          setAssessment({
+            id: full.id,
+            title: full.title,
+            description: full.description,
+            passingScore: full.passingScore,
+            questions: (full.questions ?? []).map(sanitizeQuestion),
+            googleFormUrl: full.googleFormUrl,
+            antiCheatEnabled: false, // no fullscreen lock or violation counter while trying it out
+          })
+        })
+        .catch(() => { if (!cancelled) setLoadError('โหลดแบบทดสอบไม่สำเร็จ') })
+        .finally(() => { if (!cancelled) setLoading(false) })
+      return () => { cancelled = true }
+    }
+
     setLoading(true)
     authedFetch(`/api/assessment/${encodeURIComponent(id)}/take`)
       .then(async (res) => {
@@ -184,7 +213,7 @@ export default function TakeAssessmentPage() {
       .catch(() => { if (!cancelled) setLoadError('เชื่อมต่อ server ไม่ได้') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [id, user])
+  }, [id, user, isPreview])
 
   // Read course context written by course detail page before navigation
   useEffect(() => {
@@ -262,7 +291,7 @@ export default function TakeAssessmentPage() {
   // while they read the warning screen.
   const readyToStart = !!assessment && !submitted && (!antiCheatEnabled || started)
   useEffect(() => {
-    if (DEMO_MODE || !readyToStart || sessionId || !user) return
+    if (DEMO_MODE || isPreview || !readyToStart || sessionId || !user) return
     let cancelled = false
     authedFetch('/api/assessment/start', {
       method: 'POST',
@@ -277,7 +306,7 @@ export default function TakeAssessmentPage() {
       })
       .catch(() => { /* no session → submit still works, just untimed */ })
     return () => { cancelled = true }
-  }, [readyToStart, sessionId, user, id, returnCtx])
+  }, [readyToStart, sessionId, user, id, returnCtx, isPreview])
 
   // Tick the countdown and auto-submit at zero.
   useEffect(() => {
@@ -306,6 +335,34 @@ export default function TakeAssessmentPage() {
     submittingRef.current = true
     setSubmitError(null)
     setSubmitting(true)
+
+    // Preview: grade locally against the stored key. Nothing is sent, saved or announced and
+    // the lesson is not ticked — the same result shape the server returns, so the screen is the same.
+    if (isPreview) {
+      const source = previewSource?.questions ?? []
+      const graded = gradeSubmission(source, answers)
+      const passingScore = previewSource?.passingScore ?? 70
+      setScore(graded.score)
+      setSubmitResult({
+        score: graded.score,
+        passed: graded.pointsPossible === 0 || graded.score >= passingScore,
+        passingScore,
+        pointsEarned: graded.pointsEarned,
+        pointsPossible: graded.pointsPossible,
+        attemptNumber: 1,
+        results: graded.answers.map((a) => ({
+          questionId: a.questionId,
+          correct: a.correct,
+          pointsEarned: a.pointsEarned,
+          pointsPossible: a.pointsPossible,
+          correctLabel: source.find((q) => q.id === a.questionId)?.choices?.find((c) => c.isCorrect)?.text ?? '',
+        })),
+      })
+      if (returnCtx) sessionStorage.removeItem('assessment_return')
+      setSubmitted(true)
+      setSubmitting(false)
+      return
+    }
 
     // Demo mode: grade locally against the mock key. Safe because the data is
     // fictional and nothing is persisted — the real path below never sees a key.
@@ -424,8 +481,16 @@ export default function TakeAssessmentPage() {
     return <AntiCheatGate onStart={handleStartAntiCheat} />
   }
 
+  const previewNote = isPreview ? (
+    <p className="bg-amber-50 border-b border-amber-200 px-6 py-2 text-xs font-bold text-amber-700 text-center">
+      โหมดทดลอง (พรีวิวของ Admin) — ไม่บันทึกคะแนน ไม่นับว่าเรียนบทนี้แล้ว และไม่แจ้งเตือนใคร
+    </p>
+  ) : null
+
   if (submitted) {
     return (
+      <div className="flex flex-col h-full">
+      {previewNote}
       <ResultScreen
         score={score}
         passingScore={assessment.passingScore}
@@ -436,6 +501,7 @@ export default function TakeAssessmentPage() {
         onBack={handleBack}
         fromCourse={!!returnCtx}
       />
+      </div>
     )
   }
 
@@ -443,6 +509,7 @@ export default function TakeAssessmentPage() {
 
   return (
     <div className="flex flex-col h-full bg-white">
+      {previewNote}
       {/* Top bar */}
       <div className="bg-white border-b border-gray-100 px-6 py-4 flex items-center gap-4">
         <button onClick={() => router.back()} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors shrink-0">

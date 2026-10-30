@@ -7,13 +7,20 @@ import { useAuth } from '@/hooks/useAuth'
 import { Header } from '@/components/layout/Header'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
-import { matchOutcome } from '@/lib/bucketAssessments/scoreBuckets'
+import { matchOutcome, scoreBuckets } from '@/lib/bucketAssessments/scoreBuckets'
 import type { BucketResult } from '@/types/bucketAssessment'
 
 // Generic take page for any bucket assessment — the questionnaire it runs is
 // chosen by ?assessment=<definitionId>, defaulting to MBTI so existing links
 // keep working. Nothing here knows what the questions mean; it renders whatever
 // the definition holds and posts the answers to be scored server-side.
+//
+// An answer only counts once it is CONFIRMED: picking an option highlights it, and the
+// "ยืนยันคำตอบ" button is what records it and moves to the next question. Going back
+// and changing an answer asks for a new confirmation.
+//
+// ?preview=1 (super_admin only) is a try-out: scored here in the browser, nothing is sent
+// to the server, nothing is saved to the profile and no lesson is ticked.
 
 export default function BucketAssessmentPage() {
   const { user } = useAuth()
@@ -21,8 +28,12 @@ export default function BucketAssessmentPage() {
   const courseId = searchParams.get('courseId') ?? undefined
   const lessonId = searchParams.get('lessonId') ?? undefined
   const def = getBucketAssessment(searchParams.get('assessment') ?? undefined) ?? MBTI_DEFINITION
+  // Only a super_admin can try it without saving; for anyone else the flag does nothing.
+  const isPreview = searchParams.get('preview') === '1' && user?.role === 'super_admin'
 
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  // Questions whose current answer has been confirmed.
+  const [confirmed, setConfirmed] = useState<Set<string>>(new Set())
   const [index, setIndex] = useState(0)
   const [result, setResult] = useState<BucketResult | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -32,11 +43,13 @@ export default function BucketAssessmentPage() {
     () => def.questions.slice().sort((a, b) => a.order - b.order),
     [def],
   )
-  const answeredCount = Object.keys(answers).length
+  const answeredCount = confirmed.size
   const progressPct = Math.round((answeredCount / questions.length) * 100)
   const current = questions[index]
   const isLast = index === questions.length - 1
-  const allAnswered = answeredCount === questions.length
+  const allConfirmed = answeredCount === questions.length
+  const hasPick = !!current && !!answers[current.id]
+  const isConfirmed = !!current && confirmed.has(current.id)
 
   const dimensionOf = (dimensionId: string) => def.dimensions.find((d) => d.id === dimensionId)
   const bucketLabel = (dimensionId: string, bucketId: string) =>
@@ -47,19 +60,30 @@ export default function BucketAssessmentPage() {
     [def, result],
   )
 
+  // Picking only selects. Changing a confirmed answer un-confirms it until it is confirmed again.
   function choose(questionId: string, optionId: string) {
     setAnswers((prev) => ({ ...prev, [questionId]: optionId }))
-    if (!isLast) setTimeout(() => setIndex((i) => Math.min(i + 1, questions.length - 1)), 150)
+    setConfirmed((prev) => {
+      if (!prev.has(questionId) || answers[questionId] === optionId) return prev
+      const next = new Set(prev)
+      next.delete(questionId)
+      return next
+    })
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(finalAnswers: Record<string, string>) {
     setSubmitting(true)
     setError(null)
     try {
+      if (isPreview) {
+        // Try-out: score here, send nothing, save nothing.
+        setResult(scoreBuckets(def, finalAnswers))
+        return
+      }
       const res = await authedFetch('/api/personality/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ definitionId: def.id, answers, ...(courseId ? { courseId } : {}) }),
+        body: JSON.stringify({ definitionId: def.id, answers: finalAnswers, ...(courseId ? { courseId } : {}) }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'ส่งคำตอบไม่สำเร็จ')
@@ -79,7 +103,27 @@ export default function BucketAssessmentPage() {
     }
   }
 
+  // "ยืนยันคำตอบ": record this answer, then go to the next question — or, on the last one,
+  // show the result once every question is confirmed.
+  function confirmAnswer() {
+    if (!current || !answers[current.id]) return
+    const next = new Set(confirmed)
+    next.add(current.id)
+    setConfirmed(next)
+    if (!isLast) {
+      setIndex((i) => Math.min(i + 1, questions.length - 1))
+      return
+    }
+    if (next.size === questions.length) void handleSubmit(answers)
+  }
+
   if (!user) return null
+
+  const previewBanner = isPreview ? (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2.5">
+      <p className="text-xs font-bold text-amber-700">โหมดทดลอง (พรีวิวของ Admin) — ผลนี้ไม่ถูกบันทึกในโปรไฟล์ และไม่นับว่าเรียนบทนี้แล้ว</p>
+    </div>
+  ) : null
 
   // ── Result screen ───────────────────────────────────────────────────────────
   if (result) {
@@ -88,6 +132,8 @@ export default function BucketAssessmentPage() {
         <Header title="ผลแบบประเมิน" subtitle={def.title} />
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+
+            {previewBanner}
 
             <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-8 text-center">
               <p className="text-xs font-bold text-gray-400 mb-2">ผลลัพธ์ของคุณคือ</p>
@@ -132,7 +178,9 @@ export default function BucketAssessmentPage() {
 
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 text-center">
               <p className="text-xs text-gray-400">
-                ผลนี้ถูกบันทึกไว้ในโปรไฟล์ของคุณแล้ว — ทำใหม่ได้ทุกเมื่อ ผลล่าสุดจะแทนที่ผลเดิม
+                {isPreview
+                  ? 'นี่คือการทดลอง ผลไม่ถูกบันทึก'
+                  : 'ผลนี้ถูกบันทึกไว้ในโปรไฟล์ของคุณแล้ว — ทำใหม่ได้ทุกเมื่อ ผลล่าสุดจะแทนที่ผลเดิม'}
               </p>
             </div>
 
@@ -142,7 +190,7 @@ export default function BucketAssessmentPage() {
                 {courseId ? 'กลับไปที่หลักสูตร' : 'ดูในโปรไฟล์'}
               </Link>
               <button type="button"
-                onClick={() => { setResult(null); setAnswers({}); setIndex(0) }}
+                onClick={() => { setResult(null); setAnswers({}); setConfirmed(new Set()); setIndex(0) }}
                 className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors">
                 ทำแบบประเมินใหม่
               </button>
@@ -164,10 +212,12 @@ export default function BucketAssessmentPage() {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 space-y-4">
 
+          {previewBanner}
+
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold text-gray-500">ข้อ {index + 1} จาก {questions.length}</p>
-              <p className="text-xs text-gray-400">ตอบแล้ว {answeredCount} ข้อ</p>
+              <p className="text-xs text-gray-400">ยืนยันแล้ว {answeredCount} ข้อ</p>
             </div>
             <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
               <div className="h-full rounded-full transition-all duration-300"
@@ -244,6 +294,8 @@ export default function BucketAssessmentPage() {
                 })}
               </div>
             )}
+
+            {!hasPick && <p className="text-xs text-gray-400">เลือกคำตอบ แล้วกด &quot;ยืนยันคำตอบ&quot; เพื่อไปข้อถัดไป</p>}
           </div>
 
           {error && (
@@ -254,23 +306,20 @@ export default function BucketAssessmentPage() {
 
           <div className="flex gap-2 pb-6">
             <button type="button" onClick={() => setIndex((i) => Math.max(i - 1, 0))}
-              disabled={index === 0}
+              disabled={index === 0 || submitting}
               className="px-5 py-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
               ก่อนหน้า
             </button>
 
-            {isLast ? (
-              <button type="button" onClick={handleSubmit}
-                disabled={!allAnswered || submitting}
-                className="flex-1 py-3 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
-                {submitting ? 'กำลังประมวลผล...' : allAnswered ? 'ดูผลลัพธ์' : `ยังเหลืออีก ${questions.length - answeredCount} ข้อ`}
-              </button>
-            ) : (
-              <button type="button" onClick={() => setIndex((i) => Math.min(i + 1, questions.length - 1))}
-                className="flex-1 py-3 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors">
-                ถัดไป
-              </button>
-            )}
+            <button type="button" onClick={confirmAnswer}
+              disabled={!hasPick || submitting || (isLast && isConfirmed && !allConfirmed)}
+              className="flex-1 py-3 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
+              {submitting
+                ? 'กำลังประมวลผล...'
+                : isLast
+                  ? (allConfirmed || !isConfirmed ? 'ยืนยันคำตอบ และดูผลลัพธ์' : `ยังเหลือยืนยันอีก ${questions.length - answeredCount} ข้อ`)
+                  : 'ยืนยันคำตอบ'}
+            </button>
           </div>
 
         </div>

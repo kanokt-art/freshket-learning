@@ -2682,7 +2682,7 @@ function LessonPreviewModal({ topics, assessments, courseId, onClose }: {
       courseId,
       ...(step ? { step, lessonId: lesson.id } : {}),
     }))
-    router.push(`/assessment/${lesson.assessmentId}`)
+    router.push(`/assessment/${lesson.assessmentId}?preview=1`)
   }
 
   const embedUrl = selectedLesson?.type === 'video' ? toPreviewEmbedUrl(selectedLesson.videoUrl ?? '')
@@ -2793,7 +2793,7 @@ function LessonPreviewModal({ topics, assessments, courseId, onClose }: {
                               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
                               ทดลองทำแบบทดสอบ
                             </button>
-                            <p className="text-xs text-amber-600">ทำจริงเหมือนผู้เรียน: ผลและคะแนนจะบันทึกในบัญชีของคุณ และอาจแจ้งผู้จัดการของคุณ</p>
+                            <p className="text-xs text-amber-600">ทดลองเหมือนผู้เรียน: ไม่บันทึกคะแนนและไม่แจ้งเตือนใคร</p>
                           </div>
                         ) : (
                           <p className="shrink-0 text-xs text-gray-400">บันทึกหลักสูตรก่อน จึงจะทดลองทำแบบทดสอบจริงได้</p>
@@ -2812,16 +2812,16 @@ function LessonPreviewModal({ topics, assessments, courseId, onClose }: {
                     return (
                       <div className="space-y-2">
                         <p className="text-xs text-gray-400">
-                          แบบประเมิน {def.questions.length} ข้อ ไม่มีคำตอบถูกผิดและไม่มีคะแนนผ่าน/ไม่ผ่าน ผลจะถูกบันทึกไว้ในโปรไฟล์ของผู้เรียน
+                          แบบประเมิน {def.questions.length} ข้อ ไม่มีคำตอบถูกผิดและไม่มีคะแนนผ่าน/ไม่ผ่าน ผลจะถูกบันทึกไว้ในโปรไฟล์ของผู้เรียน (ตอนทดลองจะไม่บันทึก)
                         </p>
                         {courseId ? (
                           <div className="flex flex-wrap items-center gap-3">
                             <button type="button"
-                              onClick={() => router.push(`/personality?assessment=${def.id}&courseId=${courseId}&lessonId=${selectedLesson.id}`)}
+                              onClick={() => router.push(`/personality?assessment=${def.id}&courseId=${courseId}&lessonId=${selectedLesson.id}&preview=1`)}
                               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
                               ลองทำแบบประเมิน
                             </button>
-                            <p className="text-xs text-amber-600">ทำจริงเหมือนผู้เรียน: ผลจะบันทึกในโปรไฟล์ของคุณเอง</p>
+                            <p className="text-xs text-amber-600">ทดลองเหมือนผู้เรียน: ผลไม่ถูกบันทึกในโปรไฟล์</p>
                           </div>
                         ) : (
                           <p className="text-xs text-gray-400">บันทึกหลักสูตรก่อน จึงจะลองทำแบบประเมินได้</p>
