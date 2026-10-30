@@ -4,6 +4,7 @@ import { isInCourseTarget } from '@/lib/courses/audience'
 import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
+import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { computeStreakDays, type UserStats } from '@/types/stats'
@@ -829,9 +830,12 @@ function UserTable({
     // employee shouldn't show up in a roster meant for current staff.
     // Also drop non-numeric employee IDs (e.g. "FTE" placeholder codes) — this
     // roster is meant to list real, numbered employees only.
+    // And only departments in the current rollout (PHASE1_DEPARTMENTS, the list the
+    // Employees page, org board and learner picker use): others are left out until onboarded.
     let list = users.filter((u) =>
       (!u.employmentStatus || u.employmentStatus === 'Active') &&
-      !!u.employeeId && /^\d+$/.test(u.employeeId),
+      !!u.employeeId && /^\d+$/.test(u.employeeId) &&
+      !!u.department && PHASE1_DEPARTMENTS.has(u.department),
     )
 
     const q = search.toLowerCase().trim()
