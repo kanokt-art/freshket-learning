@@ -25,7 +25,7 @@ export const ALL_MODULE_IDS = MODULE_REGISTRY.map(m => m.id) as ModuleId[]
 // ── Phase 1 rollout ──────────────────────────────────────────────────────────
 // The platform is live for these departments only. Everyone else can still sign
 // in — they keep their profile — but see no modules until their department is
-// added here. Sales/Key Account/Portfolio are the commercial teams the content
+// added here. Sales/Key Account/Portfolio/Commercial are the commercial teams the content
 // is written for; People Experience is HR, who administer the platform.
 //
 // This is the single source of truth: the Employees filter, the org board and
@@ -35,6 +35,7 @@ export const PHASE1_DEPARTMENTS = new Set([
   'Sales Management',
   'Key Account Management',
   'Portfolio Management',
+  'Commercial',
   'People Experience',
 ])
 
