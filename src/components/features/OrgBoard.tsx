@@ -323,11 +323,11 @@ function MemberRow({
         title="ดูผลการเรียน"
         className="flex-1 min-w-0 text-left"
       >
-        <p className="text-xs font-medium text-gray-700 truncate hover:text-freshket-600 hover:underline">
+        <p className="text-xs font-medium text-gray-700 break-words hover:text-freshket-600 hover:underline">
           {user.displayNameEN || user.displayName}
           {user.nickname && <span className="text-gray-400 font-normal ml-1">({user.nickname})</span>}
         </p>
-        <div className="flex items-center gap-1 min-w-0 mt-0.5">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 mt-0.5">
           {/* Team Lead / Manager pill only -- "Member" and the job-grade badge
               (JG5 etc.) are noise on every single row of this list, so they
               are dropped here specifically. The Manager/Team Lead columns
@@ -335,7 +335,7 @@ function MemberRow({
           {showRoleBadges && (isManager || isTeamLead) && (
             <RolePill role={isManager ? 'manager' : 'teamLead'} />
           )}
-          {user.position && <p className="text-xs text-gray-400 truncate">{user.position}</p>}
+          {user.position && <p className="text-xs text-gray-400 break-words">{user.position}</p>}
         </div>
       </button>
       {canEdit && (
@@ -743,7 +743,7 @@ function TeamCard({
       <div className="flex flex-col lg:flex-row lg:items-stretch gap-4">
 
       {/* Leadership — Manager above Team Lead */}
-      <div className="lg:w-56 lg:shrink-0 lg:border-r lg:border-gray-100 lg:pr-4 flex flex-col gap-3">
+      <div className="lg:w-64 lg:shrink-0 lg:border-r lg:border-gray-100 lg:pr-4 flex flex-col gap-3">
 
       {/* Manager */}
       <div>
@@ -780,15 +780,15 @@ function TeamCard({
                   title="ดูผลการเรียน"
                   className="flex-1 min-w-0 text-left"
                 >
-                  <p className="text-xs font-bold text-gray-800 truncate hover:text-freshket-600 hover:underline">
+                  <p className="text-xs font-bold text-gray-800 break-words hover:text-freshket-600 hover:underline">
                     {mgr.displayNameEN || mgr.displayName}
                     {mgr.nickname && (
                       <span className="text-gray-400 font-normal ml-1">({mgr.nickname})</span>
                     )}
                   </p>
-                  <div className="flex items-center gap-1 min-w-0 mt-0.5">
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 mt-0.5">
                     <RolePill role="manager" />
-                    {mgr.position && <p className="text-xs text-gray-400 truncate">{mgr.position}</p>}
+                    {mgr.position && <p className="text-xs text-gray-400 break-words">{mgr.position}</p>}
                   </div>
                 </button>
                 {canEdit && (
@@ -936,15 +936,15 @@ function TeamCard({
                   title="ดูผลการเรียน"
                   className="flex-1 min-w-0 text-left"
                 >
-                  <p className="text-xs font-bold text-gray-800 truncate hover:text-freshket-600 hover:underline">
+                  <p className="text-xs font-bold text-gray-800 break-words hover:text-freshket-600 hover:underline">
                     {lead.displayNameEN || lead.displayName}
                     {lead.nickname && (
                       <span className="text-gray-400 font-normal ml-1">({lead.nickname})</span>
                     )}
                   </p>
-                  <div className="flex items-center gap-1 min-w-0 mt-0.5">
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 mt-0.5">
                     <RolePill role="teamLead" />
-                    {lead.position && <p className="text-xs text-gray-400 truncate">{lead.position}</p>}
+                    {lead.position && <p className="text-xs text-gray-400 break-words">{lead.position}</p>}
                   </div>
                 </button>
                 {canEdit && (
