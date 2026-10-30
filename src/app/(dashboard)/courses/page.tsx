@@ -2658,9 +2658,13 @@ function toFormEmbedUrl(url: string): string | null {
 // assessment) because "เริ่มทำแบบฝึกหัด" on a quiz-type lesson needs THAT
 // lesson's own assessmentId — each quiz-type lesson can link a different
 // question set.
-function LessonPreviewModal({ topics, assessments, onClose }: {
-  topics: CourseTopic[]; assessments: Assessment[]; onClose: () => void
+function LessonPreviewModal({ topics, assessments, courseId, onClose }: {
+  topics: CourseTopic[]; assessments: Assessment[]
+  /** The saved course, so a quiz or questionnaire can really be tried. None for a course not saved yet. */
+  courseId?: string
+  onClose: () => void
 }) {
+  const router = useRouter()
   const sortedTopics = topics.slice().sort((a, b) => a.order - b.order)
   const firstLesson = sortedTopics.find((t) => t.lessons.length > 0)?.lessons[0]
   const [selectedId, setSelectedId] = useState<string | undefined>(firstLesson?.id)
@@ -2670,6 +2674,16 @@ function LessonPreviewModal({ topics, assessments, onClose }: {
     .find((l) => l.id === selectedId)
 
   const activeQuizAssessment = assessments.find((a) => a.id === selectedLesson?.assessmentId)
+
+  // Try the quiz for real, exactly as a learner would (same page, same grading).
+  function tryQuiz(lesson: CourseLesson) {
+    const step = lesson.quizRole === 'pre_test' ? 'pre' : lesson.quizRole === 'post_test' ? 'post' : undefined
+    sessionStorage.setItem('assessment_return', JSON.stringify({
+      courseId,
+      ...(step ? { step, lessonId: lesson.id } : {}),
+    }))
+    router.push(`/assessment/${lesson.assessmentId}`)
+  }
 
   const embedUrl = selectedLesson?.type === 'video' ? toPreviewEmbedUrl(selectedLesson.videoUrl ?? '')
     : selectedLesson?.type === 'file' ? toPreviewEmbedUrl(selectedLesson.fileUrl ?? '')
@@ -2772,13 +2786,49 @@ function LessonPreviewModal({ topics, assessments, onClose }: {
 
                   {selectedLesson.type === 'quiz' && (
                     selectedLesson.assessmentId ? (
-                      <div className="flex-1 min-h-0 flex flex-col">
-                        <QuizPreviewInline key={selectedLesson.id} assessment={activeQuizAssessment} />
+                      <div className="flex-1 min-h-0 flex flex-col gap-3">
+                        {courseId ? (
+                          <div className="shrink-0 flex flex-wrap items-center gap-3">
+                            <button type="button" onClick={() => tryQuiz(selectedLesson)}
+                              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
+                              ทดลองทำแบบทดสอบ
+                            </button>
+                            <p className="text-xs text-amber-600">ทำจริงเหมือนผู้เรียน: ผลและคะแนนจะบันทึกในบัญชีของคุณ และอาจแจ้งผู้จัดการของคุณ</p>
+                          </div>
+                        ) : (
+                          <p className="shrink-0 text-xs text-gray-400">บันทึกหลักสูตรก่อน จึงจะทดลองทำแบบทดสอบจริงได้</p>
+                        )}
+                        <div className="flex-1 min-h-0 flex flex-col">
+                          <QuizPreviewInline key={selectedLesson.id} assessment={activeQuizAssessment} />
+                        </div>
                       </div>
                     ) : (
                       <p className="text-xs text-gray-400">ยังไม่ได้เลือกชุดคำถามสำหรับบทเรียนนี้ — ไปที่การ์ด &quot;เลือกแบบฝึกหัด&quot; ด้านซ้ายเพื่อเลือก</p>
                     )
                   )}
+
+                  {selectedLesson.type === 'personality' && (() => {
+                    const def = getBucketAssessment(selectedLesson.bucketAssessmentId) ?? MBTI_DEFINITION
+                    return (
+                      <div className="space-y-2">
+                        <p className="text-xs text-gray-400">
+                          แบบประเมิน {def.questions.length} ข้อ ไม่มีคำตอบถูกผิดและไม่มีคะแนนผ่าน/ไม่ผ่าน ผลจะถูกบันทึกไว้ในโปรไฟล์ของผู้เรียน
+                        </p>
+                        {courseId ? (
+                          <div className="flex flex-wrap items-center gap-3">
+                            <button type="button"
+                              onClick={() => router.push(`/personality?assessment=${def.id}&courseId=${courseId}&lessonId=${selectedLesson.id}`)}
+                              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
+                              ลองทำแบบประเมิน
+                            </button>
+                            <p className="text-xs text-amber-600">ทำจริงเหมือนผู้เรียน: ผลจะบันทึกในโปรไฟล์ของคุณเอง</p>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-400">บันทึกหลักสูตรก่อน จึงจะลองทำแบบประเมินได้</p>
+                        )}
+                      </div>
+                    )
+                  })()}
 
                   {selectedLesson.type === 'assignment' && (
                     <div className="space-y-2">
@@ -5453,6 +5503,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
         <LessonPreviewModal
           topics={form.topics}
           assessments={assessments}
+          courseId={editCourse?.id}
           onClose={() => setShowLessonPreview(false)}
         />
       )}
