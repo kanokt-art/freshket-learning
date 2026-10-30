@@ -7,7 +7,7 @@ import { FreshketToolTabs } from '@/components/layout/FreshketToolTabs'
 import { useAuth } from '@/hooks/useAuth'
 import { canAccess } from '@/types/user'
 import { useMandatoryItems, useAllUsers, useDepartments } from '@/hooks/useFirestore'
-import { announce } from '@/lib/notifications/announce'
+import { confirmAndAnnounce } from '@/lib/notifications/confirmAnnounce'
 import { pushNotification } from '@/lib/notifications/push'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { MandatorySlideViewer } from '@/components/features/MandatorySlideViewer'
@@ -104,7 +104,7 @@ export default function MandatoryPage() {
         refPath: '/courses/mandatory',
       })
     })
-    void announce({
+    void confirmAndAnnounce({
       kind: 'mandatory_published',
       title: item.title,
       itemId: item.id,

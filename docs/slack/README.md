@@ -25,6 +25,8 @@ With `SLACK_BOT_TOKEN` and the channel id set, the posts go through the bot. Wit
 (`SLACK_WEBHOOK_URL`) exactly as before, so nothing is posted twice. Take-away and anything else not listed here
 still go to the webhook's channel.
 
+Publishing a course or Mandatory Reading asks the admin to confirm before anything goes to Slack (`confirmAndAnnounce`); saying no only skips Slack, the in-app notifications still go out.
+
 Mandatory DMs are sent only when a super_admin publishes; the server re-reads the item and its departments itself,
 so the browser cannot message anyone it should not. At most 500 people per publish.
 

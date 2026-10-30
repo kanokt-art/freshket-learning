@@ -4,7 +4,7 @@ import { lessonLabel, topicLabel, isUnnamedLesson, isUnnamedTopic, defaultLesson
 import { isInCourseTarget } from '@/lib/courses/audience'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { announce } from '@/lib/notifications/announce'
+import { confirmAndAnnounce } from '@/lib/notifications/confirmAnnounce'
 import { pushNotification } from '@/lib/notifications/push'
 import dynamic from 'next/dynamic'
 
@@ -163,7 +163,7 @@ function notifyCoursePublishChanges(
       })
     })
     if (recipients.length > 0) {
-      void announce({
+      void confirmAndAnnounce({
         kind: 'course_published',
         courseTitle: c.title,
         recipientCount: recipients.length,
@@ -188,7 +188,7 @@ function notifyCoursePublishChanges(
       })
     })
     if (recipients.length > 0) {
-      void announce({
+      void confirmAndAnnounce({
         kind: 'course_published',
         courseTitle: c.title,
         recipientCount: recipients.length,
