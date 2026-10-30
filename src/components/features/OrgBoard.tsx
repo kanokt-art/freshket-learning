@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { Department, Team, UserProfile } from '@/types/user'
 import { ROLE_LABELS, canAccess, getTeamManagerIds, getTeamLeadIds } from '@/types/user'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
-import { canManageAnyTeam } from '@/lib/users/teamManager'
+import { canLeadAnyTeam } from '@/lib/users/teamManager'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -581,16 +581,16 @@ function TeamCard({
     () => [...eligibleSale, ...availableHigherRoles],
     [eligibleSale, availableHigherRoles],
   )
-  // Org-wide, same as managerCandidates below — a team can pull in a team lead
-  // from anywhere, not just people already parked on this exact team.
+  // Same people as managerCandidates below: Assistant Managers and Managers can lead a
+  // team too, with no quota — a team can pull one in from anywhere.
   const tlCandidates = useMemo(
-    () => users.filter(u => u.role === 'team_lead' && inTargetDept(u)),
+    () => users.filter(canLeadAnyTeam),
     [users],
   )
-  // Manager slot: manager level and above in any department, plus everyone in Commercial,
-  // for any team and with no limit on how many teams one person manages (see canManageAnyTeam).
+  // Manager slot: Supervisor level and above in the rollout departments, for any team and
+  // with no limit on how many teams one person manages (see canLeadAnyTeam).
   const managerCandidates = useMemo(
-    () => users.filter(canManageAnyTeam),
+    () => users.filter(canLeadAnyTeam),
     [users],
   )
 
@@ -833,11 +833,11 @@ function TeamCard({
         {canEdit && showManagerPicker && (
           <div className="mt-2 relative z-20 w-[22rem] max-w-[calc(100vw-3rem)] bg-white rounded-xl border border-gray-200 shadow-lg text-xs overflow-hidden">
             <div className="px-3 pt-2.5 pb-1.5 text-xs font-bold text-gray-500 border-b border-gray-100">
-              เลือก Manager ได้หลายคน (ระดับ Manager ขึ้นไป และทุกคนในแผนก Commercial)
+              เลือก Manager ได้หลายคน (ระดับ Supervisor ขึ้นไป ในแผนกที่เปิดใช้ระบบ)
             </div>
             <div className="max-h-72 overflow-y-auto py-1">
               {managerCandidates.length === 0 && (
-                <p className="px-3 py-3 text-gray-400 text-center">ไม่มีพนักงานที่เลือกเป็น Manager ได้</p>
+                <p className="px-3 py-3 text-gray-400 text-center">ไม่มีพนักงานระดับ Supervisor ขึ้นไปที่เลือกได้</p>
               )}
               {managerCandidates.map(u => {
                 const checked = selManagers.includes(u.uid)
@@ -989,11 +989,11 @@ function TeamCard({
         {canEdit && showTLPicker && (
           <div className="mt-2 relative z-20 w-[22rem] max-w-[calc(100vw-3rem)] bg-white rounded-xl border border-gray-200 shadow-lg text-xs overflow-hidden">
             <div className="px-3 pt-2.5 pb-1.5 text-xs font-bold text-gray-500 border-b border-gray-100">
-              เลือก Team Lead ได้หลายคน
+              เลือก Team Lead ได้หลายคน (ระดับ Supervisor ขึ้นไป ในแผนกที่เปิดใช้ระบบ)
             </div>
             <div className="max-h-72 overflow-y-auto py-1">
               {tlCandidates.length === 0 && (
-                <p className="px-3 py-3 text-gray-400 text-center">No Team Lead available</p>
+                <p className="px-3 py-3 text-gray-400 text-center">ไม่มีพนักงานระดับ Supervisor ขึ้นไปที่เลือกได้</p>
               )}
               {tlCandidates.map(u => {
                 const checked = selTeamLeads.includes(u.uid)

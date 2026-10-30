@@ -152,8 +152,10 @@ export default function AdminGuidePage() {
             <Section id="team" title="โครงสร้างทีม">
               <p>เมนู Employees → โครงสร้างทีม จัดทีม ผู้จัดการ และหัวหน้าทีม กด + Assign (Manager), + Set (Team Lead) หรือ Add member หน้าต่างเลือกแสดงชื่อเต็มโดยไม่ตัด</p>
               <ul className="list-disc pl-5 space-y-1 marker:text-gray-300">
-                <li><b>เลือก Manager:</b> เลือกได้ทุกทีมในทุกแผนก และไม่จำกัดจำนวนทีมต่อคน เสนอให้เลือกทุกคนที่ระดับ Manager ขึ้นไป (นับทั้งบทบาทและระดับงาน เช่น Vice President) จากแผนกไหนก็ได้ และทุกคนในแผนก Commercial ไม่ว่าระดับไหน คนที่ลาออกแล้วไม่ถูกเสนอ</li>
-                <li><b>Team Lead และ Add member:</b> เสนอเฉพาะคนในแผนกที่เปิดใช้ระบบ</li>
+                <li><b>เลือก Manager และ Team Lead:</b> เสนอพนักงานกลุ่มเดียวกัน คือคนที่ยังทำงานอยู่ ในแผนกที่เปิดใช้ระบบ (รวม Commercial) และ <b>ระดับ Supervisor ขึ้นไป</b> (Supervisor, Assistant Manager, Manager และสูงกว่า)</li>
+                <li><b>ระดับดูจากข้อมูล HR (rank ตำแหน่ง)</b> ไม่ใช่จากบทบาทในแอป คนระดับ Staff ที่ถูกตั้งบทบาท team lead ไว้จะไม่ถูกเสนอ ส่วนคนระดับ Manager ที่บทบาทยังเป็น sale จะถูกเสนอ</li>
+                <li><b>เป็นได้ทุกทีม ไม่มีโควต้า:</b> คนเดียวเป็น Manager หรือ Team Lead ของกี่ทีมก็ได้</li>
+                <li><b>Add member:</b> เสนอเฉพาะคนในแผนกที่เปิดใช้ระบบ</li>
               </ul>
               <p><b>เมนู Team และสมาชิก:</b> เมนู Team ขึ้นตามบทบาท (Team Lead และ Manager) แต่สมาชิกขึ้นตามทีม ถ้ายังไม่ได้ถูกกำหนดเป็น Manager/Team Lead ของทีมใด (หรือไม่ได้อยู่ทีมใด) จะเห็นเมนู Team แต่ไม่เห็นสมาชิก และมีข้อความบอกให้ติดต่อ Admin</p>
               <Note>การเป็น Manager ของทีมไม่ได้เปลี่ยนบทบาทในระบบของคนนั้น คนในแผนก Commercial ที่บทบาทยังเป็น sale จะไม่เห็นเมนู Team จนกว่า super admin จะเปลี่ยนบทบาทให้</Note>

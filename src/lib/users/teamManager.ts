@@ -1,25 +1,20 @@
-import { jobGrade } from '@/lib/jobLevel'
-import { canAccess, type UserProfile } from '@/types/user'
+import { levelGrade, SUPERVISOR_GRADE } from '@/lib/jobLevel'
+import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { isActiveEmployee } from '@/lib/users/active'
+import type { UserProfile } from '@/types/user'
 
-// Who the "Assign Manager" picker offers for a team.
+// Who the Manager and Team Lead pickers offer for a team: a current employee of a
+// department in the rollout whose LEVEL is Supervisor or above (Supervisor, Assistant
+// Manager, Manager, and up).
 //
-// Any team, in any department, with no limit on how many teams one person manages:
-//  · anyone at manager level or above — by role, or by job grade (a Vice President
-//    whose role is still `sale` counts), whatever department they sit in;
-//  · everyone in the Commercial department, whatever their level.
-// People who have left are never offered.
-
-/** The department whose people can manage any team. Must match the HR department name exactly. */
-export const COMMERCIAL_DEPARTMENT = 'Commercial'
-
-/** Job grade of "Manager / Lead" (JG9) — manager level and above. */
-const MANAGER_GRADE = 9
-
-export function canManageAnyTeam(
+// The same person can be offered for any team, with no limit on how many teams one
+// person leads or manages. Level comes from HR's rank/position (see levelGrade), not
+// from the app role, so a Staff-level employee who was given the team_lead role is not
+// offered.
+export function canLeadAnyTeam(
   u: Pick<UserProfile, 'role' | 'rank' | 'position' | 'department' | 'employmentStatus'>,
 ): boolean {
   if (!isActiveEmployee(u)) return false
-  if (u.department === COMMERCIAL_DEPARTMENT) return true
-  return canAccess(u.role, 'manager') || jobGrade(u) >= MANAGER_GRADE
+  if (!u.department || !PHASE1_DEPARTMENTS.has(u.department)) return false
+  return levelGrade(u) >= SUPERVISOR_GRADE
 }

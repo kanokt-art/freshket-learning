@@ -80,6 +80,25 @@ export function jobGrade(u: Pick<UserProfile, 'role' | 'rank' | 'position'>): nu
   return ROLE_FALLBACK_GRADE[u.role]
 }
 
+/** Job grade of Supervisor I (JG5): the lowest level that can lead a team. */
+export const SUPERVISOR_GRADE = 5
+
+/**
+ * The person's level as HR recorded it — the rank (a "JG5" code or a name such as
+ * "Assistant Manager"), else the position — with NO lift from their app role.
+ *
+ * jobGrade() above raises a team_lead to at least Assistant Manager because the role was
+ * given by hand; that is right for who may see whom, and wrong for asking "is this person
+ * actually a supervisor or above?" — a Staff-level employee given the team_lead role would
+ * pass. The role is only the last resort, for someone whose rank and position say nothing.
+ */
+export function levelGrade(u: Pick<UserProfile, 'role' | 'rank' | 'position'>): number {
+  const jg = /^\s*jg\s*(\d{1,2})\s*$/i.exec(u.rank ?? '')
+  const fromRank = jg ? Number(jg[1]) : gradeFromText(u.rank)
+  const resolved = fromRank ?? gradeFromText(u.position)
+  return resolved ?? ROLE_FALLBACK_GRADE[u.role]
+}
+
 // Whether `viewer` may see `member`: only members at or below the viewer's
 // seniority. Role hierarchy is the hard gate (a team_lead never sees a manager),
 // and job-grade refines ordering within the same role band.
