@@ -10,6 +10,7 @@ import { alertError } from '@/lib/ui/alert'
 import { useModuleAccess, useModuleConfig } from '@/hooks/useModuleAccess'
 import { canAccess, getTeamManagerIds, getTeamLeadIds } from '@/types/user'
 import type { UserProfile } from '@/types/user'
+import { isActiveEmployee } from '@/lib/users/active'
 import { DEMO_MODE } from '@/lib/demo/demoMode'
 import { Header } from '@/components/layout/Header'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
@@ -1050,12 +1051,6 @@ function MemberAssessmentRow({
           </div>
         </div>
       </td>
-      {/* รหัสพนักงาน — super_admin only */}
-      {isSuperAdmin && (
-        <td className="px-4 py-3">
-          <span className="text-xs font-mono text-gray-500">{member.employeeId ?? '—'}</span>
-        </td>
-      )}
       {/* ตำแหน่ง */}
       <td className="px-4 py-3">
         {member.position ? (
@@ -1416,13 +1411,16 @@ export default function RoleplayPage() {
 
   // Demo fallback: show roleplay-enabled members (or first 6 while config loads)
   const displayMembers = useMemo(() => {
-    if (myMembers.length > 0) return myMembers
+    // Only people still employed: someone who has left is not a member to assess, and is
+    // left out of the count, the list, the filters and the Top 5.
+    const current = (list: UserProfile[]) => list.filter(isActiveEmployee)
+    if (myMembers.length > 0) return current(myMembers)
     const allProfiles = allUsers as UserProfile[]
     const candidates = allProfiles.filter(u =>
       (u.role === 'sale' || u.role === 'team_lead') &&
       !!u.department && roleplayDeptNames.has(u.department)
     )
-    return candidates.slice(0, 6)
+    return current(candidates).slice(0, 6)
   }, [myMembers, allUsers, roleplayDeptNames])
 
   const teamMap = useMemo(() => {
@@ -1467,7 +1465,6 @@ export default function RoleplayPage() {
         (m.nickname ?? '').toLowerCase().includes(q) ||
         (m.position ?? '').toLowerCase().includes(q) ||
         (m.department ?? '').toLowerCase().includes(q) ||
-        (m.employeeId ?? '').toLowerCase().includes(q) ||
         (m.email ?? '').toLowerCase().includes(q)
       )
     }
@@ -1922,7 +1919,7 @@ export default function RoleplayPage() {
                   type="text"
                   value={memberSearch}
                   onChange={e => setMemberSearch(e.target.value)}
-                  placeholder="ค้นหาชื่อ / รหัส / อีเมล / ตำแหน่ง..."
+                  placeholder="ค้นหาชื่อ / อีเมล / ตำแหน่ง..."
                   className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-freshket-200 placeholder:text-gray-400"
                 />
               </div>
@@ -1970,7 +1967,6 @@ export default function RoleplayPage() {
                       สมาชิก <SortIcon field="name" current={memberSortField} dir={memberSortDir} />
                     </button>
                   </th>
-                  {isSuperAdmin && <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">รหัสพนักงาน</th>}
                   <th className="px-4 py-3 text-left">
                     <button onClick={() => handleMemberSort('position')} className="flex items-center text-xs font-bold text-gray-400 hover:text-gray-700 transition-colors">
                       ตำแหน่ง <SortIcon field="position" current={memberSortField} dir={memberSortDir} />
@@ -2001,7 +1997,7 @@ export default function RoleplayPage() {
                 ))}
                 {filteredMembers.length === 0 && (
                   <tr>
-                    <td colSpan={isSuperAdmin ? 9 : 6} className="px-4 py-12 text-center text-sm text-gray-300">ไม่พบสมาชิก</td>
+                    <td colSpan={isSuperAdmin ? 8 : 6} className="px-4 py-12 text-center text-sm text-gray-300">ไม่พบสมาชิก</td>
                   </tr>
                 )}
               </tbody>
