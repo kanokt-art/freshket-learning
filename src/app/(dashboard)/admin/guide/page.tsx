@@ -150,7 +150,12 @@ export default function AdminGuidePage() {
             </Section>
 
             <Section id="team" title="โครงสร้างทีม">
-              <p>เมนู Employees → โครงสร้างทีม จัดทีม ผู้จัดการ และหัวหน้าทีม กด + Assign (Manager), + Set (Team Lead) หรือ Add member หน้าต่างเลือกแสดงเฉพาะคนในแผนกที่เปิดใช้ระบบ และแสดงชื่อเต็มโดยไม่ตัด</p>
+              <p>เมนู Employees → โครงสร้างทีม จัดทีม ผู้จัดการ และหัวหน้าทีม กด + Assign (Manager), + Set (Team Lead) หรือ Add member หน้าต่างเลือกแสดงชื่อเต็มโดยไม่ตัด</p>
+              <ul className="list-disc pl-5 space-y-1 marker:text-gray-300">
+                <li><b>เลือก Manager:</b> เลือกได้ทุกทีมในทุกแผนก และไม่จำกัดจำนวนทีมต่อคน เสนอให้เลือกทุกคนที่ระดับ Manager ขึ้นไป (นับทั้งบทบาทและระดับงาน เช่น Vice President) จากแผนกไหนก็ได้ และทุกคนในแผนก Commercial ไม่ว่าระดับไหน คนที่ลาออกแล้วไม่ถูกเสนอ</li>
+                <li><b>Team Lead และ Add member:</b> เสนอเฉพาะคนในแผนกที่เปิดใช้ระบบ</li>
+              </ul>
+              <Note>การเป็น Manager ของทีมไม่ได้เปลี่ยนบทบาทในระบบของคนนั้น คนในแผนก Commercial ที่บทบาทยังเป็น sale จะไม่เห็นเมนู Team จนกว่า super admin จะเปลี่ยนบทบาทให้</Note>
             </Section>
 
             <Section id="slack" title="Slack แจ้งอะไรบ้าง">

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { Department, Team, UserProfile } from '@/types/user'
 import { ROLE_LABELS, canAccess, getTeamManagerIds, getTeamLeadIds } from '@/types/user'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
+import { canManageAnyTeam } from '@/lib/users/teamManager'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -586,9 +587,10 @@ function TeamCard({
     () => users.filter(u => u.role === 'team_lead' && inTargetDept(u)),
     [users],
   )
-  // Manager slot: only manager-level-and-above employees are eligible.
+  // Manager slot: manager level and above in any department, plus everyone in Commercial,
+  // for any team and with no limit on how many teams one person manages (see canManageAnyTeam).
   const managerCandidates = useMemo(
-    () => users.filter(u => canAccess(u.role, 'manager') && inTargetDept(u)),
+    () => users.filter(canManageAnyTeam),
     [users],
   )
 
@@ -831,11 +833,11 @@ function TeamCard({
         {canEdit && showManagerPicker && (
           <div className="mt-2 relative z-20 w-[22rem] max-w-[calc(100vw-3rem)] bg-white rounded-xl border border-gray-200 shadow-lg text-xs overflow-hidden">
             <div className="px-3 pt-2.5 pb-1.5 text-xs font-bold text-gray-500 border-b border-gray-100">
-              เลือก Manager ได้หลายคน (ระดับ Manager ขึ้นไป)
+              เลือก Manager ได้หลายคน (ระดับ Manager ขึ้นไป และทุกคนในแผนก Commercial)
             </div>
             <div className="max-h-72 overflow-y-auto py-1">
               {managerCandidates.length === 0 && (
-                <p className="px-3 py-3 text-gray-400 text-center">ไม่มีพนักงานระดับ Manager ขึ้นไป</p>
+                <p className="px-3 py-3 text-gray-400 text-center">ไม่มีพนักงานที่เลือกเป็น Manager ได้</p>
               )}
               {managerCandidates.map(u => {
                 const checked = selManagers.includes(u.uid)
