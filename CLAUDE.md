@@ -41,6 +41,16 @@ Slack app manifest + setup in `docs/slack/`. Sends with `SLACK_BOT_TOKEN` (serve
 
 Apps Script in `docs/apps-script/cuisine-sale/` (`Code.gs`, `appsscript.json`), pushed with `clasp push -f` from that folder (script ID in `.clasp.json`). Tabs `Japanese / Western / Beef / Non food for all / Beer` (row 2 = headers) upsert into `cuisine_sale` on `(cuisine, item_id)`; midnight trigger via `createMidnightTrigger()`; `healthCheck()` verifies key, sheet, tabs, Supabase, row counts and trigger. Needs Script Property `SUPABASE_SERVICE_KEY`. Pending design: split a 20k-row `item_master` from a small `cuisine_map` (see conversation 2026-10-27).
 
+## Security work
+
+Anything that touches security — auth and sign-in, roles and access rules (`policies.ts`, RLS), secrets and env vars, API routes and what they accept, user data and privacy, Slack/Supabase/Vercel settings, dependencies, upload and import paths — follows the `security-audit` skill (`.claude/skills/security-audit/`, from github.com/cloudflare/security-audit-skill, MIT). Invoke it before starting, if it is installed. Standing rules, on top of the skill's own:
+
+- **Guidance mode by default.** Answer, review the relevant code, or investigate the specific finding. Run the full six-phase audit and write report files only when the user explicitly asks for an audit, a pen test, a full review or report artifacts.
+- **Read-only first.** Do not change behaviour, rules or settings as part of finding a problem; report it with the source evidence and the smallest fix, then fix on the user's go-ahead.
+- **Never probe live systems.** No requests to production or other deployed endpoints, no real users' data, no real tokens or keys, no paid or shared services. Use dummy principals and local fixtures. If the deciding fact is outside the repo (a Vercel, Supabase or Slack setting), say so as "needs validation" and give the owner a safe way to check.
+- **Never run target code outside a sandbox**, and never install dependencies to do so.
+- **Secrets stay out of chat and git.** Do not read, copy, print or move env files, tokens or keys; tell the user where to put them.
+
 ## Development Rules
 
 ### Icons
