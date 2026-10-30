@@ -18,6 +18,42 @@ export interface SlackDm {
   blocks?: unknown[]
 }
 
+export interface SlackLookup {
+  id?: string
+  /** Why there is no id: not in this workspace, a missing scope, rate limited, or a failure. */
+  reason?: 'not_found' | 'missing_scope' | 'rate_limited' | 'error' | 'no_token'
+}
+
+/**
+ * Find someone's Slack member id from their email (users.lookupByEmail). Needs the app's
+ * users:read and users:read.email scopes. Never throws.
+ */
+export async function findSlackIdByEmail(email: string): Promise<SlackLookup> {
+  const token = process.env.SLACK_BOT_TOKEN?.trim()
+  if (!token) return { reason: 'no_token' }
+  try {
+    const res = await fetch(`https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email.trim())}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (res.status === 429) return { reason: 'rate_limited' }
+    const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; user?: { id?: string } } | null
+    if (json?.ok && json.user?.id) return { id: json.user.id }
+    if (json?.error === 'users_not_found') return { reason: 'not_found' }
+    if (json?.error === 'missing_scope') return { reason: 'missing_scope' }
+    if (json?.error === 'ratelimited') return { reason: 'rate_limited' }
+    console.error('Slack lookupByEmail rejected', json?.error ?? res.status)
+    return { reason: 'error' }
+  } catch (err) {
+    console.error('Slack lookupByEmail failed', err)
+    return { reason: 'error' }
+  }
+}
+
+// People Slack could not find, remembered for a while so every event does not ask again.
+const MISS_TTL_MS = 10 * 60 * 1000
+const misses = new Map<string, number>()
+
 /** Send one DM. Posting to a member id lands in the app's direct conversation with that person. */
 export async function sendSlackDm(slackUserId: string, dm: SlackDm): Promise<boolean> {
   const token = process.env.SLACK_BOT_TOKEN?.trim()
@@ -60,11 +96,33 @@ export async function dmPeople(
 ): Promise<number> {
   const unique = Array.from(new Set(uids)).filter(Boolean)
   if (unique.length === 0) return 0
-  const people = (await store.getMany('users', unique)) as Array<Partial<UserProfile>>
-  const targets = people.filter((u) => u.slackUserId && keep(u)).slice(0, MAX_DM_RECIPIENTS)
+  const people = ((await store.getMany('users', unique)) as unknown as Array<Partial<UserProfile> & { id: string }>).filter(keep)
+
+  // Someone with no Slack id yet is looked up by email, and remembered if found. Stops
+  // asking for the rest of this call once Slack says to slow down or the scope is missing.
+  let lookupsOpen = true
+  async function slackIdOf(u: Partial<UserProfile> & { id: string }): Promise<string | null> {
+    if (u.slackUserId) return u.slackUserId
+    if (!lookupsOpen || !u.email) return null
+    const missedAt = misses.get(u.email)
+    if (missedAt && Date.now() - missedAt < MISS_TTL_MS) return null
+    const found = await findSlackIdByEmail(u.email)
+    if (found.id) {
+      try { await store.update('users', u.id, { slackUserId: found.id }) } catch (err) { console.error('could not save Slack id', err) }
+      return found.id
+    }
+    if (found.reason === 'not_found') misses.set(u.email, Date.now())
+    if (found.reason === 'missing_scope' || found.reason === 'rate_limited' || found.reason === 'no_token') lookupsOpen = false
+    return null
+  }
+
   let sent = 0
-  for (let k = 0; k < targets.length; k += DM_BATCH) {
-    const results = await Promise.all(targets.slice(k, k + DM_BATCH).map((u) => sendSlackDm(u.slackUserId as string, dm)))
+  const capped = people.slice(0, MAX_DM_RECIPIENTS)
+  for (let k = 0; k < capped.length; k += DM_BATCH) {
+    const results = await Promise.all(capped.slice(k, k + DM_BATCH).map(async (u) => {
+      const id = await slackIdOf(u)
+      return id ? sendSlackDm(id, dm) : false
+    }))
     sent += results.filter(Boolean).length
   }
   return sent

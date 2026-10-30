@@ -35,7 +35,7 @@ itself, so the browser cannot message anyone it should not. At most 500 people a
 5. Vercel → Project → Settings → Environment Variables: add `SLACK_BOT_TOKEN` and `SLACK_TRAINER_CHANNEL_ID` (Production), then redeploy.
    Never put the token in git, chat or the browser; it is read only on the server.
 
-Scopes are the minimum: `chat:write` (send) and `im:write` (open the direct conversation).
+Scopes: `chat:write` (send), `im:write` (open the direct conversation), `users:read` + `users:read.email` (find a person by email). After adding scopes, **Reinstall to Workspace**.
 
 ## Tell the app who is who
 
@@ -44,7 +44,9 @@ Admin → Employees → open a person → **Slack** row → paste their Slack pr
 → Save. Only the member id (`U01ABCDEF2`) is stored. Do this for every team lead / manager (to receive)
 and every learner (to be told about their review). Only a super_admin can set it.
 
-Someone with no Slack link is simply skipped; nothing fails.
+**By email, automatically:** when the app is about to message someone with no Slack link, it asks Slack who has their email and saves the answer (so it asks once). It only works when the email in Slack matches the email here; anyone it cannot find is skipped. The Slack row also has a **ค้นหาจากอีเมล** button to do this for one person on the spot. Slack limits lookups to about 50 a minute, so a big first publish may only resolve part of the audience; the rest resolve on later events.
+
+Someone with no Slack link and no match is simply skipped; nothing fails.
 
 ## Before the first deploy of this feature
 

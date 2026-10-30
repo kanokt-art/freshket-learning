@@ -1618,6 +1618,34 @@ function SlackRow({ userId, slackUserId }: { userId: string; slackUserId?: strin
     }
   }
 
+  // Ask Slack who has this person's email, and save the answer.
+  async function lookupByEmail() {
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await authedFetch('/api/slack/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: userId }),
+      })
+      const j = (await res.json().catch(() => null)) as { found?: boolean; reason?: string } | null
+      if (!res.ok) setError('ค้นหาไม่สำเร็จ')
+      else if (!j?.found) {
+        setError(
+          j?.reason === 'missing_scope' ? 'แอป Slack ยังไม่มีสิทธิ์อ่านอีเมล (users:read.email) — เพิ่มสิทธิ์แล้ว Reinstall'
+          : j?.reason === 'rate_limited' ? 'Slack ให้ลองใหม่อีกสักครู่'
+          : j?.reason === 'no_token' ? 'ยังไม่ได้ตั้งค่า SLACK_BOT_TOKEN'
+          : j?.reason === 'no_email' ? 'คนนี้ไม่มีอีเมลในระบบ'
+          : 'ไม่พบอีเมลนี้ใน Slack — วางลิงก์โปรไฟล์ด้วยตัวเอง',
+        )
+      }
+    } catch {
+      setError('ค้นหาไม่สำเร็จ')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   function submit() {
     const id = parseSlackMemberId(value)
     if (!id) { setError('ไม่พบ Slack member ID ในลิงก์นี้ — ใช้ลิงก์โปรไฟล์ เช่น https://…slack.com/team/U01ABCDEF'); return }
@@ -1634,6 +1662,12 @@ function SlackRow({ userId, slackUserId }: { userId: string; slackUserId?: strin
             : <span className="text-sm text-gray-400">ยังไม่ได้ตั้งค่า</span>}
         </div>
       </div>
+      {canEdit && !slackUserId && (
+        <button type="button" onClick={() => void lookupByEmail()} disabled={saving}
+          className="mt-2 px-3 py-1.5 text-xs font-bold rounded-lg border border-freshket-200 bg-freshket-50 text-freshket-700 hover:bg-freshket-100 disabled:opacity-60">
+          ค้นหาจากอีเมล
+        </button>
+      )}
       {canEdit && (
         <div className="mt-2 flex items-center gap-2">
           <input
