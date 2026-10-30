@@ -113,6 +113,18 @@ async function notifyManagerOfCompletion(
         ...(appUrl ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูประวัติการเรียน' }, url: `${appUrl}/manager?user=${encodeURIComponent(uid)}` }] }] : []),
       ],
     })
+    // The learner hears privately that they passed (if their Slack link is on file).
+    // Only a pass: a failed or still-to-be-marked attempt is not announced to them here.
+    if (passed && !awaitingReview) {
+      await dmPeople(store, [uid], {
+        text: `ทำแบบทดสอบ "${courseTitle}" สำเร็จ — ${score} คะแนน`,
+        blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: `✅ คุณทำแบบทดสอบ *${courseTitle}* ผ่านแล้ว
+ได้ *${score} คะแนน*` } },
+          ...(appUrl ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูหลักสูตร' }, url: `${appUrl}/courses/${courseId}` }] }] : []),
+        ],
+      })
+    }
     // Slack is an additional channel, not a replacement: the in-app record
     // above is already written, so a Slack failure loses nothing. Gated to the
     // sales org because that's the team living in the channel.

@@ -1,14 +1,30 @@
 # Slack app — private notifications
 
-The app sends **direct messages** (it never reads anything):
+The app posts in two places and never reads anything.
+
+**Private messages (DM)** — need the person's Slack link on their profile:
 
 | Event | Who is messaged |
 |---|---|
 | A learner submits a quiz | the learner's line manager, and the leads/managers of their team |
 | A learner submits a Shadow Visit | same people |
+| A learner passes a quiz (post-test or lesson quiz; not the pre-test, not a fail) | the learner |
 | A team lead / manager reviews a Shadow Visit (stars + feedback) | the person whose visit it was |
+| A course is published to them, or they are added to a live course | each learner |
+| A new Mandatory Reading goes live | each person in the targeted departments (everyone if none) |
 
-The existing channel webhook (`SLACK_WEBHOOK_URL`) is unchanged and keeps posting to the channel.
+**Trainer × team-lead group** (`SLACK_TRAINER_CHANNEL_ID`, e.g. `C0C1C9GS7N1`) — what trainers and team leads act on:
+- a learner finishes a quiz (with score and a link to their history)
+- a new Shadow Visit is waiting for review
+- a Shadow Visit was reviewed
+
+The bot must be a member of that channel: in the channel, type `/invite @Freshket Sale Tracking`.
+With `SLACK_BOT_TOKEN` + `SLACK_TRAINER_CHANNEL_ID` set, these three go to the group through the bot. Without
+them they use the old webhook (`SLACK_WEBHOOK_URL`) exactly as before, so nothing is posted twice. New course,
+Mandatory Reading and take-away posts for everyone still go to the webhook's channel.
+
+Publishing DMs are sent only when a super_admin publishes; the server re-reads the course/item and its audience
+itself, so the browser cannot message anyone it should not. At most 500 people are messaged per publish.
 
 ## Create the app (once)
 
@@ -16,7 +32,7 @@ The existing channel webhook (`SLACK_WEBHOOK_URL`) is unchanged and keeps postin
 2. Paste `docs/slack/manifest.json` (JSON tab) → Next → Create.
 3. **Install to Workspace** (needs a workspace admin to approve).
 4. **OAuth & Permissions** → copy the **Bot User OAuth Token** (`xoxb-…`).
-5. Vercel → Project → Settings → Environment Variables: add `SLACK_BOT_TOKEN` (Production), then redeploy.
+5. Vercel → Project → Settings → Environment Variables: add `SLACK_BOT_TOKEN` and `SLACK_TRAINER_CHANNEL_ID` (Production), then redeploy.
    Never put the token in git, chat or the browser; it is read only on the server.
 
 Scopes are the minimum: `chat:write` (send) and `im:write` (open the direct conversation).

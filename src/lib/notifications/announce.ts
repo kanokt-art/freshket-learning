@@ -23,6 +23,9 @@ export type AnnounceEvent =
   | {
       kind: 'course_published'
       courseTitle: string
+      /** With recipientUids: the server messages these learners privately (admin only; it re-checks the audience). */
+      courseId?: string
+      recipientUids?: string[]
       recipientCount: number
       /** True when the course was already live and people were added to it. */
       isAddition?: boolean
@@ -31,6 +34,9 @@ export type AnnounceEvent =
   | {
       kind: 'mandatory_published'
       title: string
+      /** With recipientUids: the server messages these people privately (admin only; it re-checks the departments). */
+      itemId?: string
+      recipientUids?: string[]
       departments: string[]
       recipientCount: number
       path?: string

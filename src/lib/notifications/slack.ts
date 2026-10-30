@@ -9,6 +9,8 @@
 // module reads a non-NEXT_PUBLIC_ env var and is only imported from route
 // handlers.
 
+import { sendSlackDm } from '@/lib/notifications/slackDm'
+
 /**
  * Which departments count as "sales" for Slack purposes.
  *
@@ -55,9 +57,6 @@ export interface SlackCompletionEvent {
  * log-reading, not for control flow at the call site.
  */
 export async function postCompletionToSlack(ev: SlackCompletionEvent): Promise<boolean> {
-  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
-  if (!webhook) return false // integration simply not configured
-
   const meta = [ev.position, ev.department].filter(Boolean).join(' · ')
   const verdict = ev.awaitingReview
     ? '📝 ส่งคำตอบแบบเขียนแล้ว รอตรวจ'
@@ -98,7 +97,24 @@ export async function postCompletionToSlack(ev: SlackCompletionEvent): Promise<b
     ],
   }
 
-  return post(webhook, payload)
+  return postToTeam(payload)
+}
+
+/**
+ * Post to the trainer × team-lead group. Goes through the Slack app (bot) into the group
+ * channel when SLACK_BOT_TOKEN and SLACK_TRAINER_CHANNEL_ID are set — the bot must be a
+ * member of that channel — and otherwise through the webhook as before, so nothing is
+ * posted twice and an unconfigured deployment behaves exactly as it did.
+ *
+ * Used for what trainers and team leads act on: a learner finishing a quiz, a Shadow
+ * Visit waiting for review, a Shadow Visit that was reviewed. Announcements aimed at
+ * everyone (new course, mandatory reading, take-away) still use the webhook's channel.
+ */
+async function postToTeam(payload: { text: string; blocks?: unknown[] }): Promise<boolean> {
+  const channel = process.env.SLACK_TRAINER_CHANNEL_ID?.trim()
+  if (channel && process.env.SLACK_BOT_TOKEN?.trim()) return sendSlackDm(channel, payload)
+  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
+  return webhook ? post(webhook, payload) : false
 }
 
 /** The single place that actually talks to Slack. */
@@ -155,12 +171,9 @@ export interface SlackShadowSubmittedEvent {
  * it leads with the ask rather than with the submission.
  */
 export async function postShadowSubmittedToSlack(ev: SlackShadowSubmittedEvent): Promise<boolean> {
-  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
-  if (!webhook) return false
-
   const meta = [ev.position, ev.department].filter(Boolean).join(' · ')
 
-  return post(webhook, {
+  return postToTeam({
     text: `${ev.observerName} ส่ง Shadow Visit ใหม่ — รอการประเมิน`,
     blocks: [
       {
@@ -292,12 +305,9 @@ export interface SlackShadowAckedEvent {
  * happened, which is the number the team tracks.
  */
 export async function postShadowAckedToSlack(ev: SlackShadowAckedEvent): Promise<boolean> {
-  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
-  if (!webhook) return false
-
   const score = typeof ev.rating === 'number' ? ` — ${ev.rating}/5` : ''
 
-  return post(webhook, {
+  return postToTeam({
     text: `${ev.reviewerName} ประเมิน Shadow Visit ของ ${ev.observerName} แล้ว`,
     blocks: [
       {

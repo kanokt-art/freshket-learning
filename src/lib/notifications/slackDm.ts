@@ -42,14 +42,32 @@ export async function sendSlackDm(slackUserId: string, dm: SlackDm): Promise<boo
   }
 }
 
-/** DM each of these people (by person id) who has a Slack member id on file. Returns how many were sent. */
-export async function dmPeople(store: Store, uids: readonly string[], dm: SlackDm): Promise<number> {
+const MAX_DM_RECIPIENTS = 500
+const DM_BATCH = 10
+
+/**
+ * DM each of these people (by person id) who has a Slack member id on file; returns how
+ * many were sent. The people are read in one go, and only those an admin has given a Slack
+ * link are messaged — capped, and sent in small batches, so a publish to a big audience
+ * cannot run the function out of time.
+ */
+export async function dmPeople(
+  store: Store,
+  uids: readonly string[],
+  dm: SlackDm,
+  /** Narrow who is messaged. */
+  keep: (u: Partial<UserProfile>) => boolean = () => true,
+): Promise<number> {
   const unique = Array.from(new Set(uids)).filter(Boolean)
-  const sent = await Promise.all(unique.map(async (uid) => {
-    const doc = (await store.get('users', uid)) as Partial<UserProfile> | null
-    return doc?.slackUserId ? sendSlackDm(doc.slackUserId, dm) : false
-  }))
-  return sent.filter(Boolean).length
+  if (unique.length === 0) return 0
+  const people = (await store.getMany('users', unique)) as Array<Partial<UserProfile>>
+  const targets = people.filter((u) => u.slackUserId && keep(u)).slice(0, MAX_DM_RECIPIENTS)
+  let sent = 0
+  for (let k = 0; k < targets.length; k += DM_BATCH) {
+    const results = await Promise.all(targets.slice(k, k + DM_BATCH).map((u) => sendSlackDm(u.slackUserId as string, dm)))
+    sent += results.filter(Boolean).length
+  }
+  return sent
 }
 
 /**

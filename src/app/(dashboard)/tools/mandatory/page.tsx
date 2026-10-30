@@ -107,6 +107,8 @@ export default function MandatoryPage() {
     void announce({
       kind: 'mandatory_published',
       title: item.title,
+      itemId: item.id,
+      recipientUids: targets.map(u => u.uid),
       departments: depts,
       recipientCount: targets.length,
       path: '/courses/mandatory',

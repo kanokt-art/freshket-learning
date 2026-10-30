@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/server/store'
 import { dmPeople, leadsOf } from '@/lib/notifications/slackDm'
+import { courseAudience, type AudienceCourse } from '@/lib/courses/audience'
 import { reviewId } from '@/lib/shadow/reviews'
 import { requireStaff } from '@/lib/server/auth'
 import type { UserProfile } from '@/types/user'
@@ -54,6 +55,15 @@ function text(v: unknown, max = MAX_TEXT): string | null {
   return t
 }
 
+/** Person ids the client says were notified; only ever used to NARROW who the server messages. */
+const UID_RE = /^[A-Za-z0-9_-]{1,128}$/
+function uidList(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.filter((x): x is string => typeof x === 'string' && UID_RE.test(x)).slice(0, 3000)
+}
+const ID_RE = /^[A-Za-z0-9_-]{1,128}$/
+const isActivePerson = (u: Partial<UserProfile>) => !u.employmentStatus || u.employmentStatus === 'Active'
+
 function count(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0
 }
@@ -92,6 +102,30 @@ export async function POST(req: NextRequest) {
       case 'course_published': {
         const courseTitle = text(body.courseTitle)
         if (!courseTitle) return bad('Invalid courseTitle')
+
+        // Each learner is also told privately (Slack link on file). Only an admin publishes,
+        // so only an admin triggers this; the course, its audience and the wording all come
+        // from the database, and the client's list can only narrow it.
+        const courseId = typeof body.courseId === 'string' && ID_RE.test(body.courseId) ? body.courseId : null
+        const wanted = uidList(body.recipientUids)
+        if (gate.isSuperAdmin && courseId && wanted.length > 0) {
+          const store = getStore()
+          const course = (await store.get('courses', courseId)) as (AudienceCourse & { isPublished?: boolean; title?: string }) | null
+          if (course?.isPublished) {
+            const people = (await store.getMany('users', wanted)) as unknown as Array<Partial<UserProfile> & { uid: string; role: string }>
+            const inAudience = new Set(courseAudience(course, people).map((u) => u.uid))
+            const link = appUrl(`/courses/${courseId}`)
+            const title = course.title || courseTitle
+            const added = body.isAddition === true
+            await dmPeople(store, people.filter((u) => inAudience.has(u.uid) && u.uid !== gate.uid).map((u) => u.uid), {
+              text: added ? `คุณถูกเพิ่มเข้าหลักสูตร "${title}"` : `มีหลักสูตรใหม่ส่งถึงคุณ: ${title}`,
+              blocks: [
+                { type: 'section', text: { type: 'mrkdwn', text: added ? `📚 คุณถูกเพิ่มเข้าหลักสูตร\n*${title}*` : `📚 มีหลักสูตรใหม่ส่งถึงคุณ\n*${title}*` } },
+                ...(link ? [{ type: 'actions', elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'เริ่มเรียน' }, url: link }] }] : []),
+              ],
+            }, isActivePerson)
+          }
+        }
         posted = await postCoursePublishedToSlack({
           courseTitle,
           recipientCount: count(body.recipientCount),
@@ -104,6 +138,27 @@ export async function POST(req: NextRequest) {
       case 'mandatory_published': {
         const title = text(body.title)
         if (!title) return bad('Invalid title')
+
+        // Same rule as courses: private messages are decided from the stored item.
+        const itemId = typeof body.itemId === 'string' && ID_RE.test(body.itemId) ? body.itemId : null
+        const wantedUids = uidList(body.recipientUids)
+        if (gate.isSuperAdmin && itemId && wantedUids.length > 0) {
+          const store = getStore()
+          const item = (await store.get('mandatoryItems', itemId)) as { isPublished?: boolean; title?: string; weekLabel?: string; departmentAccess?: Array<{ department?: string }> } | null
+          if (item?.isPublished) {
+            const depts = (Array.isArray(item.departmentAccess) ? item.departmentAccess : []).map((a) => a.department).filter((d): d is string => !!d)
+            const link = appUrl('/courses/mandatory')
+            const itemTitle = item.title || title
+            await dmPeople(store, wantedUids.filter((id) => id !== gate.uid), {
+              text: `Mandatory Reading ใหม่: ${itemTitle}`,
+              blocks: [
+                { type: 'section', text: { type: 'mrkdwn', text: `📌 *Mandatory Reading ใหม่*\n*${itemTitle}*` } },
+                ...(item.weekLabel ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: item.weekLabel }] }] : []),
+                ...(link ? [{ type: 'actions', elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'เปิดอ่าน' }, url: link }] }] : []),
+              ],
+            }, (u) => isActivePerson(u) && (depts.length === 0 || (!!u.department && depts.includes(u.department))))
+          }
+        }
         const departments = Array.isArray(body.departments)
           ? body.departments.filter((d): d is string => typeof d === 'string').slice(0, MAX_LIST)
           : []

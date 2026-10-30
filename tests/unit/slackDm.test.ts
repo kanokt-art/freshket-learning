@@ -8,7 +8,10 @@ const docs: Record<string, Record<string, unknown>> = {
   'users/mgr': { slackUserId: 'U0MGR00002' },
   'teams/t1': { teamLeadIds: ['lead', 'lead2'], managerIds: ['mgr'] },
 }
-const store = { get: async (path: string, id: string) => docs[`${path}/${id}`] ?? null } as unknown as Store
+const store = {
+  get: async (path: string, id: string) => docs[`${path}/${id}`] ?? null,
+  getMany: async (path: string, ids: string[]) => ids.map((id) => docs[`${path}/${id}`]).filter(Boolean),
+} as unknown as Store
 
 let calls: Array<{ url: string; body: Record<string, unknown>; auth: string | null }>
 beforeEach(() => {
