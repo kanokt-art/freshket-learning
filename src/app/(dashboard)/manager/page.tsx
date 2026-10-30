@@ -374,8 +374,16 @@ export default function ManagerPage() {
               <span className="size-8 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : filteredUsers.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-              <p className="text-sm">ไม่พบพนักงาน</p>
+            <div className="flex flex-col items-center justify-center py-16 px-6 text-center text-gray-400">
+              {managedTeamIds.size === 0 ? (
+                <>
+                  {/* The menu is there by role, the members come from teams: no team, no members. */}
+                  <p className="text-sm font-bold text-gray-600">ยังไม่ได้ถูกกำหนดให้ดูแลทีมใด</p>
+                  <p className="text-xs mt-1 max-w-sm">คุณจะเห็นสมาชิกเมื่อ Admin กำหนดคุณเป็น Manager หรือ Team Lead ของทีม ติดต่อ Admin เพื่อเพิ่มคุณเข้าทีม</p>
+                </>
+              ) : (
+                <p className="text-sm">ไม่พบพนักงาน</p>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
