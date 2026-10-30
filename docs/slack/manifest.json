@@ -1,16 +1,9 @@
 {
   "display_information": {
     "name": "Freshket Sale Tracking",
-    "description": "แจ้งเตือน team lead เมื่อ user ทำแบบทดสอบหรือส่ง Shadow Visit และแจ้ง user เมื่อได้รับการประเมิน",
-    "background_color": "#00a862",
-    "long_description": "Freshket Sale Tracking ส่งข้อความส่วนตัวใน Slack: แจ้ง team lead เมื่อ user ในทีมทำแบบทดสอบหรือส่ง Shadow Visit เข้ามา และแจ้ง user เมื่อ team lead หรือ manager ให้คะแนนและ feedback Shadow Visit ของตัวเอง บอทส่งข้อความอย่างเดียว ไม่อ่านข้อความหรือ channel ใดๆ ของผู้ใช้"
+    "description": "แจ้งเตือน team lead และ user เรื่องแบบทดสอบและ Shadow Visit"
   },
   "features": {
-    "app_home": {
-      "home_tab_enabled": false,
-      "messages_tab_enabled": true,
-      "messages_tab_read_only_enabled": true
-    },
     "bot_user": {
       "display_name": "Freshket Sale Tracking",
       "always_online": true
@@ -18,15 +11,7 @@
   },
   "oauth_config": {
     "scopes": {
-      "bot": [
-        "chat:write",
-        "im:write"
-      ]
+      "bot": ["chat:write", "im:write"]
     }
-  },
-  "settings": {
-    "org_deploy_enabled": false,
-    "socket_mode_enabled": false,
-    "token_rotation_enabled": false
   }
 }
