@@ -1,18 +1,34 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 
-// Super-admin-only sub-nav for the Administration area. Self-gating: renders
-// nothing unless the current user is super_admin, so pages shared with regular
-// users (tools) can drop it in unconditionally right after their Header.
+// Super-admin-only nav for the Administration area. Self-gating: renders nothing
+// unless the current user is super_admin, so pages shared with regular users (tools)
+// can drop it in unconditionally right after their Header.
 //
-// Multi-page groups are collapsed into hover dropdowns per the "same topic →
-// one tab" grouping: the /tools family under "Tools", log + settings under
-// "System". Employees has only one destination, so it's a plain tab.
+// Two levels, no dropdowns: the top tabs are the areas (Employees, Tools, System); the
+// area you are in shows its pages as a second row of sub tabs underneath, so every
+// page of the area is visible and one click away. Employees has a single page, so it
+// has no second row.
+
+/** The current URL hash, kept in step with hashchange (Tools uses #qa / #merch for sub-views). */
+function useHash(): string {
+  const [hash, setHash] = useState('')
+  useEffect(() => {
+    const read = () => setHash(window.location.hash.replace(/^#/, ''))
+    read()
+    window.addEventListener('hashchange', read)
+    return () => window.removeEventListener('hashchange', read)
+  }, [])
+  return hash
+}
+
 export function AdministrationTabs() {
   const pathname = usePathname()
+  const hash = useHash()
   const { user } = useAuth()
 
   if (user?.role !== 'super_admin') return null
@@ -44,59 +60,50 @@ export function AdministrationTabs() {
         : 'text-gray-500 font-normal border-transparent hover:text-gray-700'
     }`
 
-  const dropItemCls = 'block px-3.5 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors'
+  const subCls = (active: boolean) =>
+    `inline-flex items-center px-3 py-1.5 text-sm rounded-full border transition-colors whitespace-nowrap ${
+      active
+        ? 'bg-freshket-100 text-freshket-700 border-freshket-200 font-bold'
+        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-gray-900'
+    }`
+
+  // The pages of the area you are in. Tools' views share /tools and differ by hash.
+  const onToolsHome = pathname === '/tools' && hash === ''
+  const subTabs: Array<{ href: string; label: string; active: boolean; onClick?: (e: React.MouseEvent) => void }> =
+    isTools
+      ? [
+          { href: '/tools', label: 'Tools', active: onToolsHome, onClick: (e) => switchHash(e, '') },
+          { href: '/tools/cuisine-guide', label: 'Cuisine Guide', active: pathname.startsWith('/tools/cuisine-guide') },
+          { href: '/tools#qa', label: 'Q&A', active: pathname === '/tools' && hash === 'qa', onClick: (e) => switchHash(e, 'qa') },
+          { href: '/tools/mandatory', label: 'Merchandise Mandatory', active: pathname.startsWith('/tools/mandatory') },
+          { href: '/tools/new-joiner', label: 'New Joiner Hub', active: pathname.startsWith('/tools/new-joiner') },
+          { href: '/tools#merch', label: 'Merchandise Contact', active: pathname === '/tools' && hash === 'merch', onClick: (e) => switchHash(e, 'merch') },
+        ]
+      : isSystem
+        ? [
+            { href: '/admin/settings', label: 'Module Settings', active: pathname === '/admin/settings' },
+            { href: '/admin/announcements', label: 'ข่าวสาร (News Feed)', active: pathname === '/admin/announcements' },
+            { href: '/log', label: 'Activity Log', active: pathname === '/log' },
+          ]
+        : []
 
   return (
-    // No overflow-x-auto here: that computes overflow-y to clip too, which hid
-    // the hover dropdowns (they drop below the bar) and made them unclickable.
-    <nav className="flex items-center gap-6 px-6 bg-white border-b border-gray-100">
-      <Link href="/users" className={tabCls(isEmployees)}>Employees</Link>
+    <div className="bg-white border-b border-gray-100">
+      <nav className="flex items-center gap-6 px-6">
+        <Link href="/users" className={tabCls(isEmployees)}>Employees</Link>
+        <Link href="/tools" className={tabCls(isTools)}>Tools</Link>
+        <Link href="/admin/settings" className={tabCls(isSystem)}>System</Link>
+      </nav>
 
-      {/* Tools group — clicking the tab goes to /tools; hover reveals the rest */}
-      <Dropdown label="Tools" href="/tools" active={isTools}>
-        <Link href="/tools" className={dropItemCls} onClick={(e) => switchHash(e, '')}>Tools</Link>
-        <Link href="/tools/cuisine-guide" className={dropItemCls}>Cuisine Guide</Link>
-        <Link href="/tools#qa" className={dropItemCls} onClick={(e) => switchHash(e, 'qa')}>Q&amp;A</Link>
-        <Link href="/tools/mandatory" className={dropItemCls}>Merchandise Mandatory</Link>
-        <Link href="/tools/new-joiner" className={dropItemCls}>New Joiner Hub</Link>
-        {/* Moved to the end per request — was the second item. */}
-        <Link href="/tools#merch" className={dropItemCls} onClick={(e) => switchHash(e, 'merch')}>Merchandise Contact</Link>
-      </Dropdown>
-
-      {/* System group — clicking the tab goes to Module Settings */}
-      <Dropdown label="System" href="/admin/settings" active={isSystem}>
-        <Link href="/admin/settings" className={dropItemCls}>Module Settings</Link>
-        <Link href="/admin/announcements" className={dropItemCls}>ข่าวสาร (News Feed)</Link>
-        <Link href="/log" className={dropItemCls}>Activity Log</Link>
-      </Dropdown>
-    </nav>
-  )
-}
-
-function Dropdown({ label, href, active, children }: { label: string; href: string; active: boolean; children: React.ReactNode }) {
-  return (
-    <div className="relative group shrink-0">
-      {/* Trigger is a real link so the tab itself is clickable (navigates to the
-          group's landing page); the flyout still opens on hover for the rest. */}
-      <Link
-        href={href}
-        className={`inline-flex items-center gap-1 px-1 py-3 text-sm border-b-2 transition-colors ${
-          active
-            ? 'text-freshket-600 font-bold border-freshket-500'
-            : 'text-gray-500 font-normal border-transparent hover:text-gray-700'
-        }`}
-      >
-        {label}
-        <svg className="size-3.5 text-gray-300 group-hover:text-gray-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-        </svg>
-      </Link>
-
-      <div className="absolute left-0 top-full pt-2 opacity-0 invisible translate-y-1 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0 transition-all duration-150 ease-out z-40">
-        <div className="w-48 bg-white rounded-xl border border-gray-100 shadow-lg py-1.5">
-          {children}
+      {subTabs.length > 0 && (
+        <div className="flex items-center gap-2 px-6 py-2.5 border-t border-gray-100 bg-slate-50/60 overflow-x-auto">
+          {subTabs.map((t) => (
+            <Link key={t.label} href={t.href} onClick={t.onClick} className={subCls(t.active)}>
+              {t.label}
+            </Link>
+          ))}
         </div>
-      </div>
+      )}
     </div>
   )
 }
