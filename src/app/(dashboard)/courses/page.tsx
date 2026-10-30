@@ -1442,15 +1442,22 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
   // this filter is what actually keeps them out of view.
   const visibleRows = useMemo(() => rows.filter((r) => isCurrentOrIncoming(r.user)), [rows])
 
-  const sorted = useMemo(() => sortLearnerRows(visibleRows, sortKey, sortDir), [visibleRows, sortKey, sortDir])
+  // Search the list by name (English or Thai), nickname or department.
+  const [query, setQuery] = useState('')
+  const filteredRows = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return visibleRows
+    return visibleRows.filter(({ user: u }) =>
+      [u.displayNameEN, u.displayName, u.nickname, u.department].some((v) => (v ?? '').toLowerCase().includes(q)),
+    )
+  }, [visibleRows, query])
 
-  // A learner who already started the course can't be removed (the same rule
-  // the per-row delete button enforces), so they are never selectable and
-  // never counted by "select all".
-  const selectableUids = useMemo(
-    () => sorted.map((r) => r.user.uid),
-    [sorted],
-  )
+  const sorted = useMemo(() => sortLearnerRows(filteredRows, sortKey, sortDir), [filteredRows, sortKey, sortDir])
+
+  // Everyone in the list (the search narrows what is shown, not what stays selected), and
+  // just the people currently shown (what "select all" and the header tick act on).
+  const selectableUids = useMemo(() => visibleRows.map((r) => r.user.uid), [visibleRows])
+  const shownUids = useMemo(() => sorted.map((r) => r.user.uid), [sorted])
 
   // Drop selections whose row disappeared (removed, or filtered out upstream),
   // otherwise the count could exceed what's on screen.
@@ -1463,8 +1470,8 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
     })
   }, [selectableUids])
 
-  const allSelected = selectableUids.length > 0 && selected.size === selectableUids.length
-  const someSelected = selected.size > 0 && !allSelected
+  const allSelected = shownUids.length > 0 && shownUids.every((uid) => selected.has(uid))
+  const someSelected = !allSelected && shownUids.some((uid) => selected.has(uid))
 
   function toggleOne(uid: string) {
     setSelected((prev) => {
@@ -1476,7 +1483,12 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
   }
 
   function toggleAll() {
-    setSelected((prev) => (prev.size === selectableUids.length ? new Set() : new Set(selectableUids)))
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (allSelected) shownUids.forEach((uid) => next.delete(uid))
+      else shownUids.forEach((uid) => next.add(uid))
+      return next
+    })
   }
 
   async function handleRemoveSelected() {
@@ -1519,6 +1531,29 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
 
   return (
     <>
+    {/* Search: name, nickname or department */}
+    <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-100 bg-white">
+      <div className="relative flex-1 max-w-sm">
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" />
+        </svg>
+        <input
+          type="search"
+          id="assigned-learners-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="ค้นหาชื่อ ชื่อเล่น หรือแผนก"
+          aria-label="ค้นหาผู้เรียน"
+          className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-400"
+        />
+      </div>
+      {query.trim() && (
+        <span className="text-xs text-gray-500 shrink-0">
+          พบ <span className="font-bold text-gray-800">{sorted.length}</span> จาก {visibleRows.length} คน
+        </span>
+      )}
+    </div>
+
     {/* Bulk action bar — only occupies space once something is selected. */}
     {selected.size > 0 && (
       <div className="sticky top-0 z-20 flex items-center gap-3 px-4 py-2.5 bg-freshket-50 border-b border-freshket-200">
@@ -1548,7 +1583,7 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
               // checked box here would claim every row is selected.
               ref={(el) => { if (el) el.indeterminate = someSelected }}
               onChange={toggleAll}
-              disabled={selectableUids.length === 0}
+              disabled={shownUids.length === 0}
               className="size-4 rounded border-gray-300 text-freshket-500 focus:ring-2 focus:ring-freshket-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
             />
           </th>
@@ -1570,9 +1605,11 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
             {/* Distinguish "genuinely nobody assigned" from "everyone
                 assigned here has resigned" — otherwise this read as the
                 assignment being empty when it wasn't. */}
-            {rows.length > 0
-              ? 'ผู้เรียนทั้งหมดในรายชื่อนี้ลาออกแล้ว'
-              : (emptyText ?? 'ยังไม่มีผู้เรียนที่กำหนด')}
+            {visibleRows.length > 0
+              ? `ไม่พบผู้เรียนที่ตรงกับ "${query.trim()}"`
+              : rows.length > 0
+                ? 'ผู้เรียนทั้งหมดในรายชื่อนี้ลาออกแล้ว'
+                : (emptyText ?? 'ยังไม่มีผู้เรียนที่กำหนด')}
           </td></tr>
         ) : sorted.map((row) => {
           const { user: u, record, status, lastActivity } = row
