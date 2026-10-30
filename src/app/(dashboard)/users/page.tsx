@@ -165,9 +165,13 @@ export default function UsersPage() {
     // this is purely a roster-view filter, not a data deletion.
     // Also drop non-numeric employee IDs (e.g. "FTE" placeholder codes) — same
     // rule as the /sale roster: this list is meant for real, numbered employees.
+    // Only departments in the current rollout (PHASE1_DEPARTMENTS — the same list the
+    // department filter, org board and learner picker use): Tech, Logistics and the rest
+    // are left out of the list until they are onboarded.
     const active = users.filter(u =>
       (!u.employmentStatus || u.employmentStatus === 'Active') &&
-      !!u.employeeId && /^\d+$/.test(u.employeeId),
+      !!u.employeeId && /^\d+$/.test(u.employeeId) &&
+      !!u.department && PHASE1_DEPARTMENTS.has(u.department),
     )
     let list = q
       ? active.filter((u) =>
