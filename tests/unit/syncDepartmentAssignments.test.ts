@@ -283,3 +283,24 @@ describe('usersForMoveSync', () => {
     expect(usersForMoveSync([], new Map())).toEqual([])
   })
 })
+
+describe('computeDepartmentAssignmentSync — new joiners who have not started', () => {
+  const course = [{ id: 'c1', assignedDepartments: ['Sales Management'], assignedUserIds: ['u1'] }]
+
+  it('adds a hired-but-not-started employee (HR status Pending) to the roster', () => {
+    const results = computeDepartmentAssignmentSync(course, [
+      { uid: 'u1', department: 'Sales Management', employmentStatus: 'Active' },
+      { uid: 'u2', department: 'Sales Management', employmentStatus: 'Pending' },
+    ])
+    expect(results).toEqual([{ courseId: 'c1', newAssignedUserIds: ['u1', 'u2'], addedUids: ['u2'] }])
+  })
+
+  it('still skips people who resigned or never showed up', () => {
+    const results = computeDepartmentAssignmentSync(course, [
+      { uid: 'u1', department: 'Sales Management', employmentStatus: 'Active' },
+      { uid: 'u3', department: 'Sales Management', employmentStatus: 'Resigned' },
+      { uid: 'u4', department: 'Sales Management', employmentStatus: 'No show' },
+    ])
+    expect(results).toEqual([])
+  })
+})

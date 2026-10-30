@@ -150,3 +150,21 @@ describe('resultsRoster: who the results list, so finished work does not vanish'
     expect(resultsRoster({}, people, [], 'c1')).toEqual([])
   })
 });
+
+describe('courseAudience: a new joiner due to start is reached', () => {
+  const dept = { assignedDepartments: ['Sales Management'] }
+  const hired = [
+    { uid: 'a', role: 'sale', department: 'Sales Management', employmentStatus: 'Active' },
+    { uid: 'p', role: 'sale', department: 'Sales Management', employmentStatus: 'Pending' },
+    { uid: 'r', role: 'sale', department: 'Sales Management', employmentStatus: 'Resigned' },
+  ]
+
+  it('includes Pending, leaves out Resigned', () => {
+    expect(courseAudience(dept, hired).map((u) => u.uid)).toEqual(['a', 'p'])
+  })
+
+  it('shows the course to a Pending person, not to a resigned one', () => {
+    expect(isInCourseTarget(dept, hired[1])).toBe(true)
+    expect(isInCourseTarget(dept, hired[2])).toBe(false)
+  })
+})

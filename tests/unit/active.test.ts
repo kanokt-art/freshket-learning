@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isActiveEmployee, onlyActiveEmployees } from '@/lib/users/active'
+import { isActiveEmployee, onlyActiveEmployees, isCurrentOrIncoming, onlyCurrentOrIncoming } from '@/lib/users/active'
 
 // The course-assignment pickers were counting resigned staff: the
 // "ยังไม่มีทีม" bucket for Sales Management showed 74 people when only 2 of
@@ -47,5 +47,32 @@ describe('onlyActiveEmployees', () => {
 
   it('returns an empty list when everyone has left', () => {
     expect(onlyActiveEmployees([{ employmentStatus: 'Resigned' }])).toEqual([])
+  })
+})
+
+describe('isCurrentOrIncoming — a course roster covers new joiners before day one', () => {
+  it('counts someone employed now, and a hire who has not started yet', () => {
+    expect(isCurrentOrIncoming({ employmentStatus: 'Active' })).toBe(true)
+    expect(isCurrentOrIncoming({})).toBe(true)
+    expect(isCurrentOrIncoming({ employmentStatus: 'Pending' })).toBe(true)
+  })
+
+  it('still leaves out everyone who is gone or unknown', () => {
+    expect(isCurrentOrIncoming({ employmentStatus: 'Resigned' })).toBe(false)
+    expect(isCurrentOrIncoming({ employmentStatus: 'No show' })).toBe(false)
+    expect(isCurrentOrIncoming({ employmentStatus: 'Terminated' })).toBe(false)
+  })
+
+  it('does not make a Pending person "active" elsewhere (the rest of the app keeps its whitelist)', () => {
+    expect(isActiveEmployee({ employmentStatus: 'Pending' })).toBe(false)
+  })
+
+  it('onlyCurrentOrIncoming keeps those and drops the rest', () => {
+    const got = onlyCurrentOrIncoming([
+      { id: 'a', employmentStatus: 'Active' },
+      { id: 'b', employmentStatus: 'Pending' },
+      { id: 'c', employmentStatus: 'Resigned' },
+    ])
+    expect(got.map((u) => u.id)).toEqual(['a', 'b'])
   })
 })

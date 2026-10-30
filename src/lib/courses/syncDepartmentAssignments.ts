@@ -5,6 +5,8 @@
 // the matching logic is testable without the Admin SDK; the API route that
 // calls this only does I/O (read courses + users, call this, write the diffs).
 
+import { isCurrentOrIncoming } from '@/lib/users/active'
+
 export interface CourseForSync {
   id: string
   assignedDepartments?: string[]
@@ -27,8 +29,10 @@ export interface CourseSyncResult {
   addedUids: string[]
 }
 
+// Current employees AND new joiners due to start ('Pending'): a new hire is on the course
+// roster before their first day. Resigned / No show are left out.
 function isActive(u: UserForSync): boolean {
-  return !u.employmentStatus || u.employmentStatus === 'Active'
+  return isCurrentOrIncoming(u)
 }
 
 /**

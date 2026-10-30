@@ -19,6 +19,22 @@ export function isActiveEmployee(u: EmploymentFields): boolean {
   return !u.employmentStatus || u.employmentStatus === 'Active'
 }
 
+/**
+ * Employed now, or hired and due to start: HR marks someone who has accepted but not yet
+ * begun as 'Pending'. A course roster covers both — a department-targeted course must
+ * reach a new joiner before day one (and the roster must show them), not only once the
+ * HR sheet flips them to 'Active'. Everything else (Resigned, No show, anything unknown)
+ * stays out, by the same whitelist rule as above.
+ */
+export function isCurrentOrIncoming(u: EmploymentFields): boolean {
+  return isActiveEmployee(u) || u.employmentStatus === 'Pending'
+}
+
+/** Keep people employed now or due to start. */
+export function onlyCurrentOrIncoming<T extends EmploymentFields>(users: T[]): T[] {
+  return users.filter(isCurrentOrIncoming)
+}
+
 /** Keep only people still employed. */
 export function onlyActiveEmployees<T extends EmploymentFields>(users: T[]): T[] {
   return users.filter(isActiveEmployee)

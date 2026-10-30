@@ -16,6 +16,8 @@
 // as "all roles", so a course with a narrow target listed all 1,642 employees as
 // learners (every one "not started") while the course card said 0.
 
+import { isCurrentOrIncoming } from '@/lib/users/active'
+
 export interface AudienceCourse {
   assignedUserIds?: string[]
   assignedDepartments?: string[]
@@ -31,7 +33,8 @@ export interface AudienceUser {
   employmentStatus?: string
 }
 
-const isActive = (u: AudienceUser) => !u.employmentStatus || u.employmentStatus === 'Active'
+// Who a course reaches: employed now, or hired and due to start ('Pending'). See isCurrentOrIncoming.
+const isActive = isCurrentOrIncoming
 
 export function courseAudience<U extends AudienceUser>(course: AudienceCourse | null | undefined, users: readonly U[]): U[] {
   if (!course) return []

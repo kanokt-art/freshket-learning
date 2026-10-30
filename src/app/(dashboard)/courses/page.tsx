@@ -52,7 +52,7 @@ import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { alertError, alertSuccess, confirmAction } from '@/lib/ui/alert'
 import { formatPersonName } from '@/lib/users/displayName'
-import { onlyActiveEmployees, isActiveEmployee } from '@/lib/users/active'
+import { onlyCurrentOrIncoming, isCurrentOrIncoming, isActiveEmployee } from '@/lib/users/active'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { BUCKET_ASSESSMENT_LIST, getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
@@ -144,7 +144,7 @@ function notifyCoursePublishChanges(
   if (c.isPublished && !wasPublished) {
     // First publish → notify all role-based or individually-assigned targets who aren't already enrolled
     const isNotifyTarget = (u: UserProfile) =>
-      isActiveEmployee(u) && isInCourseTarget(c, u) && !alreadyEnrolled.has(u.uid)
+      isCurrentOrIncoming(u) && isInCourseTarget(c, u) && !alreadyEnrolled.has(u.uid)
     const targets = DEMO_MODE
       ? demoStore.getUsers().filter(isNotifyTarget)
       : allUsers.filter(isNotifyTarget)
@@ -176,7 +176,7 @@ function notifyCoursePublishChanges(
     const newlyAdded = (c.assignedUserIds ?? []).filter(
       id => !prevAssigned.has(id) && !alreadyEnrolled.has(id)
     )
-    const targets = allUsers.filter(u => newlyAdded.includes(u.uid) && isActiveEmployee(u))
+    const targets = allUsers.filter(u => newlyAdded.includes(u.uid) && isCurrentOrIncoming(u))
     const recipients = targets.filter(u => u.uid !== currentUid)
     recipients.forEach(u => {
       pushNotification(u.uid, {
@@ -1440,7 +1440,7 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
   // reorganisation over time, both leave resigned learners sitting in
   // assignedUserIds (removeAssignedUser only prunes on manual removal), so
   // this filter is what actually keeps them out of view.
-  const visibleRows = useMemo(() => rows.filter((r) => isActiveEmployee(r.user)), [rows])
+  const visibleRows = useMemo(() => rows.filter((r) => isCurrentOrIncoming(r.user)), [rows])
 
   const sorted = useMemo(() => sortLearnerRows(visibleRows, sortKey, sortDir), [visibleRows, sortKey, sortDir])
 
@@ -1600,6 +1600,9 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-gray-800 truncate">{formatPersonName(u)}</p>
                     <p className="text-xs text-gray-400 truncate">{u.position ?? '—'}</p>
+                    {u.employmentStatus === 'Pending' && (
+                      <span className="inline-block mt-0.5 text-xs font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">ยังไม่เริ่มงาน</span>
+                    )}
                   </div>
                 </div>
               </td>
@@ -2078,7 +2081,7 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
   }
 
   // Same rule as every other picker — see src/lib/users/active.ts.
-  const activeUsers = useMemo(() => onlyActiveEmployees(users), [users])
+  const activeUsers = useMemo(() => onlyCurrentOrIncoming(users), [users])
 
   const departments = useMemo(() => Array.from(new Set(activeUsers.map((u) => u.department).filter(Boolean))).sort() as string[], [activeUsers])
   const positions = useMemo(() => Array.from(new Set(activeUsers.map((u) => u.position).filter(Boolean))).sort() as string[], [activeUsers])
@@ -4271,7 +4274,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   // Note this filters on employment status, NOT on whether someone has a team:
   // 210 of the 285 active employees have no teamId, so requiring a team would
   // hide most of the company from the picker.
-  const assignableUsers = useMemo(() => onlyActiveEmployees(allUsers), [allUsers])
+  const assignableUsers = useMemo(() => onlyCurrentOrIncoming(allUsers), [allUsers])
 
   // A user's teamId can point at a team document that no longer exists (the
   // team was deleted/merged and the member was never re-homed) — found via a
@@ -4373,7 +4376,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   // The table hides people who have resigned, but they stay in assignedUserIds. Count only
   // who the table shows, and say how many are left behind (with a button to clear them).
   const activeAssignedIds = useMemo(
-    () => new Set(assignedRows.filter((r) => isActiveEmployee(r.user)).map((r) => r.user.uid)),
+    () => new Set(assignedRows.filter((r) => isCurrentOrIncoming(r.user)).map((r) => r.user.uid)),
     [assignedRows],
   )
   const hiddenAssignedCount = form.assignedUserIds.filter((id) => !activeAssignedIds.has(id)).length
@@ -4634,11 +4637,11 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   // asked for, since the common case is looking at the active roster.
   const [hideResigned, setHideResigned] = useState(true)
   const visibleSummaryRows = useMemo(
-    () => hideResigned ? summaryRows.filter((r) => isActiveEmployee(r.user)) : summaryRows,
+    () => hideResigned ? summaryRows.filter((r) => isCurrentOrIncoming(r.user)) : summaryRows,
     [summaryRows, hideResigned],
   )
   const resignedCount = useMemo(
-    () => summaryRows.filter((r) => !isActiveEmployee(r.user)).length,
+    () => summaryRows.filter((r) => !isCurrentOrIncoming(r.user)).length,
     [summaryRows],
   )
 
