@@ -892,7 +892,8 @@ function LessonBrowserStep({
 
   // Most lessons complete on open (there's nothing further to gate on).
   // Two exceptions, both anti-skip rules:
-  //   · video — only counts once the gated player reports ≥95% watched.
+  //   · a YouTube video — only counts once the gated player reports ≥95% watched.
+  //     Any other video (Google Drive, …) cannot be measured, so opening it counts.
   //   · a quiz tagged pre/post-test — only counts once it has actually been
   //     submitted and graded (see the completedLessonIds write in the return
   //     handler). Merely opening one must not tick it off, or the course could
@@ -909,10 +910,11 @@ function LessonBrowserStep({
   // it — same rule as a graded quiz. Without this a course whose only lesson is
   // the questionnaire could be finished having answered nothing.
   const selectedIsPersonality = selectedLessonType === 'personality'
+  const selectedIsTrackedVideo = selectedLessonType === 'video' && !!youtubeVideoId(selectedLesson?.videoUrl)
   useEffect(() => {
-    if (!selectedLessonId || selectedLessonType === 'video' || selectedIsGradedQuiz || selectedIsPersonality) return
+    if (!selectedLessonId || selectedIsTrackedVideo || selectedIsGradedQuiz || selectedIsPersonality) return
     onLessonCompleteRef.current(selectedLessonId)
-  }, [selectedLessonId, selectedLessonType, selectedIsGradedQuiz, selectedIsPersonality])
+  }, [selectedLessonId, selectedIsTrackedVideo, selectedIsGradedQuiz, selectedIsPersonality])
 
   // Every YouTube-video lesson must be watched before the media step can be
   // marked done — this is the anti-skip gate (non-YouTube media isn't enforceable).
