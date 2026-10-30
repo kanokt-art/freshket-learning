@@ -13,7 +13,9 @@ import { Header } from '@/components/layout/Header'
 import { save } from '@/lib/data/collection'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
-import { useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAllShadowAcknowledgments, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList } from '@/hooks/useFirestore'
+import { useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAllShadowAcknowledgments, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList, useBucketResultsFor } from '@/hooks/useFirestore'
+import { MbtiPill } from '@/components/features/MbtiBadge'
+import { MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { RoleplayRadar } from '@/components/features/RoleplayRadar'
 import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
@@ -141,8 +143,17 @@ export default function ManagerPage() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(
     () => searchParams.get('user'),
   )
-  const [sortField, setSortField] = useState<'name' | 'position' | 'department' | 'startDate' | 'team'>('name')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  // Newest joiners first (shortest tenure on top) until the viewer picks another order.
+  const [sortField, setSortField] = useState<MemberSortField>('startDate')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  // MBTI of everyone, loaded in one query; a person who has not taken it shows "-".
+  const { data: mbtiResults } = useBucketResultsFor(MBTI_DEFINITION.id)
+  const mbtiByUid = useMemo(() => {
+    const m: Record<string, string> = {}
+    mbtiResults.forEach(r => { if (r.uid && r.code) m[r.uid] = r.code })
+    return m
+  }, [mbtiResults])
 
   const toggleSort = (field: typeof sortField) => {
     if (sortField === field) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
@@ -207,6 +218,7 @@ export default function ManagerPage() {
         case 'position':   return (u.position ?? '').toLowerCase()
         case 'department': return (u.department ?? '').toLowerCase()
         case 'team':       return (u.teamId ? (teamMap[u.teamId] ?? '') : '').toLowerCase()
+        case 'mbti':       return mbtiByUid[u.uid] ?? ''
         case 'startDate': {
           const d = u.startDate instanceof Date ? u.startDate : (u.startDate ? new Date(u.startDate as unknown as string) : null)
           return d && !isNaN(d.getTime()) ? d.getTime() : 0
@@ -219,7 +231,7 @@ export default function ManagerPage() {
       if (av > bv) return 1 * dir
       return 0
     })
-  }, [filteredUsers, sortField, sortDir, teamMap])
+  }, [filteredUsers, sortField, sortDir, teamMap, mbtiByUid])
 
   const selectedUser = selectedUserId ? users.find(u => u.uid === selectedUserId) ?? null : null
 
@@ -375,6 +387,7 @@ export default function ManagerPage() {
                     <SortableTh label="ตำแหน่งงาน" field="position" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden sm:table-cell" />
                     <SortableTh label="แผนก" field="department" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell" />
                     <SortableTh label="วันเริ่มงาน" field="startDate" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
+                    <SortableTh label="MBTI" field="mbti" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
                     {showTeamColumn && (
                       <SortableTh label="ทีม" field="team" sortField={sortField} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
                     )}
@@ -433,6 +446,11 @@ export default function ManagerPage() {
                         </td>
                         <td className="px-4 py-3.5 text-xs text-gray-500 hidden lg:table-cell whitespace-nowrap">
                           {u.startDate ? formatDateEN(u.startDate) : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3.5 hidden lg:table-cell">
+                          {mbtiByUid[u.uid]
+                            ? <MbtiPill code={mbtiByUid[u.uid]} />
+                            : <span className="text-gray-400 text-sm">-</span>}
                         </td>
                         {showTeamColumn && (
                           <td className="px-4 py-3.5 hidden lg:table-cell">
@@ -1228,7 +1246,7 @@ function DeptPill({ label, active, onClick }: { label: string; active: boolean; 
   )
 }
 
-type MemberSortField = 'name' | 'position' | 'department' | 'startDate' | 'team'
+type MemberSortField = 'name' | 'position' | 'department' | 'startDate' | 'team' | 'mbti'
 function SortableTh({ label, field, sortField, sortDir, onSort, className = '' }: {
   label: string
   field: MemberSortField

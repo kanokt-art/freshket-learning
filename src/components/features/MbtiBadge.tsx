@@ -19,10 +19,8 @@ const AXIS_TONE: Record<string, string> = {
 const FALLBACK_TONE = 'bg-freshket-100 text-freshket-700 border-freshket-200'
 const EMPTY_TONE = 'bg-gray-100 text-gray-400 border-gray-200'
 
-export function MbtiBadge({ uid, className = '' }: { uid: string | undefined; className?: string }) {
-  const { data: result } = useMyBucketResult(uid, MBTI_DEFINITION.id)
-
-  const code = result?.code
+/** The pill for a code that is already in hand — a roster loads everyone's codes in one query. */
+export function MbtiPill({ code, className = '' }: { code: string | undefined; className?: string }) {
   const tone = !code
     ? EMPTY_TONE
     : AXIS_TONE[code.charAt(0).toUpperCase()] ?? FALLBACK_TONE
@@ -35,4 +33,9 @@ export function MbtiBadge({ uid, className = '' }: { uid: string | undefined; cl
       {code ?? '—'}
     </span>
   )
+}
+
+export function MbtiBadge({ uid, className = '' }: { uid: string | undefined; className?: string }) {
+  const { data: result } = useMyBucketResult(uid, MBTI_DEFINITION.id)
+  return <MbtiPill code={result?.code} className={className} />
 }

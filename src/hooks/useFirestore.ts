@@ -1166,6 +1166,17 @@ export function useMyBucketResult(
   return result
 }
 
+/** Everyone's result for one questionnaire, in one query (a roster column, instead of one read per row). */
+export function useBucketResultsFor(definitionId: string, enabled = true): UseResult<UserBucketResult> {
+  const result = useFirestoreList<UserBucketResult>(
+    'userBucketResults',
+    [{ type: 'where', field: 'definitionId', op: '==', value: definitionId }],
+    !DEMO_MODE && enabled,
+  )
+  if (DEMO_MODE) return { data: [], loading: false, error: null }
+  return result
+}
+
 // ── Assessment (Pre/Post) scores by user ──────────────────────────────────────
 export function useAssessmentScoresByUser(uid: string | undefined): UseResult<AssessmentScore> {
   const result = useFirestoreList<AssessmentScore>(
