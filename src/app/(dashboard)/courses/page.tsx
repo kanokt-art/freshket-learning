@@ -37,7 +37,7 @@ import { STATUS_LABELS, STATUS_COLORS, recordProgressPercent, type TrainingStatu
 import { QUESTION_TYPE_LABELS, QUESTION_TYPE_COLORS, type Assessment } from '@/types/assessment'
 import type { UserProfile, UserRole, Department, Team } from '@/types/user'
 import { getTeamLeadIds, getTeamManagerIds } from '@/types/user'
-import { save, remove, patch } from '@/lib/data/collection'
+import { save, remove, patch, removeMany } from '@/lib/data/collection'
 import { formatDateEN } from '@/lib/utils/dateFormatter'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
@@ -144,7 +144,7 @@ function notifyCoursePublishChanges(
   if (c.isPublished && !wasPublished) {
     // First publish → notify all role-based or individually-assigned targets who aren't already enrolled
     const isNotifyTarget = (u: UserProfile) =>
-      isInCourseTarget(c, u) && !alreadyEnrolled.has(u.uid)
+      isActiveEmployee(u) && isInCourseTarget(c, u) && !alreadyEnrolled.has(u.uid)
     const targets = DEMO_MODE
       ? demoStore.getUsers().filter(isNotifyTarget)
       : allUsers.filter(isNotifyTarget)
@@ -176,7 +176,7 @@ function notifyCoursePublishChanges(
     const newlyAdded = (c.assignedUserIds ?? []).filter(
       id => !prevAssigned.has(id) && !alreadyEnrolled.has(id)
     )
-    const targets = allUsers.filter(u => newlyAdded.includes(u.uid))
+    const targets = allUsers.filter(u => newlyAdded.includes(u.uid) && isActiveEmployee(u))
     const recipients = targets.filter(u => u.uid !== currentUid)
     recipients.forEach(u => {
       pushNotification(u.uid, {
@@ -1448,8 +1448,8 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
   // the per-row delete button enforces), so they are never selectable and
   // never counted by "select all".
   const selectableUids = useMemo(
-    () => sorted.filter((r) => !enrolledUserIds.has(r.user.uid)).map((r) => r.user.uid),
-    [sorted, enrolledUserIds],
+    () => sorted.map((r) => r.user.uid),
+    [sorted],
   )
 
   // Drop selections whose row disappeared (removed, or filtered out upstream),
@@ -1482,10 +1482,13 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
   async function handleRemoveSelected() {
     const uids = Array.from(selected)
     if (uids.length === 0) return
+    const started = uids.filter((uid) => enrolledUserIds.has(uid)).length
     const ok = await confirmAction({
       title: `ลบผู้เรียน ${uids.length} คน?`,
-      text: 'ผู้เรียนที่เลือกจะถูกนำออกจากรายชื่อของหลักสูตรนี้',
-      confirmText: 'ลบออก',
+      text: started > 0
+        ? `ในจำนวนนี้ ${started} คนเริ่มเรียนแล้ว ประวัติการเรียนของคนเหล่านั้นในหลักสูตรนี้ (ความคืบหน้า คะแนน สถานะ) จะถูกลบถาวรเมื่อบันทึก และกู้คืนไม่ได้`
+        : 'ผู้เรียนที่เลือกจะถูกนำออกจากรายชื่อของหลักสูตรนี้',
+      confirmText: started > 0 ? 'ลบผู้เรียนและประวัติ' : 'ลบออก',
       danger: true,
     })
     if (!ok) return
@@ -1493,6 +1496,22 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
     else uids.forEach(onRemove)
     setSelected(new Set())
   }
+  // One learner. Someone who already started is removed only after a confirmation that
+  // says their history in this course goes with them.
+  async function handleRemoveOne(row: AssignedLearnerRow) {
+    const started = enrolledUserIds.has(row.user.uid)
+    if (started) {
+      const ok = await confirmAction({
+        title: `ลบ ${formatPersonName(row.user)} ออกจากหลักสูตร?`,
+        text: 'คนนี้เริ่มเรียนแล้ว ประวัติการเรียนของเขาในหลักสูตรนี้ (ความคืบหน้า คะแนน สถานะ) จะถูกลบถาวรเมื่อบันทึก และกู้คืนไม่ได้',
+        confirmText: 'ลบผู้เรียนและประวัติ',
+        danger: true,
+      })
+      if (!ok) return
+    }
+    onRemove(row.user.uid)
+  }
+
   // Editing needs a real courseId to write trainingRecords/{uid}_{courseId} —
   // a brand-new, unsaved course has none yet, so the edit affordance is
   // simply unavailable until the course exists.
@@ -1567,8 +1586,6 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
                   type="checkbox"
                   aria-label={`เลือก ${u.displayName}`}
                   checked={isSelected}
-                  disabled={isEnrolled}
-                  title={isEnrolled ? 'ผู้เรียนที่เริ่มเรียนแล้วไม่สามารถลบออกได้' : undefined}
                   onChange={() => toggleOne(u.uid)}
                   className="size-4 rounded border-gray-300 text-freshket-500 focus:ring-2 focus:ring-freshket-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                 />
@@ -1620,11 +1637,9 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
                     </button>
                   )}
                   <button type="button"
-                    title={isEnrolled ? 'ผู้เรียนที่เริ่มเรียนแล้วไม่สามารถลบออกได้' : 'ลบออกจากรายชื่อผู้เรียน'}
-                    onClick={() => !isEnrolled && onRemove(u.uid)} disabled={isEnrolled}
-                    className={`size-7 flex items-center justify-center rounded-lg border transition-all ${
-                      isEnrolled ? 'border-gray-100 text-gray-300 cursor-not-allowed' : 'border-gray-200 text-gray-400 hover:bg-rose-500 hover:text-white hover:border-rose-500'
-                    }`}>
+                    title={isEnrolled ? 'ลบออก (เริ่มเรียนแล้ว — ประวัติจะถูกลบด้วย)' : 'ลบออกจากรายชื่อผู้เรียน'}
+                    onClick={() => { void handleRemoveOne(row) }}
+                    className="size-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-rose-500 hover:text-white hover:border-rose-500 transition-all">
                     <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                     </svg>
@@ -4355,6 +4370,17 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     [form.assignedUserIds, allUsers, allTrainingRecords, editCourse?.id],
   )
 
+  // The table hides people who have resigned, but they stay in assignedUserIds. Count only
+  // who the table shows, and say how many are left behind (with a button to clear them).
+  const activeAssignedIds = useMemo(
+    () => new Set(assignedRows.filter((r) => isActiveEmployee(r.user)).map((r) => r.user.uid)),
+    [assignedRows],
+  )
+  const hiddenAssignedCount = form.assignedUserIds.filter((id) => !activeAssignedIds.has(id)).length
+  function clearHiddenAssigned() {
+    setForm((p) => ({ ...p, assignedUserIds: p.assignedUserIds.filter((id) => activeAssignedIds.has(id)) }))
+  }
+
   // Whether the roster should show a Pre-Test/Post-Test column at all — only
   // once the admin has tagged a lesson with that role in the "แบบทดสอบ" tab.
   // A 'pre_test' lesson is sat twice (before the material and again after), so
@@ -4416,7 +4442,16 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   // to be re-selected in the picker if still wanted, rather than the system
   // guessing which department(s)/team(s) are still "whole" after an
   // arbitrary uid was pulled out.
+  // People removed from the roster who had already started. Their training records are
+  // deleted when the course is saved (not before: closing the form without saving changes nothing).
+  const [dropRecordUids, setDropRecordUids] = useState<Set<string>>(new Set())
+  function noteStartedRemoved(uids: string[]) {
+    const started = uids.filter((id) => enrolledUserIds.has(id))
+    if (started.length > 0) setDropRecordUids((prev) => new Set([...Array.from(prev), ...started]))
+  }
+
   function removeAssignedUser(uid: string) {
+    noteStartedRemoved([uid])
     setForm((p) => ({
       ...p,
       assignedUserIds: p.assignedUserIds.filter((id) => id !== uid),
@@ -4429,6 +4464,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   // loop would queue N updates that each rebuild the array from the previous
   // one — correct, but O(n²) over a 165-learner list.
   function removeAssignedUsers(uids: string[]) {
+    noteStartedRemoved(uids)
     const drop = new Set(uids)
     setForm((p) => ({
       ...p,
@@ -4533,6 +4569,17 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
       const dates = { startDate: toDate(form.startDate), endDate: toDate(form.endDate) }
       if (isEdit && editCourse) {
         await save('courses', { ...payload, ...dates, id: editCourse.id, updatedAt: now })
+        // Whoever was removed after starting loses their history in this course now that
+        // the removal is saved (someone re-added meanwhile keeps theirs).
+        const stay = new Set(form.assignedUserIds)
+        const dropIds = allTrainingRecords
+          .filter((r) => r.courseId === editCourse.id && dropRecordUids.has(r.userId) && !stay.has(r.userId))
+          .map((r) => r.id)
+        if (dropIds.length > 0) {
+          await removeMany('trainingRecords', dropIds)
+          // The per-learner summaries are rebuilt from the records; best effort.
+          void authedFetch('/api/stats/rebuild', { method: 'POST' }).catch(() => {})
+        }
         onDone({ ...editCourse, ...payload, updatedAt: now })
       } else {
         const { id } = await save('courses', {
@@ -4942,9 +4989,20 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                     <svg className="size-4 text-gray-400 group-hover:text-freshket-500 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
                     </svg>
-                    {form.assignedUserIds.length}
+                    {form.assignedUserIds.length - hiddenAssignedCount}
                   </span>
                 </button>
+                {hiddenAssignedCount > 0 && (
+                  <div className="flex items-center justify-between gap-3 px-3 py-2 -mt-2 rounded-xl bg-amber-50 border border-amber-200">
+                    <p className="text-xs text-amber-700">
+                      +{hiddenAssignedCount} คนที่ลาออกหรือไม่พบในระบบ ยังค้างอยู่ในรายชื่อ (ไม่แสดงในตาราง และไม่รับแจ้งเตือน)
+                    </p>
+                    <button type="button" onClick={clearHiddenAssigned}
+                      className="shrink-0 text-xs font-bold text-amber-700 hover:underline">
+                      ล้าง
+                    </button>
+                  </div>
+                )}
 
                 {/* Card: Individual assignment */}
                 <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">

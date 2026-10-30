@@ -18,6 +18,16 @@ const THUMB_COLORS = [
 
 function isImageUrl(s: string) { return s.startsWith('http') || s.startsWith('/') }
 
+// Recommended and minimum pixel size for a frame of this aspect ratio (width / height).
+const REC_WIDTH = 1200
+const MIN_WIDTH = 900
+const MAX_OUT_WIDTH = 1600   // what the crop is scaled down to, so the upload stays well under 5 MB
+const sizeGuide = (aspect: number) => ({
+  rec: `${REC_WIDTH} × ${Math.round(REC_WIDTH / aspect)}`,
+  min: `${MIN_WIDTH} × ${Math.round(MIN_WIDTH / aspect)}`,
+  ratio: `${Number.isInteger(aspect) ? aspect : aspect.toFixed(2)}:1`,
+})
+
 type PickerTab = 'gallery' | 'upload' | 'ai'
 
 export interface CoverImageCatalogItem { url: string; label: string; category: string }
@@ -52,6 +62,9 @@ export function CoverImagePicker({
   const [crop, setCrop] = useState<Crop>()
   const [completedCrop, setCompletedCrop] = useState<Crop>()
   const [uploading, setUploading] = useState(false)
+  // Shown when the picture is smaller than the minimum, or could not be opened for repositioning.
+  const [lowRes, setLowRes] = useState<number | null>(null)
+  const [cropError, setCropError] = useState('')
   const imgRef = useRef<HTMLImageElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [aiPrompt, setAiPrompt] = useState('')
@@ -63,7 +76,7 @@ export function CoverImagePicker({
 
   function openPicker() {
     setDraft(value); setUrlInput(value)
-    setRawSrc(''); setCrop(undefined); setCompletedCrop(undefined)
+    setRawSrc(''); setCrop(undefined); setCompletedCrop(undefined); setLowRes(null); setCropError('')
     setKeywords([]); setSelectedKw(''); setAiPrompt(''); setSuggestion('')
     setThumbError(false)
     setPickerOpen(true)
@@ -87,12 +100,23 @@ export function CoverImagePicker({
     const reader = new FileReader()
     reader.onload = () => setRawSrc(reader.result as string)
     reader.readAsDataURL(file)
-    setCrop(undefined); setCompletedCrop(undefined)
+    setCrop(undefined); setCompletedCrop(undefined); setLowRes(null); setCropError('')
   }
 
   function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
-    const { width, height } = e.currentTarget
+    const { width, height, naturalWidth } = e.currentTarget
+    setLowRes(naturalWidth < MIN_WIDTH ? naturalWidth : null)
     setCrop(centerCrop(makeAspectCrop({ unit: '%', width: 100 }, aspect, width, height), width, height))
+  }
+
+  // Slide or resize the 3:1 frame over a picture that is already chosen (uploaded, from the
+  // gallery, or a link). The result is cut and uploaded again, so the new position is what
+  // everyone sees.
+  function startReposition() {
+    if (!isImageUrl(draft)) return
+    setCropError(''); setLowRes(null)
+    setCrop(undefined); setCompletedCrop(undefined)
+    setRawSrc(draft)
   }
 
   async function handleCropUpload() {
@@ -100,12 +124,17 @@ export function CoverImagePicker({
     const canvas = document.createElement('canvas')
     const scaleX = imgRef.current.naturalWidth / imgRef.current.width
     const scaleY = imgRef.current.naturalHeight / imgRef.current.height
-    canvas.width = Math.floor(completedCrop.width * scaleX)
-    canvas.height = Math.floor(completedCrop.height * scaleY)
+    const srcW = completedCrop.width * scaleX
+    const srcH = completedCrop.height * scaleY
+    // Never larger than MAX_OUT_WIDTH wide; the frame's own shape is kept.
+    const outW = Math.max(1, Math.floor(Math.min(srcW, MAX_OUT_WIDTH)))
+    canvas.width = outW
+    canvas.height = Math.max(1, Math.floor(outW * (srcH / srcW)))
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    setCropError('')
     ctx.drawImage(imgRef.current, completedCrop.x * scaleX, completedCrop.y * scaleY,
-      completedCrop.width * scaleX, completedCrop.height * scaleY, 0, 0, canvas.width, canvas.height)
+      srcW, srcH, 0, 0, canvas.width, canvas.height)
     setUploading(true)
     try {
       const blob = await new Promise<Blob>((res, rej) =>
@@ -124,8 +153,13 @@ export function CoverImagePicker({
         body: fd,
       })
       const data = await r.json()
-      if (data.url) { setDraft(data.url); setRawSrc('') }
-    } catch { /* keep rawSrc so user can retry */ }
+      if (data.url) { setDraft(data.url); setUrlInput(data.url); setRawSrc('') }
+      else setCropError(data.error ? String(data.error) : 'อัปโหลดไม่สำเร็จ ลองใหม่อีกครั้ง')
+    } catch {
+      // Typically a picture from another site that does not allow editing, or a network error.
+      setCropError('ตัดรูปนี้ไม่ได้ (รูปจากเว็บอื่นอาจไม่อนุญาต) ลองอัปโหลดไฟล์รูปเองแทน')
+      /* keep rawSrc so user can retry */
+    }
     finally { setUploading(false) }
   }
 
@@ -215,6 +249,10 @@ export function CoverImagePicker({
           )}
         </div>
       </div>
+
+      <p className="mt-1.5 text-xs text-gray-400">
+        ขนาดที่แนะนำ {sizeGuide(aspect).rec} px (อัตราส่วน {sizeGuide(aspect).ratio})
+      </p>
 
       {/* ── Picker modal — card overlay, changes only take effect on confirm ── */}
       {pickerOpen && (
@@ -364,6 +402,13 @@ export function CoverImagePicker({
 
             {pickerTab === 'upload' && (
               <>
+                {/* Size guide */}
+                <div className="rounded-xl bg-freshket-50 border border-freshket-200 px-3.5 py-2.5 text-xs text-freshket-700 space-y-0.5">
+                  <p className="font-bold">ขนาดที่แนะนำ {sizeGuide(aspect).rec} px (กว้าง × สูง, อัตราส่วน {sizeGuide(aspect).ratio})</p>
+                  <p>ขั้นต่ำ {sizeGuide(aspect).min} px · ไฟล์ JPG, PNG หรือ WEBP ไม่เกิน 5 MB</p>
+                  <p>อัปโหลดแล้วลากกรอบเพื่อเลื่อนตำแหน่ง ลากมุมเพื่อย่อหรือขยายส่วนที่จะใช้</p>
+                </div>
+
                 {/* URL quick-enter */}
                 <div>
                   <label className="text-xs text-gray-500 font-normal block mb-1.5">URL รูปภาพ (ถ้ามี)</label>
@@ -391,16 +436,21 @@ export function CoverImagePicker({
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
                     </svg>
                     <span className="text-xs font-bold">คลิกเพื่อเลือกไฟล์รูปภาพ</span>
-                    <span className="text-xs">PNG, JPG, WEBP · แนะนำอัตราส่วน {aspect}:1</span>
+                    <span className="text-xs">PNG, JPG, WEBP · {sizeGuide(aspect).rec} px ({sizeGuide(aspect).ratio})</span>
                   </button>
                 ) : (
                   <div className="space-y-3">
                     <div className="rounded-xl overflow-hidden border border-gray-200">
                       <ReactCrop crop={crop} onChange={(c) => setCrop(c)} onComplete={(c) => setCompletedCrop(c)} aspect={aspect} minHeight={60}>
-                        <img ref={imgRef} src={rawSrc} alt="crop preview" onLoad={onImageLoad} className="max-h-48 w-full object-contain" />
+                        <img ref={imgRef} src={rawSrc} alt="crop preview" crossOrigin="anonymous" onLoad={onImageLoad}
+                          onError={() => { setRawSrc(''); setCropError('เปิดรูปนี้เพื่อปรับตำแหน่งไม่ได้ (รูปจากเว็บอื่นอาจไม่อนุญาต) ลองอัปโหลดไฟล์รูปเองแทน') }}
+                          className="max-h-48 w-full object-contain" />
                       </ReactCrop>
                     </div>
-                    <p className="text-xs text-gray-400">ลาก crop area (อัตราส่วน {aspect}:1)</p>
+                    <p className="text-xs text-gray-400">ลากกรอบเพื่อเลื่อนตำแหน่ง · ลากมุมเพื่อย่อ/ขยาย (อัตราส่วน {sizeGuide(aspect).ratio})</p>
+                    {lowRes !== null && (
+                      <p className="text-xs text-amber-600">รูปนี้กว้างแค่ {lowRes} px (ขั้นต่ำ {MIN_WIDTH} px) ภาพอาจไม่คมชัด แนะนำให้ใช้รูปที่ใหญ่กว่า</p>
+                    )}
                     <div className="flex gap-2">
                       <button type="button" onClick={() => { setRawSrc(''); if (fileInputRef.current) fileInputRef.current.value = '' }}
                         className="flex-1 py-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-500 hover:bg-gray-50 transition-all">
@@ -416,10 +466,22 @@ export function CoverImagePicker({
                   </div>
                 )}
 
-                {/* Draft preview */}
+                {cropError && <p className="text-xs text-rose-600">{cropError}</p>}
+
+                {/* Draft preview, in the shape it will be shown */}
                 {draft && !rawSrc && (
-                  <div className="rounded-xl overflow-hidden border border-freshket-200 h-16">
-                    <img src={draft} alt="preview" className="w-full h-full object-cover" />
+                  <div className="space-y-2">
+                    <div className="rounded-xl overflow-hidden border border-freshket-200 w-full" style={{ aspectRatio: String(aspect), maxHeight: '9rem' }}>
+                      {isImageUrl(draft)
+                        ? <img src={draft} alt="preview" className="w-full h-full object-cover" />
+                        : <div className="w-full h-full" style={{ background: draft }} />}
+                    </div>
+                    {isImageUrl(draft) && (
+                      <button type="button" onClick={startReposition}
+                        className="w-full py-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-gray-50 transition-all">
+                        ปรับตำแหน่ง / ตัดใหม่
+                      </button>
+                    )}
                   </div>
                 )}
               </>
