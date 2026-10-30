@@ -57,11 +57,43 @@ describe('events for trainers and team leads', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('announcements to everyone (new course) keep using the webhook, not the group', async () => {
+  it('a course notice does not go to the trainer group', async () => {
     vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
     vi.stubEnv('SLACK_TRAINER_CHANNEL_ID', 'C0C1C9GS7N1')
+    vi.stubEnv('SLACK_COURSE_CHANNEL_ID', '')
     vi.stubEnv('SLACK_WEBHOOK_URL', 'https://hooks.slack.com/services/T/B/X')
     await postCoursePublishedToSlack({ courseTitle: 'C', recipientCount: 3, isAddition: false })
+    expect(calls[0].url).toBe('https://hooks.slack.com/services/T/B/X')
+  })
+})
+
+describe('course notices', () => {
+  it('a new course goes to the course channel through the bot, tagging the channel', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    vi.stubEnv('SLACK_COURSE_CHANNEL_ID', 'C08MCUBS8G1')
+    vi.stubEnv('SLACK_WEBHOOK_URL', 'https://hooks.slack.com/services/T/B/X')
+    expect(await postCoursePublishedToSlack({ courseTitle: 'PVP', recipientCount: 5, isAddition: false })).toBe(true)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe('https://slack.com/api/chat.postMessage')
+    expect(calls[0].body.channel).toBe('C08MCUBS8G1')
+    expect(String(calls[0].body.text)).toContain('<!channel>')
+    expect(JSON.stringify(calls[0].body.blocks)).toContain('<!channel>')
+  })
+
+  it('people added to a live course are posted there without tagging the channel', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    vi.stubEnv('SLACK_COURSE_CHANNEL_ID', 'C08MCUBS8G1')
+    await postCoursePublishedToSlack({ courseTitle: 'PVP', recipientCount: 2, isAddition: true })
+    expect(calls[0].body.channel).toBe('C08MCUBS8G1')
+    expect(String(calls[0].body.text)).not.toContain('<!channel>')
+    expect(JSON.stringify(calls[0].body.blocks)).not.toContain('<!channel>')
+  })
+
+  it('uses the webhook as before when the course channel is not configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    vi.stubEnv('SLACK_COURSE_CHANNEL_ID', '')
+    vi.stubEnv('SLACK_WEBHOOK_URL', 'https://hooks.slack.com/services/T/B/X')
+    await postCoursePublishedToSlack({ courseTitle: 'PVP', recipientCount: 5, isAddition: false })
     expect(calls[0].url).toBe('https://hooks.slack.com/services/T/B/X')
   })
 })

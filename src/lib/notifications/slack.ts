@@ -117,6 +117,18 @@ async function postToTeam(payload: { text: string; blocks?: unknown[] }): Promis
   return webhook ? post(webhook, payload) : false
 }
 
+/**
+ * Post a course notice to the course channel (SLACK_COURSE_CHANNEL_ID) through the Slack app
+ * when both it and SLACK_BOT_TOKEN are set — the bot must be a member of the channel — and
+ * through the webhook otherwise, as before. Learners are not messaged one by one.
+ */
+async function postToCourseChannel(payload: { text: string; blocks?: unknown[] }): Promise<boolean> {
+  const channel = process.env.SLACK_COURSE_CHANNEL_ID?.trim()
+  if (channel && process.env.SLACK_BOT_TOKEN?.trim()) return sendSlackDm(channel, payload)
+  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
+  return webhook ? post(webhook, payload) : false
+}
+
 /** The single place that actually talks to Slack. */
 async function post(webhook: string, payload: unknown): Promise<boolean> {
   try {
@@ -219,17 +231,15 @@ export interface SlackCoursePublishedEvent {
  * The headcount carries the information the per-person messages used to.
  */
 export async function postCoursePublishedToSlack(ev: SlackCoursePublishedEvent): Promise<boolean> {
-  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
-  if (!webhook) return false
-
+  // A brand-new course tags the whole channel (<!channel>); people added to a live course do not.
   const headline = ev.isAddition
     ? `มีผู้เรียนใหม่ถูกเพิ่มเข้าหลักสูตร *${ev.courseTitle}*`
-    : `📚 หลักสูตรใหม่: *${ev.courseTitle}*`
+    : `<!channel> 📚 หลักสูตรใหม่: *${ev.courseTitle}*`
 
-  return post(webhook, {
+  return postToCourseChannel({
     text: ev.isAddition
       ? `มีผู้เรียนใหม่ถูกเพิ่มเข้าหลักสูตร "${ev.courseTitle}"`
-      : `หลักสูตรใหม่: ${ev.courseTitle}`,
+      : `<!channel> หลักสูตรใหม่: ${ev.courseTitle}`,
     blocks: [
       { type: 'section', text: { type: 'mrkdwn', text: headline } },
       {

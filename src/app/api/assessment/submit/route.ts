@@ -6,7 +6,7 @@ import { refreshUserStats } from '@/lib/server/userStats'
 import { statusAfterPostTest } from '@/lib/courses/completion'
 import { gradeSubmission, type GivenAnswers } from '@/lib/assessment/grade'
 import { postCompletionToSlack, isSalesDepartment } from '@/lib/notifications/slack'
-import { dmPeople, leadsOf } from '@/lib/notifications/slackDm'
+import { dmPeople } from '@/lib/notifications/slackDm'
 import type { Assessment, Question } from '@/types/assessment'
 import type { Course } from '@/types/course'
 import type { UserProfile } from '@/types/user'
@@ -101,18 +101,6 @@ async function notifyManagerOfCompletion(
         createdByUid: uid,
       }, { merge: false }),
     ))
-    // The learner's team lead(s) also get it as a private Slack message (those who
-    // have a Slack member id on file). Separate from the channel post below: the
-    // channel is gated to the sales org, a lead's DM is not.
-    await dmPeople(store, await leadsOf(store, learner), {
-      text: `${title} — ${verdict}`,
-      blocks: [
-        { type: 'section', text: { type: 'mrkdwn', text: `📝 *${name}* ส่งแบบทดสอบ
-*${courseTitle}*` } },
-        { type: 'context', elements: [{ type: 'mrkdwn', text: [roleLine, verdict].filter(Boolean).join(' · ') }] },
-        ...(appUrl ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูประวัติการเรียน' }, url: `${appUrl}/manager?user=${encodeURIComponent(uid)}` }] }] : []),
-      ],
-    })
     // The learner hears privately that they passed (if their Slack link is on file).
     // Only a pass: a failed or still-to-be-marked attempt is not announced to them here.
     if (passed && !awaitingReview) {

@@ -166,8 +166,6 @@ function notifyCoursePublishChanges(
       void announce({
         kind: 'course_published',
         courseTitle: c.title,
-        courseId: c.id,
-        recipientUids: recipients.map(u => u.uid),
         recipientCount: recipients.length,
         path: `/courses/${c.id}`,
       })
@@ -193,8 +191,6 @@ function notifyCoursePublishChanges(
       void announce({
         kind: 'course_published',
         courseTitle: c.title,
-        courseId: c.id,
-        recipientUids: recipients.map(u => u.uid),
         recipientCount: recipients.length,
         isAddition: true,
         path: `/courses/${c.id}`,

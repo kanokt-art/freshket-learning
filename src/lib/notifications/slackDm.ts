@@ -10,7 +10,7 @@
 // never fails the action that triggered it.
 
 import type { Store } from '@/lib/server/store'
-import { getTeamLeadIds, getTeamManagerIds, type Team, type UserProfile } from '@/types/user'
+import type { UserProfile } from '@/types/user'
 
 export interface SlackDm {
   /** Plain text: the notification preview, and what clients that cannot draw blocks show. */
@@ -126,21 +126,4 @@ export async function dmPeople(
     sent += results.filter(Boolean).length
   }
   return sent
-}
-
-/**
- * Who answers for this person: their line manager plus the leads and managers of
- * their team. Unlike the in-app bell there is no "everyone" fallback — an unassigned
- * learner must not DM two dozen people.
- */
-export async function leadsOf(store: Store, person: Partial<UserProfile>): Promise<string[]> {
-  const out = new Set<string>()
-  if (person.managerId) out.add(person.managerId)
-  if (person.teamId) {
-    const team = (await store.get('teams', person.teamId)) as Partial<Team> | null
-    if (team) {
-      for (const id of [...getTeamLeadIds(team as Team), ...getTeamManagerIds(team as Team)]) out.add(id)
-    }
-  }
-  return Array.from(out)
 }

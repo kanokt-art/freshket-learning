@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/server/store'
-import { dmPeople, leadsOf } from '@/lib/notifications/slackDm'
-import { courseAudience, type AudienceCourse } from '@/lib/courses/audience'
+import { dmPeople } from '@/lib/notifications/slackDm'
 import { reviewId } from '@/lib/shadow/reviews'
 import { requireStaff } from '@/lib/server/auth'
 import type { UserProfile } from '@/types/user'
@@ -103,29 +102,6 @@ export async function POST(req: NextRequest) {
         const courseTitle = text(body.courseTitle)
         if (!courseTitle) return bad('Invalid courseTitle')
 
-        // Each learner is also told privately (Slack link on file). Only an admin publishes,
-        // so only an admin triggers this; the course, its audience and the wording all come
-        // from the database, and the client's list can only narrow it.
-        const courseId = typeof body.courseId === 'string' && ID_RE.test(body.courseId) ? body.courseId : null
-        const wanted = uidList(body.recipientUids)
-        if (gate.isSuperAdmin && courseId && wanted.length > 0) {
-          const store = getStore()
-          const course = (await store.get('courses', courseId)) as (AudienceCourse & { isPublished?: boolean; title?: string }) | null
-          if (course?.isPublished) {
-            const people = (await store.getMany('users', wanted)) as unknown as Array<Partial<UserProfile> & { uid: string; role: string }>
-            const inAudience = new Set(courseAudience(course, people).map((u) => u.uid))
-            const link = appUrl(`/courses/${courseId}`)
-            const title = course.title || courseTitle
-            const added = body.isAddition === true
-            await dmPeople(store, people.filter((u) => inAudience.has(u.uid) && u.uid !== gate.uid).map((u) => u.uid), {
-              text: added ? `คุณถูกเพิ่มเข้าหลักสูตร "${title}"` : `มีหลักสูตรใหม่ส่งถึงคุณ: ${title}`,
-              blocks: [
-                { type: 'section', text: { type: 'mrkdwn', text: added ? `📚 คุณถูกเพิ่มเข้าหลักสูตร\n*${title}*` : `📚 มีหลักสูตรใหม่ส่งถึงคุณ\n*${title}*` } },
-                ...(link ? [{ type: 'actions', elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'เริ่มเรียน' }, url: link }] }] : []),
-              ],
-            }, isActivePerson)
-          }
-        }
         posted = await postCoursePublishedToSlack({
           courseTitle,
           recipientCount: count(body.recipientCount),
@@ -181,20 +157,6 @@ export async function POST(req: NextRequest) {
         // describe itself, and this keeps the channel's wording consistent
         // with the rest of the app (English name plus nickname).
         const sender = ((await getStore().get('users', gate.uid)) ?? {}) as Partial<UserProfile>
-
-        // The sender's team lead(s) are told privately, whatever the department:
-        // the channel post below is gated to sales, a lead's DM is not.
-        const senderName = (sender.displayNameEN?.trim() || sender.displayName || 'พนักงาน')
-          + (sender.nickname ? ` (${sender.nickname})` : '')
-        const link = appUrl(body.path)
-        await dmPeople(getStore(), await leadsOf(getStore(), sender), {
-          text: `${senderName} ส่ง Shadow Visit ใหม่ — รอการประเมิน`,
-          blocks: [
-            { type: 'section', text: { type: 'mrkdwn', text: `📋 *${senderName}* ส่ง Shadow Visit ใหม่ — _รอการประเมิน_
-${visitSummary}` } },
-            ...(link ? [{ type: 'actions', elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'เข้าไปประเมิน' }, url: link }] }] : []),
-          ],
-        })
 
         // Only sales visits go to the channel — the same gate the old push
         // route applied, kept so this change does not quietly widen who the

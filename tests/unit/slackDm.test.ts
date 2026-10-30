@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { sendSlackDm, dmPeople, leadsOf, findSlackIdByEmail } from '@/lib/notifications/slackDm'
+import { sendSlackDm, dmPeople, findSlackIdByEmail } from '@/lib/notifications/slackDm'
 import type { Store } from '@/lib/server/store'
 
 const docs: Record<string, Record<string, unknown>> = {
@@ -49,17 +49,6 @@ describe('dmPeople', () => {
     const n = await dmPeople(store, ['lead', 'lead', 'lead2', 'mgr', 'nobody'], { text: 'x' })
     expect(n).toBe(2)
     expect(calls.map((c) => c.body.channel).sort()).toEqual(['U0LEAD0001', 'U0MGR00002'])
-  })
-})
-
-describe('leadsOf', () => {
-  it('is the line manager plus the team’s leads and managers, without repeats', async () => {
-    const got = await leadsOf(store, { managerId: 'mgr', teamId: 't1' })
-    expect(got.sort()).toEqual(['lead', 'lead2', 'mgr'])
-  })
-
-  it('has no everyone-fallback for someone unassigned', async () => {
-    expect(await leadsOf(store, {})).toEqual([])
   })
 })
 
