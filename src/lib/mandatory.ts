@@ -7,13 +7,10 @@
 //
 // `showHistory: true` means: the moment this item is published, department
 // gets to see every OTHER published item that came before it too — not just
-// this one. It is a one-time grant tied to this specific item, not a standing
-// department setting: a later item that selects the same department again
-// must tick it again if the intent is still "show them everything so far".
-// This is deliberate (confirmed with the requester) rather than an oversight —
-// a department newly added to Mandatory Reading usually should NOT see a wall
-// of old content by default, only what's published from here on, unless the
-// admin explicitly opts them into the backlog on this item.
+// this one. The grant itself belongs to the item it was ticked on. The admin
+// form remembers the last item's ticks and starts the next new item from them
+// (requested), so a department that was given the backlog keeps being given it
+// until the admin unticks it; unticking on any item changes only that item.
 export interface MandatoryDeptAccess {
   department: string
   showHistory: boolean
@@ -33,6 +30,19 @@ export interface MandatoryItem {
   publishedAt: Date
   createdAt: Date
   createdBy?: string
+}
+
+/**
+ * The departments a NEW item starts with: the last item's, each keeping its "แสดงผลทั้งหมด"
+ * tick, limited to departments still allowed (the rollout list). Order is the last item's.
+ */
+export function departmentAccessFromLast(
+  last: { departments: readonly string[]; historyDepartments: readonly string[] },
+  allowed: ReadonlySet<string>,
+): MandatoryDeptAccess[] {
+  return last.departments
+    .filter((department) => allowed.has(department))
+    .map((department) => ({ department, showHistory: last.historyDepartments.includes(department) }))
 }
 
 /** Departments explicitly targeted by an item — the flattened access list. */

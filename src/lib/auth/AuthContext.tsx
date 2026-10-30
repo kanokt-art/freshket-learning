@@ -54,6 +54,8 @@ function mapDocToProfile(uid: string, email: string, displayName: string, photoU
     nickname: data.nickname as string | undefined,
     lineManager: data.lineManager as string | undefined,
     mandatoryLastDepartments: data.mandatoryLastDepartments as string[] | undefined,
+    mandatoryLastHistoryDepartments: data.mandatoryLastHistoryDepartments as string[] | undefined,
+    mandatoryLastPublish: data.mandatoryLastPublish as boolean | undefined,
     startDate: dateFromTimestamp(data.startDate),
     createdAt: dateFromTimestamp(data.createdAt) ?? new Date(),
     updatedAt: dateFromTimestamp(data.updatedAt) ?? new Date(),

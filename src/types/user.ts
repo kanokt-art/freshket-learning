@@ -65,6 +65,10 @@ export interface UserProfile extends AppUser {
   // Mandatory Reading form (tools/mandatory), so the next new item starts
   // from the same selection instead of empty every time.
   mandatoryLastDepartments?: string[]
+  /** Of those, the departments whose "แสดงผลทั้งหมด" was ticked last time. */
+  mandatoryLastHistoryDepartments?: string[]
+  /** Whether "Publish ทันที" was on last time. */
+  mandatoryLastPublish?: boolean
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {

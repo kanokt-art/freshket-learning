@@ -14,7 +14,7 @@ import { MandatorySlideViewer } from '@/components/features/MandatorySlideViewer
 import { SlidePreviewArea } from '@/components/features/MandatoryPreview'
 import { MandatoryArchiveRail, MandatoryMonthHeader } from '@/components/features/MandatoryArchive'
 import {
-  formatDate, weekLabelForDate, mandatoryTitleFor, toDateInputValue, fromDateInputValue,
+  formatDate, weekLabelForDate, departmentAccessFromLast, mandatoryTitleFor, toDateInputValue, fromDateInputValue,
   groupByMonth, groupByYear, mandatoryDepartments,
   type MandatoryItem, type MandatoryDeptAccess,
 } from '@/lib/mandatory'
@@ -37,6 +37,13 @@ interface FormState {
   publishDate: Date
   isPublished: boolean
   departmentAccess: MandatoryDeptAccess[]
+}
+
+/** What the form starts from on a new item: the last item's choices. */
+interface RememberedSettings {
+  departments: string[]
+  historyDepartments: string[]
+  publish?: boolean
 }
 
 function emptyForm(): FormState {
@@ -124,9 +131,23 @@ export default function MandatoryPage() {
   // NEXT new item starts pre-filled instead of empty every time — a plain
   // per-viewer localStorage convenience would not follow the admin between
   // devices, and this preference is meant to persist like any other setting.
-  const rememberDepartments = useCallback(async (depts: string[]) => {
+  // What the form starts from next time: the last item's departments, which of them had
+  // "แสดงผลทั้งหมด" ticked, and whether "Publish ทันที" was on. Kept here too, so the very
+  // next item in the same session already sees it without waiting for the profile to reload.
+  const [lastSettings, setLastSettings] = useState<RememberedSettings | null>(null)
+  const remembered: RememberedSettings = lastSettings ?? {
+    departments: user?.mandatoryLastDepartments ?? [],
+    historyDepartments: user?.mandatoryLastHistoryDepartments ?? [],
+    publish: user?.mandatoryLastPublish,
+  }
+  const rememberSettings = useCallback(async (next: RememberedSettings) => {
+    setLastSettings(next)
     if (!user?.uid) return
-    await patch('users', user.uid, { mandatoryLastDepartments: depts })
+    await patch('users', user.uid, {
+      mandatoryLastDepartments: next.departments,
+      mandatoryLastHistoryDepartments: next.historyDepartments,
+      mandatoryLastPublish: next.publish ?? false,
+    })
   }, [user?.uid])
 
   const saveItem = useCallback(async (form: FormState, existing?: MandatoryItem) => {
@@ -144,12 +165,16 @@ export default function MandatoryPage() {
       createdAt: existing?.createdAt ?? now,
       createdBy: existing?.createdBy ?? user?.uid,
     }
-    rememberDepartments(mandatoryDepartments(draft as MandatoryItem))
+    void rememberSettings({
+      departments: form.departmentAccess.map(a => a.department),
+      historyDepartments: form.departmentAccess.filter(a => a.showHistory).map(a => a.department),
+      publish: form.isPublished,
+    })
     // replace, not merge: dropping a department from the access list has to
     // remove it, not leave the previous entry behind.
     const { id } = await save('mandatoryItems', draft, { replace: true })
     if (draft.isPublished && !wasPublished) notifyPublish({ ...draft, id } as MandatoryItem)
-  }, [user?.uid, notifyPublish, rememberDepartments])
+  }, [user?.uid, notifyPublish, rememberSettings])
 
   // Both await the write before closing. Previously saveItem() was called
   // without await and the modal closed immediately, so a rejected write left
@@ -324,7 +349,7 @@ export default function MandatoryPage() {
       {showAdd && (
         <MandatoryFormModal
           allDepartments={allDepartments}
-          lastDepartments={user?.mandatoryLastDepartments ?? []}
+          lastSettings={remembered}
           onClose={() => setShowAdd(false)}
           onSave={handleAdd}
           formTitle="เพิ่ม Mandatory Slide ใหม่"
@@ -334,7 +359,7 @@ export default function MandatoryPage() {
         <MandatoryFormModal
           initial={editItem}
           allDepartments={allDepartments}
-          lastDepartments={user?.mandatoryLastDepartments ?? []}
+          lastSettings={remembered}
           onClose={() => setEditItem(null)}
           onSave={handleEdit}
           formTitle="แก้ไข Mandatory Slide"
@@ -517,17 +542,17 @@ function MandatoryRow({
 function MandatoryFormModal({
   initial,
   allDepartments,
-  lastDepartments,
+  lastSettings,
   onClose,
   onSave,
   formTitle,
 }: {
   initial?: MandatoryItem
   allDepartments: string[]
-  /** The admin's remembered department picks from the last item they saved —
-   * used only for a brand-new item; editing an existing one shows ITS own
-   * departments instead. */
-  lastDepartments: string[]
+  /** What the admin set on the last item they saved (departments, "แสดงผลทั้งหมด" per
+   * department, Publish ทันที) — used only for a brand-new item; editing an existing one
+   * shows ITS own values instead. */
+  lastSettings: RememberedSettings
   onClose: () => void
   /** Resolves once the item is stored — the form stays disabled until then. */
   onSave: (form: FormState) => Promise<void>
@@ -546,9 +571,8 @@ function MandatoryFormModal({
     const base = emptyForm()
     return {
       ...base,
-      departmentAccess: lastDepartments
-        .filter(department => PHASE1_DEPARTMENTS.has(department))
-        .map(department => ({ department, showHistory: false })),
+      isPublished: lastSettings.publish ?? base.isPublished,
+      departmentAccess: departmentAccessFromLast(lastSettings, PHASE1_DEPARTMENTS),
     }
   })
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({})
@@ -704,10 +728,9 @@ function MandatoryFormModal({
           </div>
 
           {/* Departments — who gets notified + can see this. Empty = everyone.
-              Ticking a department into the list is remembered for next time
-              (see rememberDepartments); the "แสดงผลทั้งหมด" checkbox under it is
-              NOT remembered — it's a one-time grant scoped to this item only
-              (see the comment on MandatoryDeptAccess in lib/mandatory.ts). */}
+              The departments, each one's "แสดงผลทั้งหมด" tick and "Publish ทันที" are all
+              remembered from the last item saved and are the starting point for the next
+              new one (see rememberSettings). */}
           <div>
             <label className="text-xs font-bold text-gray-600 mb-1.5 block">แผนกที่เกี่ยวข้อง</label>
             <p className="text-xs text-gray-500 mb-2">
