@@ -107,6 +107,9 @@ export default function UsersPage() {
   const { data: departments } = useDepartments()
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
+  // super_admin: who still needs a Slack link ('missing') or has one ('has')
+  const [slackFilter, setSlackFilter] = useState<'' | 'missing' | 'has'>('')
+  const isSuperAdmin = user?.role === 'super_admin'
   const [sortField, setSortField] = useState<'name' | 'empId' | 'startDate'>('startDate')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [page, setPage] = useState(1)
@@ -175,6 +178,8 @@ export default function UsersPage() {
         )
       : [...active]
     if (deptFilter) list = list.filter(u => u.department === deptFilter)
+    if (isSuperAdmin && slackFilter === 'missing') list = list.filter(u => !u.slackUserId)
+    if (isSuperAdmin && slackFilter === 'has') list = list.filter(u => !!u.slackUserId)
     return list.sort((a, b) => {
       let cmp = 0
       if (sortField === 'name') {
@@ -197,7 +202,7 @@ export default function UsersPage() {
       }
       return sortDir === 'asc' ? cmp : -cmp
     })
-  }, [users, search, deptFilter, sortField, sortDir])
+  }, [users, search, deptFilter, slackFilter, isSuperAdmin, sortField, sortDir])
 
   // List view renders one page at a time — the active roster can run well into
   // the thousands (a recent CSV import alone was ~2600 rows), and rendering
@@ -210,7 +215,7 @@ export default function UsersPage() {
   // Any change to what's being filtered/sorted invalidates the current page
   // number (e.g. page 5 of an unfiltered list may not exist once a search
   // narrows the result to one page).
-  useEffect(() => { setPage(1) }, [search, deptFilter, sortField, sortDir])
+  useEffect(() => { setPage(1) }, [search, deptFilter, slackFilter, sortField, sortDir])
   useEffect(() => { if (page > totalPages) setPage(totalPages) }, [page, totalPages])
 
   function handleSort(field: typeof sortField) {
@@ -773,6 +778,20 @@ export default function UsersPage() {
               </svg>
             </span>
           </div>
+          {isSuperAdmin && (
+            <select
+              value={slackFilter}
+              onChange={e => setSlackFilter(e.target.value as '' | 'missing' | 'has')}
+              title="กรองตามการตั้งค่า Slack"
+              className={`px-3 py-2.5 text-sm rounded-xl border bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 cursor-pointer transition-all ${
+                slackFilter ? 'border-freshket-300 text-freshket-700 font-bold' : 'border-gray-200 text-gray-700'
+              }`}
+            >
+              <option value="">Slack: ทั้งหมด</option>
+              <option value="missing">ยังไม่มี Slack</option>
+              <option value="has">มี Slack แล้ว</option>
+            </select>
+          )}
           {user?.role === 'super_admin' && (
             <button
               onClick={() => setShowImportAssessment(true)}
@@ -829,11 +848,12 @@ export default function UsersPage() {
           )}
         </div>
 
-        {(search || deptFilter) && (
+        {(search || deptFilter || (isSuperAdmin && slackFilter)) && (
           <p className="text-xs text-gray-500 mb-3">
             พบ <span className="font-bold text-gray-800">{filtered.length}</span> คน
             {search && <> จากการค้นหา &ldquo;{search}&rdquo;</>}
             {deptFilter && <> · แผนก <span className="font-bold text-freshket-700">{deptFilter}</span></>}
+            {isSuperAdmin && slackFilter && <> · <span className="font-bold text-freshket-700">{slackFilter === 'missing' ? 'ยังไม่มี Slack' : 'มี Slack แล้ว'}</span></>}
           </p>
         )}
 
@@ -920,6 +940,7 @@ export default function UsersPage() {
                   <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden xl:table-cell">Line Manager</th>
                   <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden lg:table-cell">Company Email</th>
                   <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden xl:table-cell">Team</th>
+                  {isSuperAdmin && <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden lg:table-cell">Slack</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -1019,6 +1040,20 @@ export default function UsersPage() {
                           : <span className="text-gray-300 text-xs">—</span>
                       })()}
                     </td>
+
+                    {/* Slack member id (super_admin) — "-" means none yet: click the row to add it */}
+                    {isSuperAdmin && (
+                      <td className="px-4 py-3.5 hidden lg:table-cell">
+                        {u.slackUserId ? (
+                          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                            <span className="font-mono text-xs bg-freshket-100 text-freshket-700 px-2.5 py-0.5 rounded-full">{u.slackUserId}</span>
+                            <CopyBtn text={u.slackUserId} />
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-sm" title="ยังไม่มี Slack — คลิกแถวเพื่อเพิ่ม">-</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
