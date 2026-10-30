@@ -58,8 +58,17 @@ export type AnnounceEvent =
       path?: string
     }
 
-export async function announce(event: AnnounceEvent): Promise<void> {
-  if (DEMO_MODE) return
+/** What an announcement did: whether a channel post went out, and how many people got a Slack DM. */
+export interface AnnounceResult {
+  posted: boolean
+  dmSent: number
+  /** Person ids who received a Slack DM (Mandatory only), so the in-app bell can skip them. */
+  dmUids?: string[]
+}
+
+export async function announce(event: AnnounceEvent): Promise<AnnounceResult> {
+  const none: AnnounceResult = { posted: false, dmSent: 0 }
+  if (DEMO_MODE) return none
 
   try {
     const { authedFetch } = await import('@/lib/api/authedFetch')
@@ -70,8 +79,16 @@ export async function announce(event: AnnounceEvent): Promise<void> {
     })
     if (!res.ok) {
       console.error('announce rejected', event.kind, res.status, await res.text())
+      return none
+    }
+    const j = (await res.json().catch(() => null)) as { posted?: boolean; dmSent?: number; dmUids?: string[] } | null
+    return {
+      posted: j?.posted === true,
+      dmSent: typeof j?.dmSent === 'number' ? j.dmSent : 0,
+      dmUids: Array.isArray(j?.dmUids) ? j.dmUids.filter((x): x is string => typeof x === 'string') : [],
     }
   } catch (err) {
     console.error('announce failed', event.kind, err)
+    return none
   }
 }

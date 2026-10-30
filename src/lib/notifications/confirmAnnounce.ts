@@ -1,5 +1,5 @@
 import { getDemoMode } from '@/lib/demo/demoMode'
-import { announce, type AnnounceEvent } from '@/lib/notifications/announce'
+import { announce, type AnnounceEvent, type AnnounceResult } from '@/lib/notifications/announce'
 
 // Publishing a course or Mandatory Reading used to post to Slack on its own. The admin
 // now confirms first, because a post to a channel (and @channel on a new course) cannot
@@ -21,11 +21,12 @@ export function describeAnnouncement(event: AnnounceEvent): string {
 }
 
 /**
- * Ask whether to announce to Slack; announce only on yes. Returns whether it was announced.
+ * Ask whether to announce to Slack; announce only on yes. Returns what the announcement did, or
+ * null when the admin said no, it failed, or it is demo mode.
  * Never throws — an announcement must not break the publish it follows.
  */
-export async function confirmAndAnnounce(event: AnnounceEvent): Promise<boolean> {
-  if (getDemoMode()) return false
+export async function confirmAndAnnounce(event: AnnounceEvent): Promise<AnnounceResult | null> {
+  if (getDemoMode()) return null
   try {
     const { confirmAction } = await import('@/lib/ui/alert')
     const yes = await confirmAction({
@@ -34,11 +35,10 @@ export async function confirmAndAnnounce(event: AnnounceEvent): Promise<boolean>
       confirmText: 'ประกาศลง Slack',
       cancelText: 'ไม่ประกาศ',
     })
-    if (!yes) return false
-    await announce(event)
-    return true
+    if (!yes) return null
+    return await announce(event)
   } catch (err) {
     console.error('confirmAndAnnounce failed', err)
-    return false
+    return null
   }
 }

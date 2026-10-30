@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/server/store'
-import { dmPeople } from '@/lib/notifications/slackDm'
+import { dmPeople, dmPeopleIds } from '@/lib/notifications/slackDm'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { reviewId } from '@/lib/shadow/reviews'
 import { requireStaff } from '@/lib/server/auth'
@@ -97,6 +97,8 @@ export async function POST(req: NextRequest) {
 
   try {
     let posted = false
+    let dmSent = 0
+    let dmUids: string[] = []
 
     switch (kind) {
       case 'course_published': {
@@ -126,7 +128,7 @@ export async function POST(req: NextRequest) {
             const depts = (Array.isArray(item.departmentAccess) ? item.departmentAccess : []).map((a) => a.department).filter((d): d is string => !!d)
             const link = appUrl('/courses/mandatory')
             const itemTitle = item.title || title
-            await dmPeople(store, wantedUids.filter((id) => id !== gate.uid), {
+            dmUids = await dmPeopleIds(store, wantedUids.filter((id) => id !== gate.uid), {
               text: `Mandatory Reading ใหม่: ${itemTitle}`,
               blocks: [
                 { type: 'section', text: { type: 'mrkdwn', text: `📌 *Mandatory Reading ใหม่*\n*${itemTitle}*` } },
@@ -199,7 +201,7 @@ export async function POST(req: NextRequest) {
             const stars = typeof review.rating === 'number' ? `${review.rating}/5 ดาว` : ''
             const who = review.reviewerName?.trim() || reviewerName
             const link = appUrl(body.path)
-            await dmPeople(store, [visit.observerUid], {
+            dmSent = await dmPeople(store, [visit.observerUid], {
               text: `${who} ประเมิน Shadow Visit ของคุณ${stars ? ` — ${stars}` : ''}`,
               blocks: [
                 { type: 'section', text: { type: 'mrkdwn', text: `⭐ *${who}* ประเมิน Shadow Visit ของคุณ${visit.storeName ? `
@@ -227,7 +229,7 @@ export async function POST(req: NextRequest) {
     // 200 either way: `posted: false` means Slack is unconfigured or refused,
     // which is not the caller's problem and must not surface as a failure in
     // the UI that triggered it.
-    return NextResponse.json({ ok: true, posted })
+    return NextResponse.json({ ok: true, posted, dmSent: dmSent || dmUids.length, dmUids })
   } catch (err) {
     console.error('announce failed', err)
     return NextResponse.json({ ok: true, posted: false })

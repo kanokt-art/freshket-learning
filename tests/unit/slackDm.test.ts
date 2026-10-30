@@ -102,3 +102,20 @@ describe('dmPeople finds a missing Slack id by email, once', () => {
     expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(3)
   })
 })
+
+describe('dmPeopleIds', () => {
+  it('returns exactly the people who were messaged, so the bell can skip them', async () => {
+    const { dmPeopleIds } = await import('@/lib/notifications/slackDm')
+    // lead and mgr have a Slack id; lead2 has none; nobody does not exist
+    expect((await dmPeopleIds(store, ['lead', 'lead2', 'mgr', 'nobody'], { text: 'x' })).sort()).toEqual(['lead', 'mgr'])
+  })
+
+  it('leaves out someone whose message Slack refused', async () => {
+    const { dmPeopleIds } = await import('@/lib/notifications/slackDm')
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      const channel = JSON.parse(String(init.body)).channel
+      return new Response(JSON.stringify(channel === 'U0LEAD0001' ? { ok: false, error: 'channel_not_found' } : { ok: true }))
+    }))
+    expect(await dmPeopleIds(store, ['lead', 'mgr'], { text: 'x' })).toEqual(['mgr'])
+  })
+})

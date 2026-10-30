@@ -1405,9 +1405,9 @@ export default function ShadowPage() {
     setLocalCreated(prev => [rec, ...prev])
     setShowForm(false)
 
-    // The bell can aim: it goes to the sale's own manager, or to every
-    // team_lead when they have none. Slack can't, so it gets one post and
-    // whoever picks it up picks it up.
+    // The bell aims at the sale's own manager. With no manager it rings nobody's: it is not
+    // broadcast to every lead (that was dozens of pings for one visit) — the trainer ×
+    // team-lead group post below is how an unassigned sale's visit is seen.
     if (user?.managerId) {
       pushNotification(user.managerId, {
         type: 'shadow_pending_ack',
@@ -1416,18 +1416,6 @@ export default function ShadowPage() {
         refId: rec.id,
         refPath: '/shadow',
       })
-    } else {
-      allUsers
-        .filter(u => canAccess(u.role, 'team_lead'))
-        .forEach(lead => {
-          pushNotification(lead.uid, {
-            type: 'shadow_pending_ack',
-            title: `${user?.displayName ?? 'พนักงาน'} ส่ง Shadow Visit ใหม่`,
-            body: `ร้าน ${data.storeName} · ${data.segment} · รอการ Acknowledge`,
-            refId: rec.id,
-            refPath: '/shadow',
-          })
-        })
     }
     void announce({
       kind: 'shadow_submitted',

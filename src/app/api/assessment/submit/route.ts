@@ -7,6 +7,7 @@ import { statusAfterPostTest } from '@/lib/courses/completion'
 import { gradeSubmission, type GivenAnswers } from '@/lib/assessment/grade'
 import { postCompletionToSlack, isSalesDepartment } from '@/lib/notifications/slack'
 import { dmPeople } from '@/lib/notifications/slackDm'
+import { quizNotice, type QuizNotice } from '@/lib/notifications/quizNotice'
 import type { Assessment, Question } from '@/types/assessment'
 import type { Course } from '@/types/course'
 import type { UserProfile } from '@/types/user'
@@ -44,9 +45,10 @@ function bad(message: string) {
 }
 
 /**
- * Best-effort notification to the learner's manager (or, absent a managerId,
- * every team_lead+ — same fallback shadow/page.tsx uses for the same reason:
- * an unassigned learner shouldn't go unseen). Never throws — a notification
+ * Best-effort notification: the learner's own manager gets a bell, the trainer × team-lead
+ * group gets a post, the learner is congratulated on a first pass (see quizNotice for who is
+ * told when). A learner with no manager rings nobody's bell — it is NOT broadcast to every
+ * lead; the group post is how an unassigned learner is seen. Never throws — a notification
  * failure must not undo an already-graded, already-recorded submission.
  */
 async function notifyManagerOfCompletion(
@@ -58,6 +60,8 @@ async function notifyManagerOfCompletion(
   courseId: string,
   /** No auto-gradeable questions — the score is meaningless, so don't quote it. */
   awaitingReview = false,
+  /** Who to tell (see quizNotice): not every attempt notifies. */
+  notice: QuizNotice = { tellTeam: true, tellLearner: true },
 ) {
   try {
     // Slack needs an absolute link; NEXT_PUBLIC_APP_URL is the deployed origin
@@ -78,14 +82,11 @@ async function notifyManagerOfCompletion(
       : `${passed ? 'ทำแบบทดสอบผ่านแล้ว' : 'ทำแบบทดสอบแล้ว แต่ยังไม่ผ่านเกณฑ์'} ได้คะแนน ${score} คะแนน`
     const body = `${roleLine ? roleLine + ' — ' : ''}${verdict}`
 
-    let targetUids: string[]
-    if (learner.managerId) {
+    let targetUids: string[] = []
+    if (!notice.tellTeam) {
+      // a retake or a repeat pass: the team already heard
+    } else if (learner.managerId) {
       targetUids = [learner.managerId]
-    } else {
-      // canAccess('team_lead') passes for team_lead, manager, and super_admin —
-      // an `in` query needs those roles spelled out instead.
-      const leads = await store.query('users', { where: [{ field: 'role', op: 'in', value: ['team_lead', 'manager', 'super_admin'] }] })
-      targetUids = leads.map((d) => d.id)
     }
 
     const now = new Date()
@@ -102,8 +103,8 @@ async function notifyManagerOfCompletion(
       }, { merge: false }),
     ))
     // The learner hears privately that they passed (if their Slack link is on file).
-    // Only a pass: a failed or still-to-be-marked attempt is not announced to them here.
-    if (passed && !awaitingReview) {
+    // Only the first pass: a failed attempt, a retake or a repeat pass is not announced to them.
+    if (notice.tellLearner && passed && !awaitingReview) {
       await dmPeople(store, [uid], {
         text: `ทำแบบทดสอบ "${courseTitle}" สำเร็จ — ${score} คะแนน`,
         blocks: [
@@ -116,7 +117,7 @@ async function notifyManagerOfCompletion(
     // Slack is an additional channel, not a replacement: the in-app record
     // above is already written, so a Slack failure loses nothing. Gated to the
     // sales org because that's the team living in the channel.
-    if (isSalesDepartment(learner.department)) {
+    if (notice.tellTeam && isSalesDepartment(learner.department)) {
       await postCompletionToSlack({
         learnerName: name,
         position: learner.position,
@@ -348,7 +349,10 @@ export async function POST(req: NextRequest) {
       // (or a plain lesson-quiz with no pre/post concept at all), never the
       // pre-assessment, which only means the learner is just starting out.
       if (step !== 'pre') {
-        await notifyManagerOfCompletion(store, uid, payload.courseTitle as string, graded.score, passed, courseId, nothingToAutoGrade)
+        await notifyManagerOfCompletion(
+          store, uid, payload.courseTitle as string, graded.score, passed, courseId, nothingToAutoGrade,
+          quizNotice(step, priorAttempts as Array<{ step?: string; passed?: boolean }>, passed),
+        )
       }
     }
 

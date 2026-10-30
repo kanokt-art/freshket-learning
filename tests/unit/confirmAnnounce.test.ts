@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { confirmAndAnnounce, describeAnnouncement } from '@/lib/notifications/confirmAnnounce'
 
-const { confirmAction, announce } = vi.hoisted(() => ({ confirmAction: vi.fn(), announce: vi.fn(async (_e: unknown) => {}) }))
+const { confirmAction, announce } = vi.hoisted(() => ({ confirmAction: vi.fn(), announce: vi.fn(async (_e: unknown) => ({ posted: true, dmSent: 2, dmUids: ['a', 'b'] })) }))
 vi.mock('@/lib/ui/alert', () => ({ confirmAction }))
 vi.mock('@/lib/notifications/announce', () => ({ announce }))
 vi.mock('@/lib/demo/demoMode', () => ({ getDemoMode: () => false }))
@@ -16,19 +16,19 @@ beforeEach(() => { confirmAction.mockReset(); announce.mockClear() })
 describe('confirmAndAnnounce', () => {
   it('announces only after the admin says yes', async () => {
     confirmAction.mockResolvedValue(true)
-    expect(await confirmAndAnnounce(newCourse)).toBe(true)
+    expect(await confirmAndAnnounce(newCourse)).toEqual({ posted: true, dmSent: 2, dmUids: ['a', 'b'] })
     expect(announce).toHaveBeenCalledWith(newCourse)
   })
 
   it('does not announce when the admin says no', async () => {
     confirmAction.mockResolvedValue(false)
-    expect(await confirmAndAnnounce(mandatory)).toBe(false)
+    expect(await confirmAndAnnounce(mandatory)).toBeNull()
     expect(announce).not.toHaveBeenCalled()
   })
 
   it('does not announce, and does not throw, when the dialog fails', async () => {
     confirmAction.mockRejectedValue(new Error('boom'))
-    expect(await confirmAndAnnounce(newCourse)).toBe(false)
+    expect(await confirmAndAnnounce(newCourse)).toBeNull()
     expect(announce).not.toHaveBeenCalled()
   })
 

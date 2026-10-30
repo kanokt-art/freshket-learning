@@ -94,8 +94,18 @@ export async function dmPeople(
   /** Narrow who is messaged. */
   keep: (u: Partial<UserProfile>) => boolean = () => true,
 ): Promise<number> {
+  return (await dmPeopleIds(store, uids, dm, keep)).length
+}
+
+/** Like dmPeople, but returns the person ids that were actually messaged. */
+export async function dmPeopleIds(
+  store: Store,
+  uids: readonly string[],
+  dm: SlackDm,
+  keep: (u: Partial<UserProfile>) => boolean = () => true,
+): Promise<string[]> {
   const unique = Array.from(new Set(uids)).filter(Boolean)
-  if (unique.length === 0) return 0
+  if (unique.length === 0) return []
   const people = ((await store.getMany('users', unique)) as unknown as Array<Partial<UserProfile> & { id: string }>).filter(keep)
 
   // Someone with no Slack id yet is looked up by email, and remembered if found. Stops
@@ -116,14 +126,15 @@ export async function dmPeople(
     return null
   }
 
-  let sent = 0
+  const reached: string[] = []
   const capped = people.slice(0, MAX_DM_RECIPIENTS)
   for (let k = 0; k < capped.length; k += DM_BATCH) {
-    const results = await Promise.all(capped.slice(k, k + DM_BATCH).map(async (u) => {
+    const batch = capped.slice(k, k + DM_BATCH)
+    const results = await Promise.all(batch.map(async (u) => {
       const id = await slackIdOf(u)
       return id ? sendSlackDm(id, dm) : false
     }))
-    sent += results.filter(Boolean).length
+    batch.forEach((u, i) => { if (results[i]) reached.push(u.id) })
   }
-  return sent
+  return reached
 }

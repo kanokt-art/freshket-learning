@@ -97,7 +97,7 @@ export default function MandatoryPage() {
   // Targets by department the same way SaleTool visibility works (empty
   // departments = everyone), not by role — Mandatory Reading has no role
   // targeting concept, only a department one.
-  const notifyPublish = useCallback((item: MandatoryItem) => {
+  const notifyPublish = useCallback(async (item: MandatoryItem) => {
     if (DEMO_MODE) return
     const depts = mandatoryDepartments(item)
     const targets = allUsers.filter(u =>
@@ -107,16 +107,9 @@ export default function MandatoryPage() {
         ? !!u.department && PHASE1_DEPARTMENTS.has(u.department)
         : !!u.department && depts.includes(u.department)),
     )
-    targets.forEach(u => {
-      pushNotification(u.uid, {
-        type: 'new_mandatory',
-        title: `Mandatory Reading ใหม่: ${item.title}`,
-        body: `${item.weekLabel} — คลิกเพื่อเปิดอ่าน`,
-        refId: item.id,
-        refPath: '/courses/mandatory',
-      })
-    })
-    void confirmAndAnnounce({
+    // One notice per person: the Slack DM if it reaches them, the in-app bell if not (no Slack
+    // link, or the admin chose not to announce).
+    const result = await confirmAndAnnounce({
       kind: 'mandatory_published',
       title: item.title,
       itemId: item.id,
@@ -124,6 +117,16 @@ export default function MandatoryPage() {
       departments: depts,
       recipientCount: targets.length,
       path: '/courses/mandatory',
+    })
+    const reached = new Set(result?.dmUids ?? [])
+    targets.filter(u => !reached.has(u.uid)).forEach(u => {
+      pushNotification(u.uid, {
+        type: 'new_mandatory',
+        title: `Mandatory Reading ใหม่: ${item.title}`,
+        body: `${item.weekLabel} — คลิกเพื่อเปิดอ่าน`,
+        refId: item.id,
+        refPath: '/courses/mandatory',
+      })
     })
   }, [allUsers, user?.uid])
 
@@ -173,7 +176,7 @@ export default function MandatoryPage() {
     // replace, not merge: dropping a department from the access list has to
     // remove it, not leave the previous entry behind.
     const { id } = await save('mandatoryItems', draft, { replace: true })
-    if (draft.isPublished && !wasPublished) notifyPublish({ ...draft, id } as MandatoryItem)
+    if (draft.isPublished && !wasPublished) void notifyPublish({ ...draft, id } as MandatoryItem)
   }, [user?.uid, notifyPublish, rememberSettings])
 
   // Both await the write before closing. Previously saveItem() was called
@@ -217,7 +220,7 @@ export default function MandatoryPage() {
   async function handleTogglePublish(item: MandatoryItem) {
     const wasPublished = item.isPublished
     await patch('mandatoryItems', item.id, { isPublished: !wasPublished })
-    if (!wasPublished) notifyPublish({ ...item, isPublished: true })
+    if (!wasPublished) void notifyPublish({ ...item, isPublished: true })
   }
 
   return (
