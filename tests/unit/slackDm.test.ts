@@ -10,7 +10,7 @@ const docs: Record<string, Record<string, unknown>> = {
 }
 const store = {
   get: async (path: string, id: string) => docs[`${path}/${id}`] ?? null,
-  getMany: async (path: string, ids: string[]) => ids.map((id) => docs[`${path}/${id}`]).filter(Boolean),
+  getMany: async (path: string, ids: string[]) => ids.filter((id) => docs[`${path}/${id}`]).map((id) => ({ id, ...docs[`${path}/${id}`] })),
 } as unknown as Store
 
 let calls: Array<{ url: string; body: Record<string, unknown>; auth: string | null }>
