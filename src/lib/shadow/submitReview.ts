@@ -42,10 +42,6 @@ export async function submitShadowReview(args: {
   const { dmSent } = await announce({
     kind: 'shadow_acked',
     recordId: record.id,
-    reviewerName: reviewer.name || 'Mentor',
-    observerName: record.observerName || 'พนักงาน',
-    rating,
-    path: '/shadow',
   })
 
   if (dmSent === 0) {

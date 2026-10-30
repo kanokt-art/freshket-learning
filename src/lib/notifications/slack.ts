@@ -10,6 +10,7 @@
 // handlers.
 
 import { sendSlackDm } from '@/lib/notifications/slackDm'
+import { slackText } from '@/lib/notifications/slackText'
 
 /**
  * Which departments count as "sales" for Slack purposes.
@@ -57,7 +58,7 @@ export interface SlackCompletionEvent {
  * log-reading, not for control flow at the call site.
  */
 export async function postCompletionToSlack(ev: SlackCompletionEvent): Promise<boolean> {
-  const meta = [ev.position, ev.department].filter(Boolean).join(' · ')
+  const meta = slackText([ev.position, ev.department].filter(Boolean).join(' · '))
   const verdict = ev.awaitingReview
     ? '📝 ส่งคำตอบแบบเขียนแล้ว รอตรวจ'
     : ev.passed
@@ -68,13 +69,13 @@ export async function postCompletionToSlack(ev: SlackCompletionEvent): Promise<b
   // the channel. `text` is still set because Slack uses it for the notification
   // preview and for clients that can't render blocks.
   const payload = {
-    text: `${ev.learnerName} เรียนจบ "${ev.courseTitle}" — ${ev.passed ? 'ผ่าน' : 'ยังไม่ผ่าน'}`,
+    text: `${slackText(ev.learnerName)} เรียนจบ "${slackText(ev.courseTitle)}" — ${ev.passed ? 'ผ่าน' : 'ยังไม่ผ่าน'}`,
     blocks: [
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*${ev.learnerName}* เรียนจบหลักสูตร\n*${ev.courseTitle}*`,
+          text: `*${slackText(ev.learnerName)}* เรียนจบหลักสูตร\n*${slackText(ev.courseTitle)}*`,
         },
       },
       {
@@ -183,16 +184,16 @@ export interface SlackShadowSubmittedEvent {
  * it leads with the ask rather than with the submission.
  */
 export async function postShadowSubmittedToSlack(ev: SlackShadowSubmittedEvent): Promise<boolean> {
-  const meta = [ev.position, ev.department].filter(Boolean).join(' · ')
+  const meta = slackText([ev.position, ev.department].filter(Boolean).join(' · '))
 
   return postToTeam({
-    text: `${ev.observerName} ส่ง Shadow Visit ใหม่ — รอการประเมิน`,
+    text: `${slackText(ev.observerName)} ส่ง Shadow Visit ใหม่ — รอการประเมิน`,
     blocks: [
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `📋 *${ev.observerName}* ส่ง Shadow Visit ใหม่ — _รอการประเมิน_\n${ev.visitSummary}`,
+          text: `📋 *${slackText(ev.observerName)}* ส่ง Shadow Visit ใหม่ — _รอการประเมิน_\n${slackText(ev.visitSummary)}`,
         },
       },
       ...(meta
@@ -233,13 +234,13 @@ export interface SlackCoursePublishedEvent {
 export async function postCoursePublishedToSlack(ev: SlackCoursePublishedEvent): Promise<boolean> {
   // A brand-new course tags the whole channel (<!channel>); people added to a live course do not.
   const headline = ev.isAddition
-    ? `มีผู้เรียนใหม่ถูกเพิ่มเข้าหลักสูตร *${ev.courseTitle}*`
-    : `<!channel> 📚 หลักสูตรใหม่: *${ev.courseTitle}*`
+    ? `มีผู้เรียนใหม่ถูกเพิ่มเข้าหลักสูตร *${slackText(ev.courseTitle)}*`
+    : `<!channel> 📚 หลักสูตรใหม่: *${slackText(ev.courseTitle)}*`
 
   return postToCourseChannel({
     text: ev.isAddition
-      ? `มีผู้เรียนใหม่ถูกเพิ่มเข้าหลักสูตร "${ev.courseTitle}"`
-      : `<!channel> หลักสูตรใหม่: ${ev.courseTitle}`,
+      ? `มีผู้เรียนใหม่ถูกเพิ่มเข้าหลักสูตร "${slackText(ev.courseTitle)}"`
+      : `<!channel> หลักสูตรใหม่: ${slackText(ev.courseTitle)}`,
     blocks: [
       { type: 'section', text: { type: 'mrkdwn', text: headline } },
       {
@@ -275,14 +276,14 @@ export async function postMandatoryPublishedToSlack(
   const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
   if (!webhook) return false
 
-  const audience = ev.departments.length > 0 ? ev.departments.join(' · ') : 'ทุกแผนก'
+  const audience = ev.departments.length > 0 ? slackText(ev.departments.join(' · ')) : 'ทุกแผนก'
 
   return post(webhook, {
-    text: `Mandatory Reading ใหม่: ${ev.title}`,
+    text: `Mandatory Reading ใหม่: ${slackText(ev.title)}`,
     blocks: [
       {
         type: 'section',
-        text: { type: 'mrkdwn', text: `📌 *Mandatory Reading ใหม่*\n*${ev.title}*` },
+        text: { type: 'mrkdwn', text: `📌 *Mandatory Reading ใหม่*\n*${slackText(ev.title)}*` },
       },
       {
         type: 'context',
@@ -318,13 +319,13 @@ export async function postShadowAckedToSlack(ev: SlackShadowAckedEvent): Promise
   const score = typeof ev.rating === 'number' ? ` — ${ev.rating}/5` : ''
 
   return postToTeam({
-    text: `${ev.reviewerName} ประเมิน Shadow Visit ของ ${ev.observerName} แล้ว`,
+    text: `${slackText(ev.reviewerName)} ประเมิน Shadow Visit ของ ${slackText(ev.observerName)} แล้ว`,
     blocks: [
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `✅ *${ev.reviewerName}* ประเมิน Shadow Visit ของ *${ev.observerName}* แล้ว${score}`,
+          text: `✅ *${slackText(ev.reviewerName)}* ประเมิน Shadow Visit ของ *${slackText(ev.observerName)}* แล้ว${score}`,
         },
       },
       ...(ev.shadowUrl
@@ -361,21 +362,21 @@ export async function postTakeAwayToSlack(ev: SlackTakeAwayEvent): Promise<boole
   const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
   if (!webhook) return false
 
-  const meta = [ev.position, ev.department].filter(Boolean).join(' · ')
+  const meta = slackText([ev.position, ev.department].filter(Boolean).join(' · '))
 
   return post(webhook, {
-    text: `${ev.learnerName} เขียนสรุปหลังเรียน "${ev.courseTitle}"`,
+    text: `${slackText(ev.learnerName)} เขียนสรุปหลังเรียน "${slackText(ev.courseTitle)}"`,
     blocks: [
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `✍️ *${ev.learnerName}* เขียนสรุปหลังเรียน\n*${ev.courseTitle}*`,
+          text: `✍️ *${slackText(ev.learnerName)}* เขียนสรุปหลังเรียน\n*${slackText(ev.courseTitle)}*`,
         },
       },
       {
         type: 'section',
-        text: { type: 'mrkdwn', text: `>${excerpt(ev.text)}` },
+        text: { type: 'mrkdwn', text: `>${slackText(excerpt(ev.text))}` },
       },
       ...(meta
         ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: meta }] }]

@@ -32,6 +32,7 @@ import {
 } from './policies'
 import { StoreError, type Store, type Query } from './store'
 import { refusesClientStatus } from '@/lib/courses/completion'
+import { refreshManyUserStats } from './userStats'
 
 // ── Results ─────────────────────────────────────────────────────────────────
 
@@ -265,6 +266,9 @@ export async function runWrite(store: Store, actor: Actor, body: unknown): Promi
     return fromStoreError(e)
   }
 
+  // Whose training records this request changes: their summary is refreshed after the write.
+  const statsUids = new Set<string>()
+
   // Judge every document first. `state` moves forward as we go, so a document is
   // judged as it would be after the operations before it in this same request.
   for (const p of planned) {
@@ -301,6 +305,11 @@ export async function runWrite(store: Store, actor: Actor, body: unknown): Promi
       }
     }
 
+    if (p.collection === 'trainingRecords') {
+      const owner = incoming?.userId ?? existing?.userId
+      if (typeof owner === 'string' && owner) statsUids.add(owner)
+    }
+
     state.set(keyOf(p.path, p.id), incoming)
   }
 
@@ -316,6 +325,16 @@ export async function runWrite(store: Store, actor: Actor, body: unknown): Promi
     }
   } catch (e) {
     return fromStoreError(e)
+  }
+
+  // Best effort, and after the write: a stale summary is corrected by the next refresh or the
+  // admin rebuild, and must never turn a saved record into an error.
+  if (statsUids.size > 0) {
+    try {
+      await refreshManyUserStats(store, Array.from(statsUids))
+    } catch (e) {
+      console.error('userStats refresh after a write failed', e)
+    }
   }
 
   return { ok: true, value: { results: planned.map((p) => ({ id: p.id })) } }

@@ -603,3 +603,46 @@ describe('newId', () => {
     for (const id of Array.from(ids)) expect(id).toMatch(/^[A-Za-z0-9]{20}$/)
   })
 })
+
+describe('the summary kept for each person (userStats)', () => {
+  it('is refreshed from their records when the door writes one of their training records', async () => {
+    const m = memStore({ trainingRecords: [{ id: 'me_c0', userId: 'me', courseId: 'c0', status: 'completed', score: 90 }] })
+    const r = await runWrite(m.store, sale('me'), { ops: [
+      { op: 'set', path: 'trainingRecords', id: 'me_c1', data: { userId: 'me', courseId: 'c1', status: 'in_progress' } },
+    ] })
+    expect(r.ok).toBe(true)
+    const summary = m.writes.find((w) => w.path === 'userStats' && w.id === 'me')
+    expect(summary).toBeTruthy()
+  })
+
+  it('is not written for a request that touches no training record', async () => {
+    const m = memStore()
+    await runWrite(m.store, sale('me'), { ops: [
+      { op: 'set', path: 'takeaways', id: 'me_c1', data: { uid: 'me', courseId: 'c1', text: 'hi' } },
+    ] })
+    expect(m.writes.some((w) => w.path === 'userStats')).toBe(false)
+  })
+
+  it('a learner cannot write the summary themselves', async () => {
+    const m = memStore()
+    const r = await runWrite(m.store, sale('me'), { ops: [
+      { op: 'set', path: 'userStats', id: 'me', data: { totalCount: 99, avgScore: 100 } },
+    ] })
+    expect(r.ok).toBe(false)
+    expect(m.writes).toEqual([])
+  })
+
+  it('a failed refresh does not undo or fail the record that was saved', async () => {
+    const m = memStore()
+    const realQuery = (m.store as unknown as { query: (...a: unknown[]) => Promise<unknown> }).query
+    ;(m.store as unknown as { query: (...a: unknown[]) => Promise<unknown> }).query = async (path: unknown, ...rest: unknown[]) => {
+      if (path === 'trainingRecords') throw new Error('stats read failed')
+      return realQuery(path, ...rest)
+    }
+    const r = await runWrite(m.store, sale('me'), { ops: [
+      { op: 'set', path: 'trainingRecords', id: 'me_c1', data: { userId: 'me', courseId: 'c1', status: 'in_progress' } },
+    ] })
+    expect(r.ok).toBe(true)
+    expect(m.writes.some((w) => w.path === 'trainingRecords' && w.id === 'me_c1')).toBe(true)
+  })
+})

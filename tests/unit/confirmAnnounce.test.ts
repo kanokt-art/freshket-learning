@@ -7,9 +7,9 @@ vi.mock('@/lib/notifications/announce', () => ({ announce }))
 vi.mock('@/lib/demo/demoMode', () => ({ getDemoMode: () => false }))
 
 
-const newCourse = { kind: 'course_published' as const, courseTitle: 'PVP', recipientCount: 5 }
-const added = { kind: 'course_published' as const, courseTitle: 'PVP', recipientCount: 2, isAddition: true }
-const mandatory = { kind: 'mandatory_published' as const, title: 'ราคาผัก', departments: [], recipientCount: 40 }
+const newCourse = { kind: 'course_published' as const, courseId: 'c1', courseTitle: 'PVP', recipientCount: 5 }
+const added = { kind: 'course_published' as const, courseId: 'c1', courseTitle: 'PVP', recipientCount: 2, isAddition: true }
+const mandatory = { kind: 'mandatory_published' as const, itemId: 'm1', title: 'ราคาผัก', recipientCount: 40 }
 
 beforeEach(() => { confirmAction.mockReset(); announce.mockClear() })
 

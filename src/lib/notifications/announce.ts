@@ -22,21 +22,23 @@ const DEMO_MODE = getDemoMode()
 export type AnnounceEvent =
   | {
       kind: 'course_published'
+      /** The course announced. The server reads its title from the database; super_admin only. */
+      courseId: string
+      /** For the confirmation dialog only: the server ignores it. */
       courseTitle: string
       recipientCount: number
       /** True when the course was already live and people were added to it. */
       isAddition?: boolean
-      path?: string
     }
   | {
       kind: 'mandatory_published'
+      /** The item announced. The server reads its title and departments from the database; super_admin only. */
+      itemId: string
+      /** For the confirmation dialog only: the server ignores it. */
       title: string
-      /** With recipientUids: the server messages these people privately (admin only; it re-checks the departments). */
-      itemId?: string
+      /** The server messages these people privately (it re-checks the departments). */
       recipientUids?: string[]
-      departments: string[]
       recipientCount: number
-      path?: string
     }
   | {
       /**
@@ -45,17 +47,13 @@ export type AnnounceEvent =
        * the token already identifies them.
        */
       kind: 'shadow_submitted'
-      visitSummary: string
-      path?: string
+      /** The visit announced: must be the caller's own. The server writes the summary from it. */
+      recordId: string
     }
   | {
       kind: 'shadow_acked'
-      /** The visit that was reviewed; the server looks up who to tell and what was given. */
-      recordId?: string
-      reviewerName: string
-      observerName: string
-      rating?: number
-      path?: string
+      /** The visit reviewed: the caller must have given a review of it. The server looks up who to tell and what was given. */
+      recordId: string
     }
 
 /** What an announcement did: whether a channel post went out, and how many people got a Slack DM. */

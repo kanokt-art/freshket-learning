@@ -165,9 +165,9 @@ function notifyCoursePublishChanges(
     if (recipients.length > 0) {
       void confirmAndAnnounce({
         kind: 'course_published',
+        courseId: c.id,
         courseTitle: c.title,
         recipientCount: recipients.length,
-        path: `/courses/${c.id}`,
       })
     }
   } else if (c.isPublished && wasPublished && prevAssignedUserIds && (c.assignedUserIds?.length ?? 0) > 0) {
@@ -190,10 +190,10 @@ function notifyCoursePublishChanges(
     if (recipients.length > 0) {
       void confirmAndAnnounce({
         kind: 'course_published',
+        courseId: c.id,
         courseTitle: c.title,
         recipientCount: recipients.length,
         isAddition: true,
-        path: `/courses/${c.id}`,
       })
     }
   }
@@ -4616,9 +4616,8 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
           .filter((r) => r.courseId === editCourse.id && dropRecordUids.has(r.userId) && !stay.has(r.userId))
           .map((r) => r.id)
         if (dropIds.length > 0) {
+          // The server refreshes their summaries when the records are deleted.
           await removeMany('trainingRecords', dropIds)
-          // The per-learner summaries are rebuilt from the records; best effort.
-          void authedFetch('/api/stats/rebuild', { method: 'POST' }).catch(() => {})
         }
         onDone({ ...editCourse, ...payload, updatedAt: now })
       } else {

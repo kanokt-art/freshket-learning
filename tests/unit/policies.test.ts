@@ -360,10 +360,12 @@ describe('userStats', () => {
     for (const a of roles) expect(read(a, 'userStats')).toBe(true)
   })
 
-  it('a person maintains their own, a super_admin anyone\'s', () => {
+  it('nobody writes a summary from the browser except a super_admin: a learner cannot set their own', () => {
     const me = actor('sale', 'me')
-    expect(write({ actor: me, collection: 'userStats', id: 'me', data: { totalCount: 1 } })).toBe(true)
-    expect(write({ actor: me, collection: 'userStats', id: 'them', data: { totalCount: 99 } })).toBe(false)
+    expect(write({ actor: me, collection: 'userStats', id: 'me', data: { totalCount: 1, avgScore: 100 } })).toBe(false)
+    expect(write({ actor: me, collection: 'userStats', id: 'me', existing: doc('me', { totalCount: 0 }), data: { totalCount: 99 } })).toBe(false)
+    expect(write({ actor: me, collection: 'userStats', id: 'me', remove: true, existing: doc('me', {}) })).toBe(false)
+    expect(write({ actor: LEAD, collection: 'userStats', id: 'them', data: { totalCount: 1 } })).toBe(false)
     expect(write({ actor: MGR, collection: 'userStats', id: 'them', data: { totalCount: 1 } })).toBe(false)
     expect(write({ actor: ADMIN, collection: 'userStats', id: 'them', data: { totalCount: 1 } })).toBe(true)
   })

@@ -1419,8 +1419,7 @@ export default function ShadowPage() {
     }
     void announce({
       kind: 'shadow_submitted',
-      visitSummary: `ร้าน ${data.storeName} · ${data.segment} · รอการ Acknowledge`,
-      path: '/shadow',
+      recordId: rec.id,
     })
   }
 

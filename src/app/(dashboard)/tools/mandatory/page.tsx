@@ -114,9 +114,7 @@ export default function MandatoryPage() {
       title: item.title,
       itemId: item.id,
       recipientUids: targets.map(u => u.uid),
-      departments: depts,
       recipientCount: targets.length,
-      path: '/courses/mandatory',
     })
     const reached = new Set(result?.dmUids ?? [])
     targets.filter(u => !reached.has(u.uid)).forEach(u => {

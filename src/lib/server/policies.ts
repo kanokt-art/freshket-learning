@@ -221,12 +221,13 @@ const POLICIES: Record<string, Policy> = {
   // team's results beside the learner's own profile card.
   userBucketResults: { read: staffRead },
 
-  // A user maintains only their own summary; super_admin (the rebuild) any.
+  // The per-person summary is derived from trainingRecords by the server (the data door
+  // refreshes it whenever a record is written; the rebuild recomputes it all). Nobody writes
+  // it from the browser: a summary a person could set for themselves would let a learner show
+  // a better score or completion count than their records say, wherever the summary is used.
   userStats: {
     read: staffRead,
-    create: (w) => w.id === w.actor.uid || isSuper(w.actor),
-    update: (w) => w.id === w.actor.uid || isSuper(w.actor),
-    delete: (w) => w.id === w.actor.uid || isSuper(w.actor),
+    ...superWrites,
   },
 
   teams: {
