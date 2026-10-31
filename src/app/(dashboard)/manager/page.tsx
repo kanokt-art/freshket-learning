@@ -641,7 +641,11 @@ function EmployeeSidebar({
   )
 
   const teamName      = user.teamId ? (teamMap[user.teamId] ?? null) : null
-  const isSaleDept    = user.department?.toLowerCase().includes('sale') || user.role === 'sale'
+  // The radar is built from Role Play assessments, so it belongs only to departments that have the
+  // Role Play module (Sales, Key Account…), not to everyone whose role happens to be "sale". A
+  // super_admin member is judged by their department like anyone else.
+  const radarModules = useModuleAccess(user.role === 'super_admin' ? 'sale' : user.role, user.department)
+  const showRadar = !radarModules.loading && radarModules.allowedModules.has('roleplay')
   const completedCount = userRecords.filter(r => r.status === 'completed').length
   const scores        = userRecords.filter(r => r.score != null).map(r => r.score as number)
   const avgScore      = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null
@@ -652,7 +656,7 @@ function EmployeeSidebar({
     { key: 'history', label: 'ประวัติการเรียน' },
     ...(showAssess ? [{ key: 'assess' as TabKey, label: 'แบบทดสอบ' }] : []),
     ...(showShadow ? [{ key: 'shadow' as TabKey, label: 'Shadow Visit' }] : []),
-    ...(isSaleDept ? [{ key: 'radar' as TabKey, label: 'Radar Chart' }] : []),
+    ...(showRadar ? [{ key: 'radar' as TabKey, label: 'Radar Chart' }] : []),
   ]
 
   return (

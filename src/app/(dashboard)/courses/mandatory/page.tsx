@@ -86,9 +86,9 @@ export default function MyMandatoryPage() {
                   {shownGroups.map((group) => (
                     <section key={group.key} id={`mandatory-${group.key}`} className="scroll-mt-4">
                       <MandatoryMonthHeader group={group} />
-                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5 mt-3">
+                      <div className="space-y-2 mt-3">
                         {group.items.map((item) => (
-                          <MandatoryCard key={item.id} item={item} onView={() => setViewing(item)} />
+                          <MandatoryRow key={item.id} item={item} onView={() => setViewing(item)} />
                         ))}
                       </div>
                     </section>
@@ -105,30 +105,31 @@ export default function MyMandatoryPage() {
   )
 }
 
-// ── Card — visually matches CourseCard on the Course tab ───────────────────────
-function MandatoryCard({ item, onView }: { item: MandatoryItem; onView: () => void }) {
+// ── Row — the same list row the admin page uses ───────────────────────────────────
+function MandatoryRow({ item, onView }: { item: MandatoryItem; onView: () => void }) {
   return (
     <button
       type="button"
       onClick={onView}
-      className="flex flex-col text-left rounded-2xl bg-white border border-gray-100 hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 overflow-hidden group"
+      className="w-full flex items-center gap-4 rounded-xl border border-gray-100 bg-white px-4 py-4 text-left hover:shadow-sm hover:border-freshket-200 transition-all duration-150 group"
     >
-      <div className="p-4 pb-0">
-        <SlidePreviewArea isPublished={item.isPublished} weekLabel={item.weekLabel} slidesUrl={item.slidesUrl} />
+      <div className="w-40 shrink-0">
+        <SlidePreviewArea isPublished={item.isPublished} weekLabel={item.weekLabel} slidesUrl={item.slidesUrl} hideBadges />
       </div>
-      <div className="flex flex-col flex-1 p-4 gap-2">
-        <h3 className="font-bold text-gray-900 text-sm leading-snug line-clamp-2 group-hover:text-freshket-600 transition-colors">{item.title}</h3>
-        <p className="text-xs text-gray-500 leading-relaxed line-clamp-2">{item.description}</p>
-        <div className="flex items-center justify-between mt-auto pt-3 border-t border-gray-100">
-          <span className="text-xs text-gray-400">{formatDate(item.publishedAt)}</span>
-          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-freshket-500 text-white text-xs font-bold group-hover:bg-freshket-600 transition-colors">
-            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-            </svg>
-            เปิดดู
-          </span>
-        </div>
+      <div className="flex-1 min-w-0">
+        <span className="inline-block text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700 mb-0.5">
+          {item.weekLabel}
+        </span>
+        <p className="text-sm font-bold text-gray-900 truncate group-hover:text-freshket-600 transition-colors">{item.title}</p>
+        <p className="text-xs text-gray-500 truncate mt-0.5">{item.description}</p>
       </div>
+      <span className="shrink-0 hidden sm:block text-xs text-gray-400">{formatDate(item.publishedAt)}</span>
+      <span className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-freshket-500 text-white text-xs font-bold group-hover:bg-freshket-600 transition-colors">
+        <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+        </svg>
+        เปิดดู
+      </span>
     </button>
   )
 }

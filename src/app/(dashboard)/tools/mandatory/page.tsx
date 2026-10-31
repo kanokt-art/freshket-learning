@@ -28,8 +28,6 @@ const DEMO_MODE = getDemoMode()
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ViewMode = 'card' | 'list'
-
 interface FormState {
   title: string
   description: string
@@ -72,7 +70,6 @@ export default function MandatoryPage() {
   const { data: departmentDocs } = useDepartments(isAdmin)
   const allDepartments = useMemo(() => departmentDocs.map(d => d.name).sort(), [departmentDocs])
 
-  const [viewMode, setViewMode]       = useState<ViewMode>('list')
   const [viewing, setViewing]         = useState<MandatoryItem | null>(null)
   const [showAdd, setShowAdd]         = useState(false)
   const [editItem, setEditItem]       = useState<MandatoryItem | null>(null)
@@ -262,38 +259,6 @@ export default function MandatoryPage() {
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-400">{visibleItems.length} รายการ</span>
           </div>
-
-          {/* Card / List toggle */}
-          <div className="flex items-center rounded-xl border border-gray-200 overflow-hidden bg-white p-0.5 gap-0.5">
-            <button
-              type="button"
-              onClick={() => setViewMode('card')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                viewMode === 'card'
-                  ? 'bg-freshket-100 text-freshket-700'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-              </svg>
-              Card
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('list')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                viewMode === 'list'
-                  ? 'bg-freshket-100 text-freshket-700'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
-              </svg>
-              List
-            </button>
-          </div>
         </div>
 
         {/* ── Empty state ──────────────────────────────────────────────────── */}
@@ -335,35 +300,19 @@ export default function MandatoryPage() {
                 <section key={group.key} id={`mandatory-${group.key}`} className="scroll-mt-4">
                   <MandatoryMonthHeader group={group} />
 
-                  {viewMode === 'card' ? (
-                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 mt-3">
-                      {group.items.map(item => (
-                        <MandatoryCard
-                          key={item.id}
-                          item={item}
-                          isAdmin={isAdmin}
-                          onView={() => setViewing(item)}
-                          onEdit={() => setEditItem(item)}
-                          onDelete={() => handleDelete(item.id)}
-                          onTogglePublish={() => handleTogglePublish(item)}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="space-y-2 mt-3">
-                      {group.items.map(item => (
-                        <MandatoryRow
-                          key={item.id}
-                          item={item}
-                          isAdmin={isAdmin}
-                          onView={() => setViewing(item)}
-                          onEdit={() => setEditItem(item)}
-                          onDelete={() => handleDelete(item.id)}
-                          onTogglePublish={() => handleTogglePublish(item)}
-                        />
-                      ))}
-                    </div>
-                  )}
+                  <div className="space-y-2 mt-3">
+                    {group.items.map(item => (
+                      <MandatoryRow
+                        key={item.id}
+                        item={item}
+                        isAdmin={isAdmin}
+                        onView={() => setViewing(item)}
+                        onEdit={() => setEditItem(item)}
+                        onDelete={() => handleDelete(item.id)}
+                        onTogglePublish={() => handleTogglePublish(item)}
+                      />
+                    ))}
+                  </div>
                 </section>
               ))}
             </div>
@@ -398,80 +347,6 @@ export default function MandatoryPage() {
 // ── SlidePreviewArea ──────────────────────────────────────────────────────────
 
 // ── MandatoryCard ─────────────────────────────────────────────────────────────
-
-function MandatoryCard({
-  item, isAdmin, onView, onEdit, onDelete, onTogglePublish,
-}: {
-  item: MandatoryItem
-  isAdmin: boolean
-  onView: () => void
-  onEdit: () => void
-  onDelete: () => void
-  onTogglePublish: () => void
-}) {
-  return (
-    <div className={`rounded-2xl border overflow-hidden flex flex-col hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 ${
-      !item.isPublished ? 'bg-gray-50 border-gray-200 opacity-60 grayscale' : 'bg-white border-gray-100'
-    }`}>
-      <div className="p-4 pb-0">
-        <SlidePreviewArea isPublished={item.isPublished} weekLabel={item.weekLabel} slidesUrl={item.slidesUrl} />
-      </div>
-      <div className="p-4 flex-1 flex flex-col">
-        <h3 className="text-sm font-bold text-gray-900 leading-snug mb-1.5 line-clamp-2">{item.title}</h3>
-        <p className="text-xs text-gray-500 leading-relaxed line-clamp-2 flex-1 mb-3">{item.description}</p>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-400">{formatDate(item.publishedAt)}</span>
-          <div className="flex items-center gap-1.5">
-            {isAdmin && (
-              <>
-                <button
-                  type="button"
-                  title={item.isPublished ? 'Unpublish' : 'Publish'}
-                  onClick={onTogglePublish}
-                  className={`size-7 rounded-lg flex items-center justify-center transition-colors ${
-                    item.isPublished ? 'text-freshket-500 hover:bg-freshket-50' : 'text-amber-500 hover:bg-amber-50'
-                  }`}
-                >
-                  <PublishIcon published={item.isPublished} />
-                </button>
-                <button
-                  type="button"
-                  onClick={onEdit}
-                  className="size-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors"
-                >
-                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={onDelete}
-                  className="size-7 rounded-lg flex items-center justify-center text-gray-300 hover:bg-rose-50 hover:text-rose-400 transition-colors"
-                >
-                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                  </svg>
-                </button>
-              </>
-            )}
-            <button
-              type="button"
-              onClick={onView}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-xs font-bold transition-colors"
-            >
-              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-              </svg>
-              เปิดดู
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── MandatoryRow ──────────────────────────────────────────────────────────────
 
 function MandatoryRow({
   item, isAdmin, onView, onEdit, onDelete, onTogglePublish,
