@@ -1,8 +1,11 @@
 import { ROLE_HIERARCHY, type UserProfile, type UserRole } from '@/types/user'
 
-// Freshket Job-Grade ladder (JG0 = Daily staff … JG14 = CEO), from the official
-// Job Level table. Used to order employees so a lower-level person cannot see a
-// higher-level person's profile/history.
+// Freshket Job-Grade ladder for the Head Office (HQ, non-tech) teams — the official Job Level table
+// (JG14 = CEO … JG3 = Staff / Assistant, JG0 = Contract Staff). Used to order employees by seniority:
+// who may see whom, and who a team's Manager / Team Lead pickers offer.
+//
+// Some HR exports carry the JG code in `rank` (JG9) and some a name (Manager, Senior Staff I); both
+// resolve to the same grade here. Warehouse and tech ladders are not part of this table.
 export interface JobLevelDef {
   grade: number      // comparable rank; higher = more senior
   jg: string         // 'JG14' … 'JG0'
@@ -11,22 +14,20 @@ export interface JobLevelDef {
 }
 
 export const JOB_LEVELS: JobLevelDef[] = [
-  { grade: 14, jg: 'JG14', level: 'CEO',                th: 'ประธานเจ้าหน้าที่บริหาร' },
-  { grade: 13, jg: 'JG13', level: 'C-Level',            th: 'ประธานเจ้าหน้าที่สายงาน' },
-  { grade: 12, jg: 'JG12', level: 'Vice President',     th: 'รองประธานเจ้าหน้าที่' },
-  { grade: 11, jg: 'JG11', level: 'Head of Department', th: 'ผู้จัดการฝ่าย' },
-  { grade: 10, jg: 'JG10', level: 'Senior Manager',     th: 'ผู้จัดการแผนกอาวุโส' },
-  { grade: 9,  jg: 'JG9',  level: 'Manager / Lead',     th: 'ผู้จัดการแผนก' },
-  { grade: 8,  jg: 'JG8',  level: 'Assistant Manager',  th: 'ผู้ช่วยผู้จัดการแผนก' },
-  { grade: 7,  jg: 'JG7',  level: 'Senior Supervisor',  th: 'หัวหน้างานอาวุโส' },
-  { grade: 6,  jg: 'JG6',  level: 'Supervisor II',      th: 'หัวหน้างาน II' },
-  { grade: 5,  jg: 'JG5',  level: 'Supervisor I',       th: 'หัวหน้างาน I' },
-  { grade: 4,  jg: 'JG4',  level: 'Leader',             th: 'หัวหน้ากลุ่มงาน' },
-  { grade: 3,  jg: 'JG3',  level: 'Senior Master',      th: 'เจ้าหน้าที่อาวุโส' },
-  { grade: 2,  jg: 'JG2',  level: 'Master',             th: 'เจ้าหน้าที่ / พนักงานคลังสินค้า' },
-  { grade: 1,  jg: 'JG1',  level: 'Staff (Monthly)',    th: 'พนักงานคลังสินค้า (รายเดือน)' },
-  { grade: 0,  jg: 'JG0',  level: 'Staff (Daily)',      th: 'พนักงานคลังสินค้า (รายวัน)' },
-  { grade: -1, jg: '-',    level: 'Internship',         th: 'นักศึกษาฝึกงาน' },
+  { grade: 14, jg: 'JG14', level: 'Chief Executive Officer',               th: 'ประธานเจ้าหน้าที่บริหาร' },
+  { grade: 13, jg: 'JG13', level: 'C-Level',                               th: 'ประธานเจ้าหน้าที่สายงาน' },
+  { grade: 12, jg: 'JG12', level: 'Vice President',                        th: 'รองประธานเจ้าหน้าที่' },
+  { grade: 11, jg: 'JG11', level: 'Head of Department',                    th: 'ผู้จัดการฝ่าย' },
+  { grade: 10, jg: 'JG10', level: 'Senior Manager',                        th: 'ผู้จัดการแผนกอาวุโส' },
+  { grade: 9,  jg: 'JG9',  level: 'Manager / Lead',                        th: 'ผู้จัดการแผนก' },
+  { grade: 8,  jg: 'JG8',  level: 'Assistant Manager / Team Lead',         th: 'ผู้ช่วยผู้จัดการแผนก' },
+  { grade: 7,  jg: 'JG7',  level: 'Senior Supervisor / Senior Specialist', th: 'หัวหน้างานอาวุโส / ผู้เชี่ยวชาญอาวุโส' },
+  { grade: 6,  jg: 'JG6',  level: 'Supervisor / Specialist',               th: 'หัวหน้างาน / ผู้เชี่ยวชาญ' },
+  { grade: 5,  jg: 'JG5',  level: 'Senior Officer / Executive',            th: 'เจ้าหน้าที่อาวุโส' },
+  { grade: 4,  jg: 'JG4',  level: 'Officer',                               th: 'เจ้าหน้าที่ (ป.ตรี)' },
+  { grade: 3,  jg: 'JG3',  level: 'Staff / Assistant',                     th: 'เจ้าหน้าที่ (ปวส.)' },
+  { grade: 0,  jg: 'JG0',  level: 'Contract Staff',                        th: 'พนักงานสัญญาจ้าง' },
+  { grade: -1, jg: '-',    level: 'Internship',                            th: 'นักศึกษาฝึกงาน' },
 ]
 
 // Coarse fallback grade per role — used when rank/position can't be mapped, so
@@ -35,28 +36,30 @@ const ROLE_FALLBACK_GRADE: Record<UserRole, number> = {
   super_admin: 14,
   manager: 9,
   team_lead: 8,
-  sale: 1,
+  sale: 3,
 }
 
-// Keyword → grade, ordered most-specific first (so "senior manager" beats
-// "manager", "assistant manager" beats "manager", etc.).
+// Keyword → grade, ordered most-specific first (so "senior manager" beats "manager", "assistant
+// manager" beats "manager", "contract staff" beats "staff").
+//
+// HR's rank names that are not in the table ("Senior Staff I", "Staff - HQ I", "Supervisor III") are
+// placed provisionally: Supervisor of any number = Supervisor / Specialist; Senior Staff = Senior
+// Officer / Executive; Staff = Staff / Assistant. A JG code in `rank` always wins over these.
 const KEYWORD_GRADES: { match: RegExp; grade: number }[] = [
   { match: /internship|intern|ฝึกงาน/, grade: -1 },
-  { match: /\bceo\b|ประธานเจ้าหน้าที่บริหาร/, grade: 14 },
-  { match: /c-?level/, grade: 13 },
+  { match: /\bceo\b|chief executive|ประธานเจ้าหน้าที่บริหาร/, grade: 14 },
+  { match: /c-?level|ประธานเจ้าหน้าที่สายงาน/, grade: 13 },
   { match: /vice president|\bvp\b|รองประธาน/, grade: 12 },
   { match: /head of|หัวหน้าฝ่าย|ผู้จัดการฝ่าย/, grade: 11 },
   { match: /senior manager|ผู้จัดการ.*อาวุโส/, grade: 10 },
-  { match: /assistant.*manager|ผู้ช่วยผู้จัดการ/, grade: 8 },
-  { match: /manager|ผู้จัดการ/, grade: 9 },
-  { match: /senior supervisor|หัวหน้างานอาวุโส/, grade: 7 },
-  { match: /supervisor\s*(ii|2)|หัวหน้างาน\s*2/, grade: 6 },
-  { match: /supervisor|หัวหน้างาน/, grade: 5 },
-  { match: /leader|lead|หัวหน้ากลุ่ม/, grade: 4 },
-  { match: /senior master|senior|อาวุโส/, grade: 3 },
-  { match: /master|เจ้าหน้าที่/, grade: 2 },
-  { match: /staff.*month|รายเดือน/, grade: 1 },
-  { match: /staff|daily|รายวัน/, grade: 0 },
+  { match: /assistant.*manager|team lead|ผู้ช่วยผู้จัดการ/, grade: 8 },
+  { match: /manager|\blead\b|ผู้จัดการ/, grade: 9 },
+  { match: /senior supervisor|senior specialist|หัวหน้างานอาวุโส|ผู้เชี่ยวชาญอาวุโส/, grade: 7 },
+  { match: /supervisor|specialist|หัวหน้างาน|ผู้เชี่ยวชาญ/, grade: 6 },
+  { match: /senior|executive|อาวุโส/, grade: 5 },
+  { match: /officer|เจ้าหน้าที่/, grade: 4 },
+  { match: /contract|สัญญาจ้าง|daily|รายวัน/, grade: 0 },
+  { match: /staff|assistant|พนักงาน/, grade: 3 },
 ]
 
 function gradeFromText(text?: string): number | null {
@@ -80,8 +83,8 @@ export function jobGrade(u: Pick<UserProfile, 'role' | 'rank' | 'position'>): nu
   return ROLE_FALLBACK_GRADE[u.role]
 }
 
-/** Job grade of Supervisor I (JG5): the lowest level that can lead a team. */
-export const SUPERVISOR_GRADE = 5
+/** Job grade of Supervisor / Specialist (JG6): the lowest level that can lead a team. */
+export const SUPERVISOR_GRADE = 6
 
 /**
  * The person's level as HR recorded it — the rank (a "JG5" code or a name such as

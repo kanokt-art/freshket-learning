@@ -7,22 +7,23 @@ const u = (over: Record<string, unknown>) =>
 
 describe('levelGrade', () => {
   it.each([
-    [{ rank: 'JG5' }, 5], [{ rank: 'JG10' }, 10], [{ rank: 'jg 9' }, 9], [{ rank: 'JG0' }, 0],
-    [{ rank: 'Supervisor I' }, 5], [{ rank: 'Supervisor II' }, 6], [{ rank: 'Supervisor III' }, 6],
+    [{ rank: 'JG5' }, 5], [{ rank: 'JG6' }, 6], [{ rank: 'JG10' }, 10], [{ rank: 'jg 9' }, 9], [{ rank: 'JG0' }, 0],
+    [{ rank: 'Supervisor I' }, 6], [{ rank: 'Supervisor II' }, 6], [{ rank: 'Supervisor III' }, 6], [{ rank: 'Senior Supervisor' }, 7],
     [{ rank: 'Assistant Manager' }, 8], [{ rank: 'Manager' }, 9], [{ rank: 'Vice President' }, 12],
-    [{ rank: 'Senior Staff I' }, 3], [{ rank: 'Staff - HQ I' }, 0], [{ rank: 'Staff' }, 0], [{ rank: 'Internship' }, -1],
+    [{ rank: 'Senior Staff I' }, 5], [{ rank: 'Staff - HQ I' }, 3], [{ rank: 'Staff' }, 3], [{ rank: 'Contract Staff' }, 0], [{ rank: 'Internship' }, -1],
+    [{ rank: 'Head of' }, 11], [{ rank: 'Senior Manager' }, 10], [{ position: 'Team Lead' }, 8],
   ])('reads %j as grade %i', (over, grade) => {
     expect(levelGrade({ role: 'sale', ...over } as Parameters<typeof levelGrade>[0])).toBe(grade)
   })
 
   it('does not lift a Staff-level team_lead: the role is not the level', () => {
-    expect(levelGrade({ role: 'team_lead', rank: 'Staff', position: 'Acquisition Team' })).toBe(0)
+    expect(levelGrade({ role: 'team_lead', rank: 'Staff', position: 'Acquisition Team' })).toBe(3)
   })
 
   it('falls back to the position, then the role, only when the rank says nothing', () => {
     expect(levelGrade({ role: 'sale', rank: undefined, position: 'Account Management Manager' })).toBe(9)
     expect(levelGrade({ role: 'manager', rank: undefined, position: undefined })).toBe(9)
-    expect(levelGrade({ role: 'sale', rank: undefined, position: undefined })).toBe(1)
+    expect(levelGrade({ role: 'sale', rank: undefined, position: undefined })).toBe(3)
   })
 })
 
@@ -41,6 +42,9 @@ describe('canLeadAnyTeam', () => {
     expect(canLeadAnyTeam(u({ role: 'team_lead', rank: 'Staff', position: 'Acquisition Team' }))).toBe(false)
     expect(canLeadAnyTeam(u({ rank: 'Senior Staff I' }))).toBe(false)
     expect(canLeadAnyTeam(u({ rank: 'JG4' }))).toBe(false)
+    // JG5 is Senior Officer / Executive in the HQ table, one step below Supervisor (JG6)
+    expect(canLeadAnyTeam(u({ rank: 'JG5' }))).toBe(false)
+    expect(canLeadAnyTeam(u({ rank: 'JG6' }))).toBe(true)
   })
 
   it('offers only departments in the rollout, Commercial included', () => {
