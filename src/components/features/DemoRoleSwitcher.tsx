@@ -3,12 +3,13 @@
 import { formatPersonName } from '@/lib/users/displayName'
 import { isActiveEmployee } from '@/lib/users/active'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
+import { isDepartmentHead } from '@/lib/users/departmentHead'
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers } from '@/hooks/useFirestore'
 import { getDemoMode, toggleDemoMode } from '@/lib/demo/demoMode'
-import { ROLE_LABELS, type UserRole, type UserProfile } from '@/types/user'
+import { ROLE_LABELS, ROLE_HIERARCHY, type UserRole, type UserProfile } from '@/types/user'
 import { MOCK_USERS } from '@/lib/utils/mockData'
 
 const ROLES: {
@@ -62,6 +63,16 @@ const ROLES: {
 const PICKABLE_ROLES: UserRole[] = ['sale', 'team_lead', 'manager']
 
 const ROLE_BY_ID = Object.fromEntries(ROLES.map((r) => [r.role, r])) as Record<UserRole, typeof ROLES[0]>
+
+// "Head of" is not an app role: it is whoever is Head of Department / VP or above (JG11+) in the
+// rollout. It gets its own picker so the admin can see what a department head sees.
+type PickerKey = UserRole | 'head'
+const PICKERS: PickerKey[] = ['sale', 'team_lead', 'manager', 'head']
+const HEAD_STYLE = {
+  activeClass: 'bg-indigo-500 text-white shadow-sm',
+  hoverClass: 'hover:bg-indigo-50 hover:text-indigo-700',
+  dotClass: 'bg-indigo-500',
+}
 
 export function DemoRoleSwitcher() {
   const router = useRouter()
@@ -319,7 +330,7 @@ function LiveImpersonator() {
   const router = useRouter()
   const { userOverride, setUserOverride } = useAuth()
   const { data: allUsers } = useAllUsers()
-  const [open, setOpen] = useState<UserRole | null>(null)
+  const [open, setOpen] = useState<PickerKey | null>(null)
   const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
@@ -347,11 +358,22 @@ function LiveImpersonator() {
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
-  function pick(u: UserProfile) {
-    setUserOverride(u)
+  // The people the Head of picker offers: active heads of a rollout department.
+  const heads = useMemo(
+    () => allUsers
+      .filter((u) => isActiveEmployee(u) && isDepartmentHead(u))
+      .sort((a, b) => formatPersonName(a).localeCompare(formatPersonName(b))),
+    [allUsers],
+  )
+
+  function pick(u: UserProfile, asHead = false) {
+    // A head oversees their department's teams, which lives on the manager pages — so they are
+    // shown at manager level at least, even if the account's stored role is lower.
+    const shown = asHead && ROLE_HIERARCHY[u.role] < ROLE_HIERARCHY.manager ? { ...u, role: 'manager' as UserRole } : u
+    setUserOverride(shown)
     setOpen(null)
     setQuery('')
-    router.push(ROLE_BY_ID[u.role]?.href ?? '/sale')
+    router.push(asHead ? '/manager' : (ROLE_BY_ID[u.role]?.href ?? '/sale'))
   }
 
   function reset() {
@@ -362,11 +384,15 @@ function LiveImpersonator() {
 
   return (
     <div ref={ref} className="flex items-center gap-1">
-      {PICKABLE_ROLES.map((role) => {
-        const r = ROLE_BY_ID[role]
-        const isActive = userOverride?.role === role
+      {PICKERS.map((role) => {
+        const isHead = role === 'head'
+        const r = isHead ? { ...ROLE_BY_ID.manager, ...HEAD_STYLE } : ROLE_BY_ID[role]
+        const label = isHead ? 'Head of' : ROLE_LABELS[role]
+        const overrideIsHead = !!userOverride && isDepartmentHead(userOverride)
+        // Someone who is a head shows under Head of, not also under their stored role.
+        const isActive = isHead ? overrideIsHead : userOverride?.role === role && !overrideIsHead
         const isOpen = open === role
-        const pool = usersByRole[role] ?? []
+        const pool = isHead ? heads : (usersByRole[role] ?? [])
         const q = query.trim().toLowerCase()
         const filtered = q
           ? pool.filter((u) =>
@@ -381,13 +407,13 @@ function LiveImpersonator() {
             <button
               type="button"
               onClick={() => { setOpen(isOpen ? null : role); setQuery('') }}
-              title={`สวมเป็น ${ROLE_LABELS[role]} คนใดคนหนึ่ง`}
+              title={isHead ? 'สวมเป็น Head of Department / VP คนใดคนหนึ่ง (ดูว่าเห็นอะไร)' : `สวมเป็น ${label} คนใดคนหนึ่ง`}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
                 isActive ? r.activeClass : `border border-gray-100 text-gray-500 ${r.hoverClass}`
               }`}
             >
               <span className={`size-1.5 rounded-full shrink-0 ${isActive ? 'bg-white/60' : r.dotClass}`} />
-              {ROLE_LABELS[role]}
+              {label}
               {isActive && userOverride && (
                 <>
                   <span className="text-white/50">·</span>
@@ -410,7 +436,7 @@ function LiveImpersonator() {
                 <style>{`@keyframes dropUp { from { opacity:0; transform:translateX(-50%) translateY(8px) } to { opacity:1; transform:translateX(-50%) translateY(0) } }`}</style>
 
                 <div className="px-3 pt-3 pb-2 border-b border-gray-50">
-                  <p className="text-xs font-bold text-gray-400 mb-2">{ROLE_LABELS[role]} · {pool.length} คน</p>
+                  <p className="text-xs font-bold text-gray-400 mb-2">{label} · {pool.length} คน</p>
                   <input
                     autoFocus
                     value={query}
@@ -422,7 +448,7 @@ function LiveImpersonator() {
 
                 <div className="py-1 max-h-64 overflow-y-auto">
                   {filtered.length === 0 ? (
-                    <p className="px-3 py-4 text-xs text-gray-400 text-center">ไม่พบผู้ใช้</p>
+                    <p className="px-3 py-4 text-xs text-gray-400 text-center">{isHead && pool.length === 0 ? 'ยังไม่มี Head / VP ที่ Active ในแผนก target' : 'ไม่พบผู้ใช้'}</p>
                   ) : (
                     filtered.map((u) => {
                       const selected = userOverride?.uid === u.uid
@@ -430,7 +456,7 @@ function LiveImpersonator() {
                         <button
                           key={u.uid}
                           type="button"
-                          onClick={() => pick(u)}
+                          onClick={() => pick(u, isHead)}
                           className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${selected ? 'bg-gray-50' : 'hover:bg-gray-50'}`}
                         >
                           <div className={`size-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden ${selected ? r.activeClass : 'bg-gray-100 text-gray-500'}`}>
