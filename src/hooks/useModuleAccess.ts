@@ -5,7 +5,8 @@ import { getDemoMode } from '@/lib/demo/demoMode'
 import { getDocument } from '@/lib/data/client'
 import { attachLive } from '@/lib/data/live'
 import { pollIntervalFor } from '@/lib/data/pollInterval'
-import { ALL_MODULE_IDS, DEFAULT_MODULES, type ModuleId, type ModuleAccessConfig } from '@/lib/modules'
+import { ALL_MODULE_IDS, DEFAULT_MODULES, isTargetDepartment, type ModuleId, type ModuleAccessConfig } from '@/lib/modules'
+import { areTargetDepartmentsLoaded, useTargetDepartmentsVersion } from '@/lib/data/targetDepartments'
 
 const DEMO = getDemoMode()
 
@@ -109,12 +110,16 @@ export function useModuleAccess(role?: string, department?: string | null): Modu
   // Subscribe (unless admin/demo, which never need the config). useSyncExternalStore
   // is the idiomatic React 18 way to read an external store without tearing.
   useSyncExternalStore(skip ? noopSubscribe : subscribe, getVersion, getServerVersion)
+  useTargetDepartmentsVersion()
 
   if (skip) return { allowedModules: new Set(ALL_MODULE_IDS), loading: false }
 
   // Optimistic: show everything while the very first snapshot is still in flight
   // (subsequent mounts skip this because sharedLoaded stays true).
-  if (!sharedLoaded) return { allowedModules: new Set(ALL_MODULE_IDS), loading: true }
+  if (!sharedLoaded || !areTargetDepartmentsLoaded()) return { allowedModules: new Set(ALL_MODULE_IDS), loading: true }
+
+  // A department that has not been switched on sees nothing: signing in works, the app is empty.
+  if (!isTargetDepartment(department)) return { allowedModules: new Set<ModuleId>(), loading: false }
 
   const dept = department ?? ''
   const modules = sharedConfig?.[dept] ?? sharedConfig?.['default'] ?? DEFAULT_MODULES

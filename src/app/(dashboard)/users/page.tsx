@@ -5,6 +5,7 @@ import { formatPersonName } from '@/lib/users/displayName'
 import { rankToRole } from '@/lib/users/rankToRole'
 import { resolveImportRows, type ImportRow } from '@/lib/users/importDedupe'
 import { isExcludedPosition } from '@/lib/users/excludedPositions'
+import { isTargetDepartment } from '@/lib/modules'
 import { tenureLabel } from '@/lib/users/tenure'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
@@ -1812,9 +1813,11 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
   duplicates: string[]
   hidden: number
   missing: UserProfile[]
+  /** People left out because their department is not switched on. */
+  outside: number
 } {
   const lines = text.replace(/^﻿/, '').replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean)
-  if (lines.length < 2) return { valid: [], updated: [], duplicates: [], hidden: 0, missing: [] }
+  if (lines.length < 2) return { valid: [], updated: [], duplicates: [], hidden: 0, missing: [], outside: 0 }
 
   // Look up existing records to carry over uid (upsert uses existing uid)
   const existingByEmpId = new Map(existingUsers.filter(u => u.employeeId).map(u => [u.employeeId!, u]))
@@ -1831,6 +1834,7 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
 
   // Every usable line; people who appear more than once are reduced afterwards (resolveImportRows).
   const rows: ImportRow[] = []
+  let outside = 0
 
   for (const line of lines.slice(1)) {
     const cols = parseCSVLine(line)
@@ -1859,6 +1863,8 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
     if (!displayName) continue
     // Maids and masseuses are not target: left out of the import altogether.
     if (isExcludedPosition(position)) continue
+    // A department a super_admin has not switched on is not synced in at all (Module Settings).
+    if (!isTargetDepartment(dept)) { outside++; continue }
 
     // Reuse existing uid so saveLocalImportedUsers can upsert by uid.
     // UID is deterministic: csv-{empId} — same employee always gets same UID
@@ -1903,7 +1909,7 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
     updatedAt: new Date(),
   }))
 
-  return resolveImportRows(rows, missing)
+  return { ...resolveImportRows(rows, missing), outside }
 }
 
 
@@ -1954,7 +1960,7 @@ function AddEmployeeModal({
     department: '', position: '', role: 'sale' as UserRole, startDate: '',
   })
   const [manualError, setManualError] = useState('')
-  const [csvResult, setCsvResult] = useState<{ valid: UserProfile[]; updated: string[]; duplicates: string[]; hidden: number; missing: UserProfile[] } | null>(null)
+  const [csvResult, setCsvResult] = useState<{ valid: UserProfile[]; updated: string[]; duplicates: string[]; hidden: number; missing: UserProfile[]; outside: number } | null>(null)
   const [confirmMissing, setConfirmMissing] = useState(false)
   const [csvFileName, setCsvFileName] = useState('')
 
@@ -2136,6 +2142,7 @@ function AddEmployeeModal({
                   <div>
                     <p className="text-xs font-bold text-freshket-700">พร้อมนำเข้า <span className="text-base">{csvResult.valid.length}</span> คน{csvResult.updated.length > 0 && <span className="font-normal text-amber-600"> (อัปเดต {csvResult.updated.length} คน)</span>}</p>
                     {csvResult.duplicates.length > 0 && <p className="text-xs text-amber-600 mt-0.5">ข้ามซ้ำในไฟล์ {csvResult.duplicates.length} คน</p>}
+                    {csvResult.outside > 0 && <p className="text-xs text-gray-500 mt-0.5">ไม่นำเข้า {csvResult.outside} คน เพราะแผนกยังไม่เปิดใช้งาน (เปิดได้ที่ Module Settings)</p>}
                   </div>
                 </div>
                 {csvResult.duplicates.length > 0 && (

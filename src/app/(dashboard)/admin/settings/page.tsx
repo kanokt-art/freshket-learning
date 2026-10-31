@@ -6,7 +6,8 @@ import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers } from '@/hooks/useFirestore'
 import { useModuleConfig } from '@/hooks/useModuleAccess'
-import { MODULE_REGISTRY, ALL_MODULE_IDS, DEFAULT_MODULES, PHASE1_DEPARTMENTS, type ModuleId } from '@/lib/modules'
+import { MODULE_REGISTRY, ALL_MODULE_IDS, DEFAULT_MODULES, TARGET_DEPARTMENTS_DOC, type ModuleId } from '@/lib/modules'
+import { useTargetDepartmentList } from '@/lib/data/targetDepartments'
 import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -34,7 +35,10 @@ export default function ModuleSettingsPage() {
   // typed the URL got the RBAC editor. Writes were still refused by
   // firestore.rules, but the roster and config were fully readable.
   const isSuperAdmin = user?.role === 'super_admin'
-  const { data: allUsers } = useAllUsers(isSuperAdmin)
+  // includeAll: the roster elsewhere only lists switched-on departments; this page shows all of them
+  // so a super_admin can switch one on.
+  const { data: allUsers } = useAllUsers(isSuperAdmin, { includeAll: true })
+  const liveTargets = useTargetDepartmentList()
   // Shared warm config from the SAME store useModuleAccess uses (null while the
   // first snapshot is in flight). Seeding the editable copy from here means
   // revisiting this page is instant — no per-mount getDoc round-trip / loading
@@ -51,14 +55,28 @@ export default function ModuleSettingsPage() {
   // Unsaved-changes flag — drives the floating Save button that appears the
   // moment an admin toggles a module.
   const [dirty, setDirty] = useState(false)
+  // Departments switched on (the target list). Seeded once from the saved setting, like the config.
+  const [targets, setTargets] = useState<string[]>([])
+  const [targetsLoaded, setTargetsLoaded] = useState(false)
+  useEffect(() => {
+    if (targetsLoaded || liveTargets === null) return
+    setTargets(liveTargets)
+    setTargetsLoaded(true)
+  }, [liveTargets, targetsLoaded])
 
-  // Derive unique departments from users — only those in the current rollout (PHASE1_DEPARTMENTS).
-  // The other departments' saved settings stay in the config untouched; they just are not listed.
+  // Every department on the roster, switched-on ones first.
   const departments = useMemo(() => {
     const depts = new Set<string>()
-    allUsers.forEach(u => { if (u.department && (isDemo || PHASE1_DEPARTMENTS.has(u.department))) depts.add(u.department) })
-    return Array.from(depts).sort()
-  }, [allUsers, isDemo])
+    allUsers.forEach(u => { if (u.department) depts.add(u.department) })
+    targets.forEach(t => depts.add(t))
+    return Array.from(depts).sort((a, b) => Number(targets.includes(b)) - Number(targets.includes(a)) || a.localeCompare(b))
+  }, [allUsers, targets])
+
+  function toggleTarget(dept: string) {
+    setTargets(prev => (prev.includes(dept) ? prev.filter(d => d !== dept) : [...prev, dept]))
+    setSaved(false)
+    setDirty(true)
+  }
 
   // Seed the editable copy ONCE from the shared warm config (or demo mock).
   // Seed only once (guarded by `loaded`) so a later listener re-fire never
@@ -107,6 +125,8 @@ export default function ModuleSettingsPage() {
     try {
       // Patches only `departments`, never clobbering other fields on the doc.
       await patch('appConfig', 'moduleAccess', { departments: config })
+      // Which departments are switched on at all.
+      if (targetsLoaded) await patch('appConfig', TARGET_DEPARTMENTS_DOC, { departments: targets })
       setSaved(true)
       setDirty(false)
     } catch {
@@ -118,7 +138,7 @@ export default function ModuleSettingsPage() {
 
   const allDepts = departments.length > 0
     ? departments
-    : Object.keys(config).filter(k => k !== 'default' && (isDemo || PHASE1_DEPARTMENTS.has(k)))
+    : Object.keys(config).filter(k => k !== 'default' && (isDemo || targets.includes(k)))
 
   // Placed after every hook so the hook order stays stable across renders
   // (the same shape the sibling /admin/announcements page uses).
@@ -214,6 +234,10 @@ export default function ModuleSettingsPage() {
                   เลือกว่าแต่ละแผนกจะเห็น module ไหนใน sidebar และสามารถเข้าใช้งานได้บ้าง
                   Super Admin จะเห็นทุก module เสมอโดยไม่ขึ้นกับการตั้งค่านี้
                 </p>
+                <p className="text-xs text-gray-500 leading-relaxed mt-2">
+                  <span className="font-bold text-gray-700">เปิดใช้งานแผนก:</span> แผนกที่ไม่ได้เปิดจะไม่ถูก sync เข้าระบบตอน import HR, ไม่ปรากฏในรายชื่อหรือรายงานใด ๆ
+                  และพนักงานของแผนกนั้น login ได้ แต่จะไม่เห็น module อะไรเลย
+                </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {MODULE_REGISTRY.map(m => (
                     <span key={m.id} className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full bg-freshket-100 text-freshket-700 border border-freshket-200">
@@ -273,6 +297,7 @@ export default function ModuleSettingsPage() {
                   <thead className="sticky top-0 z-20">
                     <tr>
                       <th className="text-left text-xs font-bold text-gray-500 px-6 py-3 w-48 bg-white border-b border-gray-100">แผนก</th>
+                      <th className="text-center text-xs font-bold text-gray-500 px-4 py-3 w-28 bg-white border-b border-gray-100">เปิดใช้งานแผนก</th>
                       {MODULE_REGISTRY.map(m => (
                         <th key={m.id} className="text-center text-xs font-bold text-gray-500 px-4 py-3 min-w-[100px] bg-white border-b border-gray-100">
                           <div>{m.label}</div>
@@ -287,8 +312,9 @@ export default function ModuleSettingsPage() {
                       const mods = getModulesForDept(dept)
                       const hasOverride = dept in config
                       const allEnabled = MODULE_REGISTRY.every(m => mods.includes(m.id))
+                      const on = isDemo || targets.includes(dept)
                       return (
-                        <tr key={dept} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                        <tr key={dept} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'} ${on ? '' : 'opacity-60'}`}>
                           <td className="px-6 py-3">
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-bold text-gray-800">{dept}</span>
@@ -303,12 +329,24 @@ export default function ModuleSettingsPage() {
                               )}
                             </div>
                           </td>
+                          <td className="text-center px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleTarget(dept)}
+                              disabled={isDemo || !targetsLoaded}
+                              title={on ? 'ปิดแผนกนี้' : 'เปิดแผนกนี้'}
+                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 disabled:opacity-60 ${on ? 'bg-freshket-500' : 'bg-gray-200'}`}
+                            >
+                              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${on ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                            </button>
+                          </td>
                           {MODULE_REGISTRY.map(m => (
                             <td key={m.id} className="text-center px-4 py-3">
                               <label className="inline-flex items-center justify-center cursor-pointer">
                                 <input
                                   type="checkbox"
                                   checked={mods.includes(m.id)}
+                                  disabled={!on}
                                   onChange={() => toggleModule(dept, m.id)}
                                   className="size-4 rounded border-gray-300 text-freshket-500 focus:ring-freshket-300 cursor-pointer"
                                 />

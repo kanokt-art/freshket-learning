@@ -28,6 +28,8 @@ import { attachLive } from '@/lib/data/live'
 import { pollIntervalFor } from '@/lib/data/pollInterval'
 import { reviewId } from '@/lib/shadow/reviews'
 import { isExcludedPosition } from '@/lib/users/excludedPositions'
+import { useTargetDepartmentsVersion } from '@/lib/data/targetDepartments'
+import { isTargetDepartment } from '@/lib/modules'
 
 // ── Local imported-user overlay (persists CSV-imported users in localStorage) ──
 /**
@@ -644,8 +646,14 @@ export function useAssessment(id: string): { data: Assessment | null; loading: b
 // `enabled` lets learner-facing pages skip this whole-collection subscription —
 // the full users roster is an admin/lead concern; a plain sale user's pages
 // shouldn't pay ~users-collection reads for it.
-export function useAllUsers(enabled = true): UseResult<UserProfile> {
+/**
+ * Everyone on the roster in a switched-on department. People in other departments are not listed on
+ * any screen until a super_admin switches their department on; `includeAll` is for the one admin page
+ * that needs to see them to do exactly that.
+ */
+export function useAllUsers(enabled = true, opts: { includeAll?: boolean } = {}): UseResult<UserProfile> {
   const demoData = useDemoSnapshot(() => demoStore.getUsers())
+  const targetVersion = useTargetDepartmentsVersion()
 
   const [localOverlay, setLocalOverlay] = useState<UserProfile[]>([])
   const [patches, setPatches] = useState<Record<string, UserPatch>>({})
@@ -795,9 +803,16 @@ export function useAllUsers(enabled = true): UseResult<UserProfile> {
     return [...mergedFb, ...uniqueLocal].filter((u) => !isExcludedPosition(u.position))
   }, [fbResult.data, patches, localOverlay])
 
+  const includeAll = opts.includeAll === true
+  const visibleData = useMemo(
+    () => (includeAll ? mergedData : mergedData.filter((u) => isTargetDepartment(u.department))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mergedData, includeAll, targetVersion],
+  )
+
   if (DEMO_MODE) return { data: demoData, loading: false, error: null }
 
-  return { ...fbResult, data: mergedData }
+  return { ...fbResult, data: visibleData }
 }
 
 export function useTeams(enabled = true): UseResult<Team> {

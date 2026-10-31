@@ -31,13 +31,36 @@ export const ALL_MODULE_IDS = MODULE_REGISTRY.map(m => m.id) as ModuleId[]
 // This is the single source of truth: the Employees filter, the org board and
 // the course learner picker all read it, so adding a department here is the one
 // edit needed to onboard it.
-export const PHASE1_DEPARTMENTS = new Set([
+//
+// The list is set by a super_admin in Module Settings (stored in appConfig/targetDepartments) and
+// loaded into this set on both sides — the browser and every API request — so every check that
+// reads it follows the setting. Until a setting exists (and if it cannot be read) these defaults
+// stand. A department that is not on the list: its people are not synced in by the HR import, are
+// not listed anywhere, and see no modules; they can still sign in.
+export const DEFAULT_TARGET_DEPARTMENTS = [
   'Sales Management',
   'Key Account Management',
   'Portfolio Management',
   'Commercial',
   'People Experience',
-])
+]
+export const PHASE1_DEPARTMENTS = new Set<string>(DEFAULT_TARGET_DEPARTMENTS)
+
+/** The appConfig document that holds the switched-on departments: { departments: string[] }. */
+export const TARGET_DEPARTMENTS_DOC = 'targetDepartments'
+
+/** The departments a stored setting names; the defaults when there is no usable setting. */
+export function parseTargetDepartments(doc: unknown): string[] {
+  const list = (doc as { departments?: unknown } | null | undefined)?.departments
+  if (!Array.isArray(list)) return [...DEFAULT_TARGET_DEPARTMENTS]
+  return Array.from(new Set(list.filter((d): d is string => typeof d === 'string' && d.trim() !== '').map((d) => d.trim())))
+}
+
+/** Replace the live target list in place, so everything holding PHASE1_DEPARTMENTS sees it. */
+export function setTargetDepartments(names: readonly string[]): void {
+  PHASE1_DEPARTMENTS.clear()
+  names.forEach((n) => PHASE1_DEPARTMENTS.add(n))
+}
 
 /** Is this department in the current rollout? */
 export function isTargetDepartment(department?: string | null): boolean {

@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminAuth } from '@/lib/firebase/admin'
 import { getStore, StoreError } from './store'
 import { resolvePerson, type Person } from './identity'
+import { refreshTargetDepartments } from './targetDepartments'
 import type { Role } from './policies'
 
 export interface Caller {
@@ -51,6 +52,8 @@ export async function authenticate(req: NextRequest, bodyToken?: string): Promis
   }
 
   try {
+    // The department list is a setting: load it before anything decides by department.
+    await refreshTargetDepartments(getStore())
     const resolved = await resolvePerson(getStore(), {
       uid: decoded.uid,
       email: decoded.email,
