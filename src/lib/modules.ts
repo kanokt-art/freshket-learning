@@ -39,6 +39,11 @@ export const PHASE1_DEPARTMENTS = new Set([
   'People Experience',
 ])
 
+/** Is this department in the current rollout? */
+export function isTargetDepartment(department?: string | null): boolean {
+  return !!department && PHASE1_DEPARTMENTS.has(department)
+}
+
 // Modules enabled by default when a department has no explicit config.
 // Empty on purpose: a department outside PHASE1_DEPARTMENTS gets nothing until
 // it is rolled out. super_admin bypasses this entirely (see useModuleAccess).

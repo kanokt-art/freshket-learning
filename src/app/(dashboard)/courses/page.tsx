@@ -56,7 +56,7 @@ import { formatPersonName } from '@/lib/users/displayName'
 import { onlyCurrentOrIncoming, isCurrentOrIncoming, isActiveEmployee } from '@/lib/users/active'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { BUCKET_ASSESSMENT_LIST, getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
-import { PHASE1_DEPARTMENTS } from '@/lib/modules'
+import { PHASE1_DEPARTMENTS, isTargetDepartment } from '@/lib/modules'
 const DEMO_MODE = getDemoMode()
 const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS) as CourseCategory[]
 
@@ -1492,7 +1492,7 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
   // reorganisation over time, both leave resigned learners sitting in
   // assignedUserIds (removeAssignedUser only prunes on manual removal), so
   // this filter is what actually keeps them out of view.
-  const visibleRows = useMemo(() => rows.filter((r) => isCurrentOrIncoming(r.user)), [rows])
+  const visibleRows = useMemo(() => rows.filter((r) => isCurrentOrIncoming(r.user) && isTargetDepartment(r.user.department)), [rows])
 
   // Search the list by name (English or Thai), nickname or department.
   const [query, setQuery] = useState('')
@@ -1770,7 +1770,7 @@ function AssignedLearnersTableModal({ assignedUserIds, allUsers, allTrainingReco
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
           <div>
             <h3 className="text-base font-bold text-gray-900">รายชื่อผู้เรียน</h3>
-            <p className="text-xs text-gray-400">{rows.length} คน</p>
+            <p className="text-xs text-gray-400">{rows.filter((r) => isCurrentOrIncoming(r.user) && isTargetDepartment(r.user.department)).length} คน</p>
           </div>
           <button type="button" onClick={onClose}
             className="size-9 shrink-0 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-all">
@@ -4385,7 +4385,11 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   // Note this filters on employment status, NOT on whether someone has a team:
   // 210 of the 285 active employees have no teamId, so requiring a team would
   // hide most of the company from the picker.
-  const assignableUsers = useMemo(() => onlyCurrentOrIncoming(allUsers), [allUsers])
+  // Only departments in the current rollout: people elsewhere are not target and are never offered.
+  const assignableUsers = useMemo(
+    () => onlyCurrentOrIncoming(allUsers).filter((u) => isTargetDepartment(u.department)),
+    [allUsers],
+  )
 
   // A user's teamId can point at a team document that no longer exists (the
   // team was deleted/merged and the member was never re-homed) — found via a
@@ -4484,10 +4488,11 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     [form.assignedUserIds, allUsers, allTrainingRecords, editCourse?.id],
   )
 
-  // The table hides people who have resigned, but they stay in assignedUserIds. Count only
-  // who the table shows, and say how many are left behind (with a button to clear them).
+  // The table hides people who have resigned or are outside the target departments, but they stay
+  // in assignedUserIds. Count only who the table shows, and say how many are left behind (with a
+  // button to clear them).
   const activeAssignedIds = useMemo(
-    () => new Set(assignedRows.filter((r) => isCurrentOrIncoming(r.user)).map((r) => r.user.uid)),
+    () => new Set(assignedRows.filter((r) => isCurrentOrIncoming(r.user) && isTargetDepartment(r.user.department)).map((r) => r.user.uid)),
     [assignedRows],
   )
   const hiddenAssignedCount = form.assignedUserIds.filter((id) => !activeAssignedIds.has(id)).length
@@ -5117,7 +5122,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                 {hiddenAssignedCount > 0 && (
                   <div className="flex items-center justify-between gap-3 px-3 py-2 -mt-2 rounded-xl bg-amber-50 border border-amber-200">
                     <p className="text-xs text-amber-700">
-                      +{hiddenAssignedCount} คนที่ลาออกหรือไม่พบในระบบ ยังค้างอยู่ในรายชื่อ (ไม่แสดงในตาราง และไม่รับแจ้งเตือน)
+                      +{hiddenAssignedCount} คนที่ลาออก ไม่พบในระบบ หรืออยู่นอกแผนก target ยังค้างอยู่ในรายชื่อ (ไม่แสดงในตาราง และไม่รับแจ้งเตือน)
                     </p>
                     <button type="button" onClick={clearHiddenAssigned}
                       className="shrink-0 text-xs font-bold text-amber-700 hover:underline">
@@ -5486,7 +5491,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
 
       {openPanel === 'individual' && (
         <IndividualAssignmentPanel
-          users={allUsers}
+          users={assignableUsers}
           assignedIds={form.assignedUserIds}
           enrolledUserIds={enrolledUserIds}
           onConfirm={(ids) => set('assignedUserIds', ids)}
