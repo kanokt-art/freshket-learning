@@ -51,6 +51,18 @@ describe('what a department head sees', () => {
     expect(managedMembers(head, people, teams).map(u => u.uid).sort()).toEqual(['a', 'b'])
   })
 
+  it('lists everyone in the department, with or without a team, super_admin included', () => {
+    const everyone = [
+      ...people,
+      user({ uid: 'noteam', rank: 'Staff' }),                                         // in the department, on no team
+      user({ uid: 'admin', role: 'super_admin', rank: 'Senior Staff' }),              // a super_admin who works in People
+      user({ uid: 'boss', rank: 'Vice President' }),                                  // more senior than the head
+      user({ uid: 'other', department: 'Sales Management', rank: 'Staff' }),          // another department, no team
+    ]
+    const uids = managedMembers(head, everyone, teams).map(u => u.uid).sort()
+    expect(uids).toEqual(['a', 'admin', 'b', 'noteam'])
+  })
+
   it('gives a plain Manager nothing they were not assigned', () => {
     const manager = user({ uid: 'm', role: 'manager', rank: 'Manager' })
     expect(Array.from(managedTeamIds(manager, [manager, ...people], teams))).toEqual([])

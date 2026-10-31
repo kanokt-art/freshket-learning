@@ -23,7 +23,7 @@ import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types
 import { canAccess, ROLE_LABELS, getTeamManagerIds, getTeamLeadIds, type UserProfile } from '@/types/user'
 import type { AssessmentScore } from '@/types/assessmentScore'
 import { canViewByLevel } from '@/lib/jobLevel'
-import { managedTeamIds } from '@/lib/users/managedMembers'
+import { managedMembers, managedTeamIds } from '@/lib/users/managedMembers'
 import { formatDateEN } from '@/lib/utils/dateFormatter'
 import { MOCK_TAKEAWAYS } from '@/lib/utils/mockData'
 import { alertError } from '@/lib/ui/alert'
@@ -116,13 +116,8 @@ export default function ManagerPage() {
 
   // Exclude the manager themselves, and anyone more senior — a viewer only sees
   // members at or below their own level (a team_lead never sees the manager).
-  const users = useMemo(
-    () => allUsers.filter(u =>
-      u.uid !== user?.uid &&
-      u.teamId && managedTeamIdSet.has(u.teamId) &&
-      !!user && canViewByLevel(user, u)),
-    [allUsers, managedTeamIdSet, user],
-  )
+  // The same set every "my team" view uses; a department head also gets everyone in the department.
+  const users = useMemo(() => managedMembers(user, allUsers, teams), [allUsers, teams, user])
 
   // Records scoped to the managed members. This used to stream the ENTIRE
   // trainingRecords collection (ungated) and then throw most of it away here; now

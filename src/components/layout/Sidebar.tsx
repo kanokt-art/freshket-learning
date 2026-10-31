@@ -219,7 +219,7 @@ function SidebarLabel({ expanded, children, className = '' }: { expanded: boolea
 // ── Component ─────────────────────────────────────────────────────────────────
 export function Sidebar({ className = 'flex' }: { className?: string }) {
   const pathname = usePathname()
-  const { user, signOut, realRole, roleOverride, setRoleOverride } = useAuth()
+  const { user, signOut, realRole, roleOverride, userOverride, setRoleOverride } = useAuth()
   const router = useRouter()
   // Icon-only by default — hovering (or pinning via the toggle button) reveals full labels
   const [collapsed, setCollapsed] = useState(true)
@@ -366,7 +366,7 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
         ))}
         {/* A super_admin learns like anyone else: this opens the app as a learner (same account,
             same records) with My Course, Tools and the rest; the button at the bottom comes back. */}
-        {realRole === 'super_admin' && !roleOverride && (
+        {realRole === 'super_admin' && !roleOverride && !userOverride && (
           <button
             type="button"
             onClick={() => { setRoleOverride('sale'); router.push('/courses') }}

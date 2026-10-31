@@ -1,5 +1,5 @@
 import { canViewByLevel } from '@/lib/jobLevel'
-import { departmentScope, isDepartmentHead } from '@/lib/users/departmentHead'
+import { departmentScope, isDepartmentHead, levelOf } from '@/lib/users/departmentHead'
 import { teamsOfDepartment } from '@/lib/users/teamsOfDepartment'
 import { getTeamManagerIds, getTeamLeadIds, type Team, type UserProfile } from '@/types/user'
 
@@ -26,6 +26,10 @@ export function managedTeamIds(user: Viewer, allUsers: readonly UserProfile[], t
  * lead or manage (plus any explicit visibleTeamIds and their own team), at or
  * below their own level. Used wherever "my team's report" is shown, so the home
  * dashboard, the roster and a course's results all mean the same set of people.
+ *
+ * A department head (JG11+) is responsible for the whole department, not only its teams: everyone
+ * in it — with or without a team, whatever their app role (a super_admin who works in the
+ * department included) — at or below the head's level.
  */
 export function managedMembers(
   user: Viewer | null | undefined,
@@ -35,5 +39,14 @@ export function managedMembers(
   if (!user) return []
   const managed = managedTeamIds(user, allUsers, teams)
   // Only members at or below the viewer's level (a team_lead never sees the manager).
-  return allUsers.filter((u) => u.uid !== user.uid && u.teamId && managed.has(u.teamId) && canViewByLevel(user, u))
+  const byTeam = allUsers.filter((u) => u.uid !== user.uid && u.teamId && managed.has(u.teamId) && canViewByLevel(user, u))
+  if (!isDepartmentHead(user) || !user.department) return byTeam
+
+  const scope = new Set(departmentScope(user.department))
+  const headLevel = levelOf(user)
+  const everyone = new Map<string, UserProfile>(byTeam.map((u) => [u.uid, u]))
+  for (const u of allUsers) {
+    if (u.uid !== user.uid && !!u.department && scope.has(u.department) && levelOf(u) <= headLevel) everyone.set(u.uid, u)
+  }
+  return Array.from(everyone.values())
 }
