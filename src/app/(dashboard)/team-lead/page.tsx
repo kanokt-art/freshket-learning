@@ -695,11 +695,11 @@ export default function TeamLeadPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100">
-                      <th className="text-left text-xs font-bold text-gray-400 px-5 py-3">ชื่อ</th>
-                      <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 whitespace-nowrap">วันเริ่มงาน</th>
-                      <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">ความก้าวหน้า</th>
-                      <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">สถานะ</th>
-                      <th className="text-right text-xs font-bold text-gray-400 px-3 py-3">คะแนนเฉลี่ย</th>
+                      <th className="text-left text-xs font-bold text-gray-400 px-5 py-3">Name</th>
+                      <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 whitespace-nowrap">Start Date</th>
+                      <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">Progress</th>
+                      <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">Status</th>
+                      <th className="text-right text-xs font-bold text-gray-400 px-3 py-3">Avg Score</th>
                       <th className="w-6" />
                     </tr>
                   </thead>

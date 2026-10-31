@@ -6,6 +6,7 @@ import { rankToRole } from '@/lib/users/rankToRole'
 import { resolveImportRows, type ImportRow } from '@/lib/users/importDedupe'
 import { isExcludedPosition } from '@/lib/users/excludedPositions'
 import { isTargetDepartment } from '@/lib/modules'
+import { CopyableText, CopyIcon, StartDateCell } from '@/components/common/EmployeeCells'
 import { tenureLabel } from '@/lib/users/tenure'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
@@ -936,8 +937,8 @@ export default function UsersPage() {
                       <SortIcon active={sortField === 'name'} dir={sortDir} />
                     </button>
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden md:table-cell">Department</th>
                   <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden md:table-cell">Position</th>
+                  <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden md:table-cell">Department</th>
                   <th className="text-left px-4 py-3 hidden lg:table-cell">
                     <button
                       onClick={() => handleSort('startDate')}
@@ -983,26 +984,19 @@ export default function UsersPage() {
                       </div>
                     </td>
 
-                    {/* Department */}
-                    <td className="px-4 py-3.5 text-xs text-gray-600 hidden md:table-cell max-w-32 truncate">
-                      {u.department ?? <span className="text-gray-300">—</span>}
+                    {/* Position — full text, with copy */}
+                    <td className="px-4 py-3.5 text-xs text-gray-700 hidden md:table-cell" onClick={e => e.stopPropagation()}>
+                      <CopyableText text={u.position} />
                     </td>
 
-                    {/* Position */}
-                    <td className="px-4 py-3.5 text-xs text-gray-700 hidden md:table-cell max-w-40 truncate">
-                      {u.position ?? <span className="text-gray-300">—</span>}
+                    {/* Department */}
+                    <td className="px-4 py-3.5 text-xs text-gray-600 hidden md:table-cell" onClick={e => e.stopPropagation()}>
+                      <CopyableText text={u.department} />
                     </td>
 
                     {/* Start Date */}
                     <td className="px-4 py-3.5 text-xs text-gray-500 hidden lg:table-cell whitespace-nowrap">
-                      {u.startDate ? (
-                        <div className="flex flex-col items-start gap-1">
-                          <span>{formatDateEN(u.startDate)}</span>
-                          {tenureLabel(u.startDate) && (
-                            <span className="inline-flex items-center text-xs font-bold px-2.5 py-0.5 rounded-full bg-freshket-100 text-freshket-700 border border-freshket-200">{tenureLabel(u.startDate)}</span>
-                          )}
-                        </div>
-                      ) : <span className="text-gray-300">—</span>}
+                      <StartDateCell startDate={u.startDate} />
                     </td>
 
                     {/* Line Manager */}
@@ -2188,11 +2182,11 @@ function AddEmployeeModal({
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-gray-50 border-b border-gray-100">
-                          <th className="text-left px-3 py-2 font-bold text-gray-500">ชื่อ</th>
-                          <th className="text-left px-3 py-2 font-bold text-gray-500">ชื่อเล่น</th>
-                          <th className="text-left px-3 py-2 font-bold text-gray-500">รหัส</th>
-                          <th className="text-left px-3 py-2 font-bold text-gray-500">แผนก</th>
-                          <th className="text-left px-3 py-2 font-bold text-gray-500">สถานะ</th>
+                          <th className="text-left px-3 py-2 font-bold text-gray-500">Name</th>
+                          <th className="text-left px-3 py-2 font-bold text-gray-500">Nickname</th>
+                          <th className="text-left px-3 py-2 font-bold text-gray-500">Emp.ID</th>
+                          <th className="text-left px-3 py-2 font-bold text-gray-500">Department</th>
+                          <th className="text-left px-3 py-2 font-bold text-gray-500">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">

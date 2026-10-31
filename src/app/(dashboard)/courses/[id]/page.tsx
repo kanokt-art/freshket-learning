@@ -1,6 +1,7 @@
 'use client'
 
 import { resultsRoster } from '@/lib/courses/audience'
+import { CopyableText } from '@/components/common/EmployeeCells'
 import { isActiveEmployee } from '@/lib/users/active'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Link from 'next/link'
@@ -1655,12 +1656,13 @@ function CourseResultsDashboard({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  <th className="text-left text-xs font-bold text-gray-400 px-5 py-3">ชื่อ-นามสกุล</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden md:table-cell">แผนก</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden lg:table-cell">ทีม</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">สถานะ</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">คะแนน</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden lg:table-cell">วันที่</th>
+                  <th className="text-left text-xs font-bold text-gray-400 px-5 py-3">Name</th>
+                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden md:table-cell">Position</th>
+                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden md:table-cell">Department</th>
+                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden lg:table-cell">Team</th>
+                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">Status</th>
+                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">Score</th>
+                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden lg:table-cell">Completed</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -1704,9 +1706,14 @@ function CourseResultsDashboard({
                         </div>
                       </td>
 
+                      {/* Position — full text, with copy */}
+                      <td className="px-3 py-3.5 hidden md:table-cell text-xs text-gray-600">
+                        <CopyableText text={row.user.position} />
+                      </td>
+
                       {/* Dept */}
-                      <td className="px-3 py-3.5 hidden md:table-cell">
-                        <span className="text-xs text-gray-600">{row.deptName}</span>
+                      <td className="px-3 py-3.5 hidden md:table-cell text-xs text-gray-600">
+                        <CopyableText text={row.deptName === '-' ? undefined : row.deptName} />
                       </td>
 
                       {/* Team */}

@@ -1,6 +1,7 @@
 'use client'
 
 import { isInCourseTarget } from '@/lib/courses/audience'
+import { CopyableText, CopyIcon, StartDateCell } from '@/components/common/EmployeeCells'
 import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
@@ -905,12 +906,11 @@ function UserTable({
           {/* Table header */}
           <div className="grid grid-cols-12 gap-2 px-4 py-2.5 bg-white border-b border-gray-100 text-xs font-bold text-gray-500">
             <div className="col-span-1">#</div>
-            <SortHeaderCell className="col-span-1" label="รหัส" active={sortBy === 'empId'} dir={sortDir} onClick={() => toggleSort('empId')} />
-            <SortHeaderCell className="col-span-2" label="ชื่อ" active={sortBy === 'name'} dir={sortDir} onClick={() => toggleSort('name')} />
-            <SortHeaderCell className="col-span-2" label="แผนก" active={sortBy === 'department'} dir={sortDir} onClick={() => toggleSort('department')} />
-            <SortHeaderCell className="col-span-1" label="ตำแหน่ง" active={sortBy === 'position'} dir={sortDir} onClick={() => toggleSort('position')} />
-            <SortHeaderCell className="col-span-2" label="วันที่เริ่มทำงาน" active={sortBy === 'startDate'} dir={sortDir} onClick={() => toggleSort('startDate')} />
-            <SortHeaderCell className="col-span-1" label="อายุงาน" active={sortBy === 'tenure'} dir={sortDir} onClick={() => toggleSort('tenure')} />
+            <SortHeaderCell className="col-span-1" label="Emp.ID" active={sortBy === 'empId'} dir={sortDir} onClick={() => toggleSort('empId')} />
+            <SortHeaderCell className="col-span-2" label="Name" active={sortBy === 'name'} dir={sortDir} onClick={() => toggleSort('name')} />
+            <SortHeaderCell className="col-span-2" label="Position" active={sortBy === 'position'} dir={sortDir} onClick={() => toggleSort('position')} />
+            <SortHeaderCell className="col-span-2" label="Department" active={sortBy === 'department'} dir={sortDir} onClick={() => toggleSort('department')} />
+            <SortHeaderCell className="col-span-2" label="Start Date" active={sortBy === 'startDate'} dir={sortDir} onClick={() => toggleSort('startDate')} />
             <div className="col-span-2">Email</div>
           </div>
 
@@ -926,7 +926,7 @@ function UserTable({
                   <button
                     key={u.uid}
                     onClick={() => onSelect(u)}
-                    className={`w-full grid grid-cols-12 gap-2 px-4 py-3 text-left transition-colors hover:bg-indigo-50/60 ${isSelected ? 'bg-indigo-50 border-l-2 border-indigo-500' : ''}`}
+                    className={`w-full grid grid-cols-12 gap-2 px-4 py-3 text-left items-start transition-colors hover:bg-indigo-50/60 ${isSelected ? 'bg-indigo-50 border-l-2 border-indigo-500' : ''}`}
                   >
                     {/* # */}
                     <div className="col-span-1 flex items-center">
@@ -943,21 +943,17 @@ function UserTable({
                         {u.nickname && <span className="text-gray-400 font-normal"> ({u.nickname})</span>}
                       </p>
                     </div>
+                    {/* Position — full text, with copy */}
+                    <div className="col-span-2 flex items-start min-w-0 text-xs text-gray-600">
+                      <CopyableText text={u.position} />
+                    </div>
                     {/* Department */}
-                    <div className="col-span-2 flex items-center">
-                      <span className="text-xs text-gray-600 truncate">{u.department ?? '—'}</span>
+                    <div className="col-span-2 flex items-start min-w-0 text-xs text-gray-600">
+                      <CopyableText text={u.department} />
                     </div>
-                    {/* Position */}
-                    <div className="col-span-1 flex items-center">
-                      <span className="text-xs text-gray-500 truncate">{u.position ?? '—'}</span>
-                    </div>
-                    {/* Start Date */}
-                    <div className="col-span-2 flex items-center">
-                      <span className="text-xs text-gray-500 whitespace-nowrap">{u.startDate ? formatDateEN(u.startDate) : '—'}</span>
-                    </div>
-                    {/* Tenure */}
-                    <div className="col-span-1 flex items-center">
-                      <span className="text-xs text-gray-500 font-mono tabular-nums whitespace-nowrap">{calcTenure(u.startDate as Date | undefined)}</span>
+                    {/* Start Date, with the length of service under it */}
+                    <div className="col-span-2 flex items-start text-xs text-gray-500">
+                      <StartDateCell startDate={u.startDate} />
                     </div>
                     {/* Email */}
                     <div className="col-span-2 flex items-center">

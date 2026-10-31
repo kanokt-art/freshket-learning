@@ -290,11 +290,11 @@ export default function UserReportPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50/60 border-b border-gray-100">
-                      <th className="text-left px-5 py-3 text-xs font-bold text-gray-500">วิชา</th>
-                      <th className="text-left px-4 py-3 text-xs font-bold text-gray-500">สถานะ</th>
-                      <th className="text-left px-4 py-3 text-xs font-bold text-gray-500">คะแนน</th>
-                      <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden md:table-cell">วันที่สำเร็จ</th>
-                      <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden md:table-cell">ครั้งที่สอบ</th>
+                      <th className="text-left px-5 py-3 text-xs font-bold text-gray-500">Course</th>
+                      <th className="text-left px-4 py-3 text-xs font-bold text-gray-500">Status</th>
+                      <th className="text-left px-4 py-3 text-xs font-bold text-gray-500">Score</th>
+                      <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden md:table-cell">Completed</th>
+                      <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 hidden md:table-cell">Attempts</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">

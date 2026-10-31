@@ -141,12 +141,12 @@ export default function AssessmentPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="text-left text-xs font-bold text-gray-500 px-4 py-3">ชื่อแบบทดสอบ</th>
-                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">จำนวนข้อ</th>
-                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">คะแนนเต็ม</th>
-                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">เกณฑ์ผ่าน</th>
+                  <th className="text-left text-xs font-bold text-gray-500 px-4 py-3">Assessment</th>
+                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Questions</th>
+                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Max Score</th>
+                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Passing Score</th>
                   <th className="text-center text-xs font-bold text-gray-500 px-3 py-3">Status</th>
-                  <th className="text-left text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">วันที่สร้าง</th>
+                  <th className="text-left text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Created</th>
                   <th className="w-10" />
                 </tr>
               </thead>
@@ -187,10 +187,10 @@ export default function AssessmentPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="text-left text-xs font-bold text-gray-500 px-4 py-3">ชื่อแบบประเมิน</th>
-                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">จำนวนข้อ</th>
-                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">ผลลัพธ์</th>
-                  <th className="text-left text-xs font-bold text-gray-500 px-3 py-3">ผลลัพธ์ที่เป็นไปได้</th>
+                  <th className="text-left text-xs font-bold text-gray-500 px-4 py-3">Questionnaire</th>
+                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Questions</th>
+                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Outcomes</th>
+                  <th className="text-left text-xs font-bold text-gray-500 px-3 py-3">Possible Outcomes</th>
                   <th className="w-24" />
                 </tr>
               </thead>

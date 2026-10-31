@@ -296,15 +296,15 @@ export default function ModuleSettingsPage() {
                 <table className="w-full">
                   <thead className="sticky top-0 z-20">
                     <tr>
-                      <th className="text-left text-xs font-bold text-gray-500 px-6 py-3 w-48 bg-white border-b border-gray-100">แผนก</th>
-                      <th className="text-center text-xs font-bold text-gray-500 px-4 py-3 w-28 bg-white border-b border-gray-100">เปิดใช้งานแผนก</th>
+                      <th className="text-left text-xs font-bold text-gray-500 px-6 py-3 w-48 bg-white border-b border-gray-100">Department</th>
+                      <th className="text-center text-xs font-bold text-gray-500 px-4 py-3 w-28 bg-white border-b border-gray-100">Enabled</th>
                       {MODULE_REGISTRY.map(m => (
                         <th key={m.id} className="text-center text-xs font-bold text-gray-500 px-4 py-3 min-w-[100px] bg-white border-b border-gray-100">
                           <div>{m.label}</div>
                           <div className="text-gray-400 font-normal mt-0.5">{m.description.split(' ').slice(0, 3).join(' ')}</div>
                         </th>
                       ))}
-                      <th className="text-center text-xs font-bold text-gray-400 px-4 py-3 w-24 bg-white border-b border-gray-100">ทั้งหมด</th>
+                      <th className="text-center text-xs font-bold text-gray-400 px-4 py-3 w-24 bg-white border-b border-gray-100">All</th>
                     </tr>
                   </thead>
                   <tbody>

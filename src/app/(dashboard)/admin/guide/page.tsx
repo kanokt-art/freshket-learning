@@ -170,8 +170,8 @@ export default function AdminGuidePage() {
                 <table className="w-full text-sm min-w-[32rem]">
                   <thead>
                     <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
-                      <th className="py-2 pr-3 font-bold">เหตุการณ์</th>
-                      <th className="py-2 pr-3 font-bold">ไปที่</th>
+                      <th className="py-2 pr-3 font-bold">Event</th>
+                      <th className="py-2 pr-3 font-bold">Go to</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">

@@ -636,12 +636,12 @@ function SaleVisitsTable({
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-100">
-              <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 whitespace-nowrap">ร้าน</th>
+              <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 whitespace-nowrap">Store</th>
               <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 whitespace-nowrap hidden md:table-cell">Segment</th>
               <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 whitespace-nowrap hidden md:table-cell">Persona</th>
               <th className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 whitespace-nowrap">Mentor</th>
-              <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 whitespace-nowrap hidden lg:table-cell">วันที่</th>
-              <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 whitespace-nowrap">สถานะ</th>
+              <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 whitespace-nowrap hidden lg:table-cell">Date</th>
+              <th className="px-4 py-2.5 text-center text-xs font-bold text-gray-400 whitespace-nowrap">Status</th>
               <th className="w-10" />
             </tr>
           </thead>

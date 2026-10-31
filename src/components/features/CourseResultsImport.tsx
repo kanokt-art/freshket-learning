@@ -222,10 +222,10 @@ export function CourseResultsImport({ courses, onClose, onDone }: {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="text-left text-xs text-amber-700/70">
-                          <th className="px-4 py-2 font-bold">พนักงาน</th>
-                          <th className="px-4 py-2 font-bold whitespace-nowrap">ก่อนเรียน เดิม → ใหม่</th>
-                          <th className="px-4 py-2 font-bold whitespace-nowrap">หลังเรียน เดิม → ใหม่</th>
-                          <th className="px-4 py-2 font-bold whitespace-nowrap">สถานะ เดิม → ใหม่</th>
+                          <th className="px-4 py-2 font-bold">Employee</th>
+                          <th className="px-4 py-2 font-bold whitespace-nowrap">Pre-Test (old → new)</th>
+                          <th className="px-4 py-2 font-bold whitespace-nowrap">Post-Test (old → new)</th>
+                          <th className="px-4 py-2 font-bold whitespace-nowrap">Status (old → new)</th>
                         </tr>
                       </thead>
                       <tbody>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
+import { CopyIcon, StartDateCell } from '@/components/common/EmployeeCells'
 import { useAuth } from '@/hooks/useAuth'
 import {
   useAllUsers, useTeams, useDepartments, useAllRoleplayAssessments, useRoleplayAssessmentsByUser,
@@ -1030,11 +1031,6 @@ function MemberAssessmentRow({
   isSuperAdmin: boolean
   teamName: string
 }) {
-  const parsedStart = toDate(member.startDate)
-  const startDateFormatted = parsedStart
-    ? parsedStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-    : '—'
-
   return (
     <tr onClick={onViewHistory} className="hover:bg-freshket-50/40 cursor-pointer transition-colors group">
       {/* สมาชิก */}
@@ -1054,8 +1050,11 @@ function MemberAssessmentRow({
       {/* ตำแหน่ง */}
       <td className="px-4 py-3">
         {member.position ? (
-          <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full truncate max-w-[180px] ${positionColor(member.position)}`}>
-            {member.position}
+          <span className="inline-flex items-start gap-1">
+            <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full ${positionColor(member.position)}`}>
+              {member.position}
+            </span>
+            <CopyIcon text={member.position} />
           </span>
         ) : <span className="text-xs text-gray-300">—</span>}
       </td>
@@ -1070,8 +1069,11 @@ function MemberAssessmentRow({
       {/* แผนก */}
       <td className="px-4 py-3">
         {member.department ? (
-          <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full truncate max-w-[160px] ${deptColor(member.department)}`}>
-            {member.department}
+          <span className="inline-flex items-start gap-1">
+            <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full ${deptColor(member.department)}`}>
+              {member.department}
+            </span>
+            <CopyIcon text={member.department} />
           </span>
         ) : <span className="text-xs text-gray-300">—</span>}
       </td>
@@ -1087,13 +1089,9 @@ function MemberAssessmentRow({
           <span className="text-xs text-gray-400 whitespace-nowrap">{member.email || '—'}</span>
         </td>
       )}
-      {/* วันเริ่มงาน */}
-      <td className="px-4 py-3">
-        <span className="text-xs text-gray-500 whitespace-nowrap">{startDateFormatted}</span>
-      </td>
-      {/* อายุงาน */}
-      <td className="px-4 py-3">
-        <span className="text-xs font-mono text-gray-500">{calcTenure(member.startDate)}</span>
+      {/* Start Date, with the length of service under it */}
+      <td className="px-4 py-3 text-xs text-gray-500">
+        <StartDateCell startDate={member.startDate} />
       </td>
     </tr>
   )
@@ -1964,24 +1962,23 @@ export default function RoleplayPage() {
                 <tr className="border-b border-gray-100">
                   <th className="px-4 py-3 text-left">
                     <button onClick={() => handleMemberSort('name')} className="flex items-center text-xs font-bold text-gray-400 hover:text-gray-700 transition-colors">
-                      สมาชิก <SortIcon field="name" current={memberSortField} dir={memberSortDir} />
+                      Member <SortIcon field="name" current={memberSortField} dir={memberSortDir} />
                     </button>
                   </th>
                   <th className="px-4 py-3 text-left">
                     <button onClick={() => handleMemberSort('position')} className="flex items-center text-xs font-bold text-gray-400 hover:text-gray-700 transition-colors">
-                      ตำแหน่ง <SortIcon field="position" current={memberSortField} dir={memberSortDir} />
+                      Position <SortIcon field="position" current={memberSortField} dir={memberSortDir} />
                     </button>
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Rank</th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">แผนก</th>
-                  {isSuperAdmin && <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">ทีม</th>}
-                  {isSuperAdmin && <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">อีเมล</th>}
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Department</th>
+                  {isSuperAdmin && <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Team</th>}
+                  {isSuperAdmin && <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">Email</th>}
                   <th className="px-4 py-3 text-left">
                     <button onClick={() => handleMemberSort('startDate')} className="flex items-center text-xs font-bold text-gray-400 hover:text-gray-700 transition-colors">
-                      วันเริ่มงาน <SortIcon field="startDate" current={memberSortField} dir={memberSortDir} />
+                      Start Date <SortIcon field="startDate" current={memberSortField} dir={memberSortDir} />
                     </button>
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-400">อายุงาน</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -1997,7 +1994,7 @@ export default function RoleplayPage() {
                 ))}
                 {filteredMembers.length === 0 && (
                   <tr>
-                    <td colSpan={isSuperAdmin ? 8 : 6} className="px-4 py-12 text-center text-sm text-gray-300">ไม่พบสมาชิก</td>
+                    <td colSpan={isSuperAdmin ? 7 : 5} className="px-4 py-12 text-center text-sm text-gray-300">ไม่พบสมาชิก</td>
                   </tr>
                 )}
               </tbody>

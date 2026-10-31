@@ -52,6 +52,7 @@ import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { alertError, alertSuccess, confirmAction } from '@/lib/ui/alert'
 import { formatTenure } from '@/lib/users/tenure'
+import { CopyableText, StartDateCell } from '@/components/common/EmployeeCells'
 import { formatPersonName } from '@/lib/users/displayName'
 import { onlyCurrentOrIncoming, isCurrentOrIncoming, isActiveEmployee } from '@/lib/users/active'
 import { authedFetch } from '@/lib/api/authedFetch'
@@ -859,9 +860,9 @@ function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMa
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100">
-              <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ชื่อคอร์สเรียน</th>
-              <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">หมวดหมู่</th>
-              <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">สถานะการเรียน</th>
+              <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Course</th>
+              <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Category</th>
+              <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Status</th>
             </tr>
           </thead>
           <tbody>
@@ -902,13 +903,13 @@ function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMa
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-100">
-            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ชื่อคอร์สเรียน</th>
-            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">คะแนน</th>
-            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">หมวดหมู่</th>
-            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">เผยแพร่เมื่อ</th>
-            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">แก้ไขล่าสุด</th>
-            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ผู้เรียน</th>
-            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">สถานะ</th>
+            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Course</th>
+            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Score</th>
+            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Category</th>
+            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Published</th>
+            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Last Updated</th>
+            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Learners</th>
+            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Status</th>
           </tr>
         </thead>
         <tbody>
@@ -1171,18 +1172,19 @@ function CourseOverviewModal({ course, allUsers, allTrainingRecords, onClose, on
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 sticky top-0 bg-white">
-                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ชื่อ / ตำแหน่ง</th>
-                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">แผนก</th>
-                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">วันที่เริ่มเรียน</th>
-                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">เรียนล่าสุด</th>
-                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ความคืบหน้า</th>
-                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">ผลการทดสอบ</th>
-                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">สถานะ</th>
+                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Name</th>
+                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Position</th>
+                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Department</th>
+                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Started</th>
+                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Last Activity</th>
+                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Progress</th>
+                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Score</th>
+                    <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredRows.length === 0 ? (
-                    <tr><td colSpan={7} className="text-center text-gray-400 text-sm py-10">ไม่พบข้อมูลผู้เรียน</td></tr>
+                    <tr><td colSpan={8} className="text-center text-gray-400 text-sm py-10">ไม่พบข้อมูลผู้เรียน</td></tr>
                   ) : filteredRows.map(({ user: u, record, status, lastActivity }) => {
                     const pct = approxProgressPct(status, record)
                     return (
@@ -1196,11 +1198,11 @@ function CourseOverviewModal({ course, allUsers, allTrainingRecords, onClose, on
                             </div>
                             <div className="min-w-0">
                               <p className="text-xs font-bold text-gray-800 truncate">{u.displayName}</p>
-                              <p className="text-xs text-gray-400 truncate">{u.position ?? '—'}</p>
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{u.department ?? '—'}</td>
+                        <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.position} /></td>
+                        <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.department} /></td>
                         <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(record?.startedAt)}</td>
                         <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(lastActivity)}</td>
                         <td className="px-4 py-3 whitespace-nowrap">
@@ -1639,21 +1641,22 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
               className="size-4 rounded border-gray-300 text-freshket-500 focus:ring-2 focus:ring-freshket-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
             />
           </th>
-          <SortableTh label="รายชื่อ" sortKey="name" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-          <SortableTh label="สังกัด" sortKey="department" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-          <SortableTh label="วันที่เริ่มเรียน" sortKey="startDate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-          <SortableTh label="เรียนล่าสุด" sortKey="lastActivity" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-          <SortableTh label="ความคืบหน้า" sortKey="progress" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-          <SortableTh label="ผลการทดสอบ" sortKey="score" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <SortableTh label="Name" sortKey="name" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Position</th>
+          <SortableTh label="Department" sortKey="department" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <SortableTh label="Started" sortKey="startDate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <SortableTh label="Last Activity" sortKey="lastActivity" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <SortableTh label="Progress" sortKey="progress" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <SortableTh label="Score" sortKey="score" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           {hasPreTest && <SortableTh label="Pre-Test" sortKey="preTest" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />}
           {hasPostTest && <SortableTh label="Post-Test" sortKey="postTest" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />}
-          <SortableTh label="สถานะ" sortKey="status" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <SortableTh label="Status" sortKey="status" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <th className="px-4 py-3" />
         </tr>
       </thead>
       <tbody>
         {sorted.length === 0 ? (
-          <tr><td colSpan={8 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">
+          <tr><td colSpan={9 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">
             {/* Distinguish "genuinely nobody assigned" from "everyone
                 assigned here has resigned" — otherwise this read as the
                 assignment being empty when it wasn't. */}
@@ -1688,14 +1691,14 @@ function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemoveMany, 
                   </div>
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-gray-800 truncate">{formatPersonName(u)}</p>
-                    <p className="text-xs text-gray-400 truncate">{u.position ?? '—'}</p>
                     {u.employmentStatus === 'Pending' && (
                       <span className="inline-block mt-0.5 text-xs font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">ยังไม่เริ่มงาน</span>
                     )}
                   </div>
                 </div>
               </td>
-              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{u.department ?? '—'}</td>
+              <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.position} /></td>
+              <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.department} /></td>
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(record?.startedAt)}</td>
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(lastActivity)}</td>
               <td className="px-4 py-3 whitespace-nowrap">
@@ -2262,11 +2265,11 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
           <thead className="sticky top-0 bg-white z-[5]">
             <tr className="border-b border-gray-100">
               <th className="w-10 px-4 py-2.5"></th>
-              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">ชื่อ</th>
-              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">รหัสพนักงาน</th>
-              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">ตำแหน่ง</th>
-              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">แผนก</th>
-              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">วันเริ่มงาน</th>
+              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">Name</th>
+              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">Emp.ID</th>
+              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">Position</th>
+              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">Department</th>
+              <th className="px-2 py-2.5 text-xs font-bold text-gray-500">Start Date</th>
               <th className="w-24 px-4 py-2.5"></th>
             </tr>
           </thead>
@@ -2294,9 +2297,9 @@ function IndividualAssignmentPanel({ users, assignedIds, enrolledUserIds, onConf
                     </div>
                   </td>
                   <td className="px-2 py-2.5 text-xs text-gray-500 whitespace-nowrap font-mono">{u.employeeId ?? '—'}</td>
-                  <td className="px-2 py-2.5 text-xs text-gray-600 truncate max-w-48">{u.position ?? '—'}</td>
-                  <td className="px-2 py-2.5 text-xs text-gray-600 truncate max-w-48">{u.department ?? '—'}</td>
-                  <td className="px-2 py-2.5 text-xs text-gray-600 whitespace-nowrap">{u.startDate ? formatDateEN(u.startDate) : '—'}</td>
+                  <td className="px-2 py-2.5 text-xs text-gray-600"><CopyableText text={u.position} /></td>
+                  <td className="px-2 py-2.5 text-xs text-gray-600"><CopyableText text={u.department} /></td>
+                  <td className="px-2 py-2.5 text-xs text-gray-600"><StartDateCell startDate={u.startDate} /></td>
                   <td className="px-4 py-2.5 text-right">
                     {isEnrolled && (
                       <span className="text-xs font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">เรียนแล้ว</span>
@@ -5273,15 +5276,15 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-gray-100 sticky top-0 bg-white">
-                          <SortableTh label="ชื่อ" sortKey="name" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
-                          <SortableTh label="ตำแหน่ง" sortKey="position" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
-                          <SortableTh label="แผนก" sortKey="department" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
-                          <SortableTh label="อายุงาน" sortKey="tenure" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
-                          <SortableTh label="ความคืบหน้า" sortKey="progress" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
+                          <SortableTh label="Name" sortKey="name" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
+                          <SortableTh label="Position" sortKey="position" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
+                          <SortableTh label="Department" sortKey="department" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
+                          <SortableTh label="Start Date" sortKey="tenure" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
+                          <SortableTh label="Progress" sortKey="progress" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
                           {hasPreTest && <SortableTh label="Pre-Test" sortKey="preTest" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
                           {hasPostTest && <SortableTh label="Post-Test" sortKey="postTest" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
-                          {!hasPreTest && !hasPostTest && <SortableTh label="คะแนน" sortKey="score" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
-                          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">สถานะพนักงาน</th>
+                          {!hasPreTest && !hasPostTest && <SortableTh label="Score" sortKey="score" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
+                          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Employee Status</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -5303,9 +5306,9 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                                   <p className="text-xs font-bold text-gray-800 truncate">{formatPersonName(u)}</p>
                                 </div>
                               </td>
-                              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{u.position ?? '—'}</td>
-                              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{u.department ?? '—'}</td>
-                              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtTenure(u.startDate)}</td>
+                              <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.position} /></td>
+                              <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.department} /></td>
+                              <td className="px-4 py-3 text-xs text-gray-600"><StartDateCell startDate={u.startDate} /></td>
                               <td className="px-4 py-3 whitespace-nowrap">
                                 <div className="flex items-center gap-2 w-28">
                                   <div className="h-1.5 flex-1 bg-gray-100 rounded-full overflow-hidden">
