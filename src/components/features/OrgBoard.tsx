@@ -6,6 +6,7 @@ import type { Department, Team, UserProfile } from '@/types/user'
 import { ROLE_LABELS, canAccess, getTeamManagerIds, getTeamLeadIds } from '@/types/user'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { canLeadAnyTeam } from '@/lib/users/teamManager'
+import { deptId, teamsOfDepartment } from '@/lib/users/teamsOfDepartment'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -45,20 +46,14 @@ function RolePill({ role }: { role: 'manager' | 'teamLead' | 'member' }) {
 
 // ── Department merges — display-only, no data change ─────────────────────────
 
-const DEPT_MERGES: Array<{ sourceNames: string[]; displayName: string }> = [
-  {
-    sourceNames: ['Key Account Management', 'Portfolio Management'],
-    displayName: 'Key Account Management & Portfolio Management',
-  },
-]
+// Empty now: Key Account Management and Portfolio Management each have their own tab. The
+// mechanism stays for any future merge. Teams filed while the two were merged are sorted back
+// to the right one by teamsOfDepartment.
+const DEPT_MERGES: Array<{ sourceNames: string[]; displayName: string }> = []
 
 // Re-exported so existing importers keep working; the list itself lives in
 // lib/modules alongside the module registry it gates.
 export { PHASE1_DEPARTMENTS }
-
-function deptId(name: string) {
-  return `dept-${name.toLowerCase().replace(/[^a-z0-9ก-๙]/g, '-')}`
-}
 
 // Roster-eligible: shows up in a team's "Members" list and a department's
 // "Unassigned" list. Managers are included here per request — previously they
@@ -502,7 +497,6 @@ function TeamCard({
   onSetManagers,
   onOpenVisibility,
   onUpdateVisibility,
-  rankFilter,
   searchQuery,
 }: {
   team: Team
@@ -520,7 +514,6 @@ function TeamCard({
   onSetManagers: (uids: string[]) => void
   onOpenVisibility: (user: UserProfile) => void
   onUpdateVisibility: (uid: string, teamIds: string[] | undefined) => void
-  rankFilter?: string
   searchQuery?: string
 }) {
   const router = useRouter()
@@ -551,13 +544,9 @@ function TeamCard({
     () => users.filter(u => u.teamId === team.id && isRosterRole(u.role)),
     [users, team.id],
   )
-  const rankedMembers = useMemo(
-    () => rankFilter ? allMembers.filter(u => u.rank === rankFilter) : allMembers,
-    [allMembers, rankFilter],
-  )
   const members = useMemo(
-    () => searchQuery ? rankedMembers.filter(u => matchesSearch(u, searchQuery)) : rankedMembers,
-    [rankedMembers, searchQuery],
+    () => searchQuery ? allMembers.filter(u => matchesSearch(u, searchQuery)) : allMembers,
+    [allMembers, searchQuery],
   )
   // Org-wide, department-agnostic: a manager can search the whole employee
   // roster by name/nickname, not just people already unassigned in this team's
@@ -660,7 +649,7 @@ function TeamCard({
           )}
           <span className={`inline-flex items-center gap-1 text-xs font-normal px-2 py-0.5 rounded-full mt-1 ${accent.badge}`}>
             <span className={`size-1.5 rounded-full ${accent.dot}`} />
-            {(rankFilter || searchQuery) ? `${members.length}/${allMembers.length}` : allMembers.length} member{allMembers.length !== 1 ? 's' : ''}
+            {searchQuery ? `${members.length}/${allMembers.length}` : allMembers.length} member{allMembers.length !== 1 ? 's' : ''}
           </span>
         </div>
         {canManage && (
@@ -1133,6 +1122,103 @@ function TeamCard({
 
 // ── Department Card ───────────────────────────────────────────────────────────
 
+// ── Team summary card ────────────────────────────────────────────────────────
+// One compact card per team: the team's name, the team lead's photo (their Google photo once
+// they have signed in, otherwise an initial), who leads it and how many are in it. Clicking opens
+// the full team — Manager, Team Lead and every member — in a pop-up.
+
+const personName = (u: UserProfile) => u.displayNameEN || u.displayName
+
+function TeamSummaryCard({
+  team, users, accent, canManage, onOpen, onDelete,
+}: {
+  team: Team
+  users: UserProfile[]
+  accent: ReturnType<typeof deptAccent>
+  canManage: boolean
+  onOpen: () => void
+  onDelete: () => void
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const leadIds = getTeamLeadIds(team)
+  const managerIds = getTeamManagerIds(team)
+  const leads = users.filter(u => leadIds.includes(u.uid))
+  const managers = users.filter(u => managerIds.includes(u.uid))
+  const memberCount = users.filter(u => u.teamId === team.id && isRosterRole(u.role)).length
+  // The first team lead who has signed in (so has a photo) lends the card their picture.
+  const photoOwner = leads.find(u => !!u.photoURL)
+  const initialOwner = leads[0]
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
+      className="relative bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-freshket-200 hover:shadow-md transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-freshket-300"
+    >
+      <div className="flex items-start gap-3">
+        {photoOwner ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={photoOwner.photoURL ?? ''} alt={personName(photoOwner)} referrerPolicy="no-referrer"
+            className="size-12 rounded-full object-cover shrink-0 border border-gray-100" />
+        ) : (
+          <div className={`size-12 rounded-full flex items-center justify-center text-base font-bold shrink-0 ${initialOwner ? rankColor(initialOwner.rank) : 'bg-gray-100 text-gray-400'}`}>
+            {(initialOwner ? personName(initialOwner) : team.name).charAt(0)}
+          </div>
+        )}
+        <div className="min-w-0 flex-1 pr-6">
+          <h4 className="text-sm font-bold text-gray-900 break-words">{team.name}</h4>
+          <span className={`inline-flex items-center gap-1 text-xs font-normal px-2 py-0.5 rounded-full mt-1 ${accent.badge}`}>
+            <span className={`size-1.5 rounded-full ${accent.dot}`} />
+            {memberCount} member{memberCount !== 1 ? 's' : ''}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-1 text-xs">
+        <p className="text-gray-400">
+          Team Lead:{' '}
+          <span className={leads.length ? 'text-gray-700 font-bold' : 'italic'}>
+            {leads.length ? leads.map(personName).join(', ') : 'ยังไม่ได้กำหนด'}
+          </span>
+        </p>
+        <p className="text-gray-400">
+          Manager:{' '}
+          <span className={managers.length ? 'text-gray-700 font-bold' : 'italic'}>
+            {managers.length ? managers.map(personName).join(', ') : 'ยังไม่ได้กำหนด'}
+          </span>
+        </p>
+      </div>
+
+      {canManage && !confirmDelete && (
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); setConfirmDelete(true) }}
+          title="ลบทีม"
+          aria-label="ลบทีม"
+          className="absolute top-3 right-3 p-1.5 rounded-lg text-gray-300 hover:text-rose-500 hover:bg-rose-50 transition-all"
+        >
+          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+          </svg>
+        </button>
+      )}
+
+      {confirmDelete && (
+        <div className="mt-3 p-3 bg-rose-50 rounded-xl border border-rose-200 text-xs cursor-default" onClick={e => e.stopPropagation()}>
+          <p className="text-rose-700 font-bold mb-1">ลบทีม &quot;{team.name}&quot;?</p>
+          <p className="text-rose-600 mb-2">สมาชิก {memberCount} คนจะกลับไปอยู่ที่ Unassigned</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => { onDelete(); setConfirmDelete(false) }} className="px-3 py-1 bg-rose-500 text-white rounded-lg font-bold">ลบทีม</button>
+            <button type="button" onClick={() => setConfirmDelete(false)} className="px-3 py-1 bg-white border border-gray-200 text-gray-600 rounded-lg">ยกเลิก</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DeptCard({
   dept,
   deptIndex,
@@ -1173,34 +1259,21 @@ function DeptCard({
   const accent = deptAccent(deptIndex)
   const [addingTeam, setAddingTeam] = useState(false)
   const [newTeamName, setNewTeamName] = useState('')
-  const [rankFilter, setRankFilter] = useState('')
+  const [openTeamId, setOpenTeamId] = useState<string | null>(null)
 
   const manager = users.find(u => u.uid === dept.managerId)
   // Both re-filter the full roster; without memoization, local state
   // unrelated to the roster (e.g. typing a new team's name) still re-ran
   // these on every keystroke.
-  const deptTeams = useMemo(() => {
-    // Support merged departments: match teams from all source dept IDs
-    const sourceDeptIds = new Set(sourceNames.map(deptId))
-    return teams.filter(t => {
-      if (t.departmentId) return sourceDeptIds.has(t.departmentId)
-      // Orphan team (no departmentId): include if any member belongs to a source department
-      return users.some(u => u.teamId === t.id && !!u.department && sourceNames.includes(u.department))
-    })
-  }, [teams, users, sourceNames])
+  const deptTeams = useMemo(() => teamsOfDepartment(teams, users, sourceNames), [teams, users, sourceNames])
+  const openTeam = deptTeams.find(t => t.id === openTeamId)
 
-  // Members belonging to any source department — feeds both the header count
-  // and (filtered to roster roles) the rank-filter option list below.
+  // Members belonging to any source department — feeds the header count.
   const deptMembers = useMemo(
     () => users.filter(u => !!u.department && sourceNames.includes(u.department)),
     [users, sourceNames],
   )
   const deptMemberCount = useMemo(() => deptMembers.filter(u => isRosterRole(u.role)).length, [deptMembers])
-  // Only ranks present in any source department
-  const deptRanks = useMemo(
-    () => Array.from(new Set(deptMembers.map(u => u.rank).filter((r): r is string => Boolean(r)))).sort(),
-    [deptMembers],
-  )
 
   // Unassigned-in-this-dept roster, computed once instead of inside the JSX
   // IIFE below (which re-ran on every render regardless of whether teams/
@@ -1216,13 +1289,9 @@ function DeptCard({
     }),
     [users, sourceNames, deptTeamIds],
   )
-  const rankedUnassigned = useMemo(
-    () => rankFilter ? allUnassigned.filter(u => u.rank === rankFilter) : allUnassigned,
-    [allUnassigned, rankFilter],
-  )
   const visibleUnassigned = useMemo(
-    () => searchQuery ? rankedUnassigned.filter(u => matchesSearch(u, searchQuery)) : rankedUnassigned,
-    [rankedUnassigned, searchQuery],
+    () => searchQuery ? allUnassigned.filter(u => matchesSearch(u, searchQuery)) : allUnassigned,
+    [allUnassigned, searchQuery],
   )
 
   function commitAddTeam() {
@@ -1280,31 +1349,6 @@ function DeptCard({
               </div>
             )}
 
-            {/* Rank filter pills — only ranks in this dept */}
-            {deptRanks.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  onClick={() => setRankFilter('')}
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
-                    rankFilter === '' ? 'bg-freshket-100 border-freshket-300 text-freshket-700 font-bold' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
-                  }`}
-                >
-                  All
-                </button>
-                {deptRanks.map(rank => (
-                  <button
-                    key={rank}
-                    onClick={() => setRankFilter(rankFilter === rank ? '' : rank)}
-                    className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
-                      rankFilter === rank ? 'bg-freshket-100 border-freshket-300 text-freshket-700 font-bold' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
-                    }`}
-                  >
-                    {rank}
-                  </button>
-                ))}
-              </div>
-            )}
-
             {canManage && (
               <button
                 onClick={() => setAddingTeam(true)}
@@ -1338,33 +1382,22 @@ function DeptCard({
           }
         }}
       >
-        <div className="flex flex-col gap-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {deptTeams.map(t => (
-            <TeamCard
+            <TeamSummaryCard
               key={t.id}
               team={t}
               users={users}
-              allTeams={allTeams}
-              canManage={canManage}
-              showRoleBadges={showRoleBadges}
               accent={accent}
-              deptName={dept.name}
-              sourceNames={sourceNames}
-              onRename={name => onRenameTeam(t.id, name)}
+              canManage={canManage}
+              onOpen={() => setOpenTeamId(t.id)}
               onDelete={() => onDeleteTeam(t.id)}
-              onMoveUser={onMoveUser}
-              onSetTeamLeads={uids => onSetTeamLeads(t.id, uids)}
-              onSetManagers={uids => onSetManagers(t.id, uids)}
-              onOpenVisibility={onOpenVisibility}
-              onUpdateVisibility={onUpdateVisibility}
-              rankFilter={rankFilter}
-              searchQuery={searchQuery}
             />
           ))}
 
           {/* Add team inline form */}
           {addingTeam && (
-            <div className="w-full max-w-sm bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 p-4">
+            <div className="bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 p-4">
               <p className="text-xs text-gray-500 font-normal mb-2">Team name</p>
               <input
                 autoFocus
@@ -1383,7 +1416,7 @@ function DeptCard({
           )}
 
           {deptTeams.length === 0 && !addingTeam && (
-            <div className="text-center py-8 text-sm text-gray-400">
+            <div className="col-span-full text-center py-8 text-sm text-gray-400">
               No teams yet — click <span className="text-freshket-600 font-normal">Add team</span> to get started
             </div>
           )}
@@ -1391,11 +1424,48 @@ function DeptCard({
 
       </div>
 
+      {/* The full team: Manager, Team Lead and every member */}
+      {openTeam && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto" onClick={() => setOpenTeamId(null)}>
+          <div className="w-full max-w-5xl my-6 bg-slate-50 rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-white rounded-t-2xl">
+              <p className="text-sm font-bold text-gray-800">{dept.name} · {openTeam.name}</p>
+              <button type="button" onClick={() => setOpenTeamId(null)} aria-label="ปิด"
+                className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
+                <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-4">
+              <TeamCard
+                team={openTeam}
+                users={users}
+                allTeams={allTeams}
+                canManage={canManage}
+                showRoleBadges={showRoleBadges}
+                accent={accent}
+                deptName={dept.name}
+                sourceNames={sourceNames}
+                onRename={name => onRenameTeam(openTeam.id, name)}
+                onDelete={() => { onDeleteTeam(openTeam.id); setOpenTeamId(null) }}
+                onMoveUser={onMoveUser}
+                onSetTeamLeads={uids => onSetTeamLeads(openTeam.id, uids)}
+                onSetManagers={uids => onSetManagers(openTeam.id, uids)}
+                onOpenVisibility={onOpenVisibility}
+                onUpdateVisibility={onUpdateVisibility}
+                searchQuery={searchQuery}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Unassigned members in this dept */}
       {allUnassigned.length > 0 && (
         <div className="border-t border-gray-100 px-5 py-4">
           <p className="text-xs text-gray-400 font-normal mb-2">
-            Unassigned ({(rankFilter || searchQuery) ? `${visibleUnassigned.length}/${allUnassigned.length}` : allUnassigned.length})
+            Unassigned ({searchQuery ? `${visibleUnassigned.length}/${allUnassigned.length}` : allUnassigned.length})
           </p>
           <div className="flex flex-wrap gap-2">
             {visibleUnassigned.map(u => (
