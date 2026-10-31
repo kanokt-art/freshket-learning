@@ -429,9 +429,25 @@ function AddMemberDropdown({
   onClose: () => void
 }) {
   const [q, setQ] = useState('')
+  // People ticked so far; "เพิ่ม" adds them all at once.
+  const [picked, setPicked] = useState<string[]>([])
   // Org-wide, department-agnostic — a manager searches the whole employee
   // database by nickname or real name, not just people in the same department.
   const filtered = availableUsers.filter(u => !q || matchesSearch(u, q))
+  const toggle = (uid: string) => setPicked(prev => (prev.includes(uid) ? prev.filter(x => x !== uid) : [...prev, uid]))
+  const allShownPicked = filtered.length > 0 && filtered.every(u => picked.includes(u.uid))
+  function toggleAllShown() {
+    setPicked(prev => {
+      if (allShownPicked) return prev.filter(id => !filtered.some(u => u.uid === id))
+      const next = new Set(prev)
+      filtered.forEach(u => next.add(u.uid))
+      return Array.from(next)
+    })
+  }
+  function addPicked() {
+    availableUsers.filter(u => picked.includes(u.uid)).forEach(u => onAdd(u, teamId))
+    onClose()
+  }
 
   // Only when every level is already shown is an empty list truly empty; otherwise keep the
   // dropdown (and its "show all levels" switch) so the rest can be reached.
@@ -470,9 +486,19 @@ function AddMemberDropdown({
           return (
             <button
               key={u.uid}
-              onClick={() => { onAdd(u, teamId); onClose() }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 text-left"
+              type="button"
+              onClick={() => toggle(u.uid)}
+              className={`w-full flex items-center gap-2 px-3 py-1.5 text-left ${picked.includes(u.uid) ? 'bg-freshket-50' : 'hover:bg-gray-50'}`}
             >
+              <span className={`size-4 rounded border-2 flex items-center justify-center shrink-0 transition-all ${
+                picked.includes(u.uid) ? 'border-freshket-500 bg-freshket-500' : 'border-gray-300'
+              }`}>
+                {picked.includes(u.uid) && (
+                  <svg className="size-2.5 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" />
+                  </svg>
+                )}
+              </span>
               <div className="size-5 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 text-xs font-bold shrink-0">
                 {u.displayName.charAt(0)}
               </div>
@@ -485,8 +511,21 @@ function AddMemberDropdown({
         })}
         {filtered.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">No results</p>}
       </div>
-      <div className="border-t border-gray-100 px-3 py-2">
-        <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-500">Cancel</button>
+      <div className="border-t border-gray-100 px-3 py-2 space-y-2">
+        <button type="button" onClick={toggleAllShown} disabled={filtered.length === 0}
+          className="text-xs text-freshket-600 hover:underline disabled:opacity-60 disabled:no-underline disabled:cursor-not-allowed">
+          {allShownPicked ? 'ยกเลิกเลือกทั้งหมดที่แสดง' : `เลือกทั้งหมดที่แสดง (${filtered.length})`}
+        </button>
+        <div className="flex gap-2">
+          <button type="button" onClick={onClose}
+            className="flex-1 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-bold text-gray-500 hover:bg-gray-50 transition-colors">
+            Cancel
+          </button>
+          <button type="button" onClick={addPicked} disabled={picked.length === 0}
+            className="flex-1 px-3 py-1.5 rounded-lg bg-freshket-500 hover:bg-freshket-600 text-white text-xs font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
+            {picked.length > 0 ? `เพิ่ม ${picked.length} คน` : 'เพิ่ม'}
+          </button>
+        </div>
       </div>
     </div>
   )
