@@ -154,7 +154,7 @@ export default function ProfilePage() {
 
           {/* Badges — MBTI sits beside the role so both read as one cluster */}
           <div className="flex items-center justify-center gap-2 lg:ml-auto lg:shrink-0">
-            <MbtiBadge uid={user.uid} />
+            <MbtiBadge uid={user.uid} openable />
             <span className={`inline-flex items-center text-xs font-bold px-3 py-1 rounded-full border ${ROLE_BADGE[user.role] ?? 'bg-gray-100 text-gray-700 border-gray-200'}`}>
               {ROLE_LABELS[user.role]}
             </span>

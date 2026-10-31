@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { Header } from '@/components/layout/Header'
 import { authedFetch } from '@/lib/api/authedFetch'
+import { MbtiProfileContent } from '@/components/features/MbtiBadge'
 import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { matchOutcome, scoreBuckets } from '@/lib/bucketAssessments/scoreBuckets'
 import type { BucketResult } from '@/types/bucketAssessment'
@@ -155,6 +156,13 @@ export default function BucketAssessmentPage() {
               </div>
             )}
 
+            {/* The full type card — also reachable later from the MBTI pill on the profile. */}
+            {def.id === MBTI_DEFINITION.id && (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                <MbtiProfileContent code={result.code} />
+              </div>
+            )}
+
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
               <p className="text-xs font-bold text-gray-500">รายละเอียดแต่ละด้าน</p>
               {result.dimensions.map((d) => {
@@ -180,7 +188,7 @@ export default function BucketAssessmentPage() {
               <p className="text-xs text-gray-400">
                 {isPreview
                   ? 'นี่คือการทดลอง ผลไม่ถูกบันทึก'
-                  : 'ผลนี้ถูกบันทึกไว้ในโปรไฟล์ของคุณแล้ว — ทำใหม่ได้ทุกเมื่อ ผลล่าสุดจะแทนที่ผลเดิม'}
+                  : 'ผลนี้ถูกบันทึกไว้ในโปรไฟล์ของคุณแล้ว — คลิกป้าย MBTI ที่โปรไฟล์เพื่ออ่านย้อนหลังได้ · ทำใหม่ได้ทุกเมื่อ ผลล่าสุดจะแทนที่ผลเดิม'}
               </p>
             </div>
 
