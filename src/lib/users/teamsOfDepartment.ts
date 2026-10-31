@@ -6,6 +6,9 @@ export function deptId(name: string) {
   return `dept-${name.toLowerCase().replace(/[^a-z0-9ก-๙]/g, '-')}`
 }
 
+/** The Commercial org chart: Sales, Key Account, Portfolio and Commercial itself. */
+export const COMMERCIAL_FAMILY = ['Sales Management', 'Key Account Management', 'Portfolio Management', 'Commercial']
+
 /** The two departments that used to share one card; their teams carry the first one's id. */
 const FORMER_MERGE = ['Key Account Management', 'Portfolio Management']
 
@@ -40,4 +43,29 @@ export function teamsOfDepartment(teams: Team[], users: UserProfile[], sourceNam
     // Orphan team (no departmentId): include if any member belongs to a source department
     return users.some(u => u.teamId === t.id && !!u.department && sourceNames.includes(u.department))
   })
+}
+
+/** The department a team belongs to, by its stored id (sorting the former merge by its people). */
+export function teamHomeDepartment(team: Team, users: UserProfile[], fallback: string): string {
+  if (team.departmentId) {
+    const legacy = FORMER_MERGE.find(n => deptId(n) === team.departmentId)
+    if (legacy) return formerMergeHome(team, users) ?? legacy
+    const known = [...COMMERCIAL_FAMILY, 'People Experience'].find(n => deptId(n) === team.departmentId)
+    if (known) return known
+  }
+  return fallback
+}
+
+/**
+ * Whose department a person may be in to be added to a team of `home`: their own department,
+ * Commercial people into any team under Commercial, and Key Account / Portfolio teams take
+ * both of those departments. A People Experience team takes People Experience only.
+ */
+export function allowedMemberDepartments(home: string): Set<string> {
+  if (home === 'Commercial') return new Set(COMMERCIAL_FAMILY)
+  if (home === 'Key Account Management' || home === 'Portfolio Management') {
+    return new Set(['Key Account Management', 'Portfolio Management', 'Commercial'])
+  }
+  if (home === 'Sales Management') return new Set(['Sales Management', 'Commercial'])
+  return new Set([home])
 }

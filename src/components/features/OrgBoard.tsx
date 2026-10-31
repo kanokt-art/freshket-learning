@@ -6,7 +6,7 @@ import type { Department, Team, UserProfile } from '@/types/user'
 import { ROLE_LABELS, canAccess, getTeamManagerIds, getTeamLeadIds } from '@/types/user'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { canLeadAnyTeam } from '@/lib/users/teamManager'
-import { deptId, teamsOfDepartment } from '@/lib/users/teamsOfDepartment'
+import { COMMERCIAL_FAMILY, allowedMemberDepartments, deptId, teamHomeDepartment, teamsOfDepartment } from '@/lib/users/teamsOfDepartment'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -297,7 +297,7 @@ function MemberRow({
 
   return (
     <div
-      className={`inline-flex items-center gap-2 py-1.5 pl-1.5 pr-2 group/member rounded-lg border transition-all w-full sm:w-64 ${
+      className={`inline-flex items-center gap-3 py-2.5 pl-2.5 pr-3 group/member rounded-xl border transition-all w-full sm:w-80 ${
         isDragging ? 'opacity-50 bg-gray-100 border-gray-200' : 'bg-white border-gray-100 hover:border-gray-200 hover:shadow-sm'
       }`}
       ref={ref}
@@ -309,7 +309,7 @@ function MemberRow({
       }}
       onDragEnd={() => setIsDragging(false)}
     >
-      <div className={`size-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${canEdit ? 'cursor-grab active:cursor-grabbing' : ''} ${rankColor(user.rank)}`}>
+      <div className={`size-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${canEdit ? 'cursor-grab active:cursor-grabbing' : ''} ${rankColor(user.rank)}`}>
         {(user.displayNameEN || user.displayName).charAt(0)}
       </div>
       <button
@@ -318,7 +318,7 @@ function MemberRow({
         title="ดูผลการเรียน"
         className="flex-1 min-w-0 text-left"
       >
-        <p className="text-xs font-medium text-gray-700 break-words hover:text-freshket-600 hover:underline">
+        <p className="text-sm font-medium text-gray-800 break-words hover:text-freshket-600 hover:underline">
           {user.displayNameEN || user.displayName}
           {user.nickname && <span className="text-gray-400 font-normal ml-1">({user.nickname})</span>}
         </p>
@@ -330,7 +330,7 @@ function MemberRow({
           {showRoleBadges && (isManager || isTeamLead) && (
             <RolePill role={isManager ? 'manager' : 'teamLead'} />
           )}
-          {user.position && <p className="text-xs text-gray-400 break-words">{user.position}</p>}
+          {user.position && <p className="text-xs text-gray-500 break-words">{user.position}</p>}
         </div>
       </button>
       {canEdit && (
@@ -490,6 +490,7 @@ function TeamCard({
   accent,
   deptName,
   sourceNames,
+  homeDept,
   onRename,
   onDelete,
   onMoveUser,
@@ -507,6 +508,8 @@ function TeamCard({
   accent: ReturnType<typeof deptAccent>
   deptName: string
   sourceNames: string[]
+  /** The department this team belongs to (decides who the add-member picker offers). */
+  homeDept: string
   onRename: (name: string) => void
   onDelete: () => void
   onMoveUser: (uid: string, teamId: string | undefined) => void
@@ -521,14 +524,18 @@ function TeamCard({
   const canEdit = canManage && editMode
   const [editingName, setEditingName] = useState(false)
   const [nameVal, setNameVal] = useState(team.name)
-  const [showAddMember, setShowAddMember] = useState(false)
-  const [showTLPicker, setShowTLPicker] = useState(false)
+  // One picker open at a time: opening Add member, Team Lead or Manager closes the other two,
+  // so panels never stack on top of each other.
+  const [picker, setPicker] = useState<'member' | 'teamLead' | 'manager' | null>(null)
+  const showAddMember = picker === 'member'
+  const showTLPicker = picker === 'teamLead'
+  const showManagerPicker = picker === 'manager'
+  const togglePicker = (which: 'member' | 'teamLead' | 'manager') => setPicker(cur => (cur === which ? null : which))
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
   const [dragOverMembers, setDragOverMembers] = useState(false)
   const [dragOverTL, setDragOverTL] = useState(false)
   const [dragOverManager, setDragOverManager] = useState(false)
-  const [showManagerPicker, setShowManagerPicker] = useState(false)
   const [selManagers, setSelManagers] = useState<string[]>([])
   const [selTeamLeads, setSelTeamLeads] = useState<string[]>([])
 
@@ -554,17 +561,24 @@ function TeamCard({
   // sale rep can only ever be on one team), so picking someone from another
   // team here is a move, not a duplicate assignment — AddMemberDropdown
   // surfaces their current team so that's not a surprise.
+  // Own department only — plus Commercial into any team under Commercial, and Key Account and
+  // Portfolio teams see each other's people.
+  const allowedDepts = useMemo(() => allowedMemberDepartments(homeDept), [homeDept])
+  const inAllowedDept = useMemo(
+    () => (u: UserProfile) => inTargetDept(u) && allowedDepts.has(u.department ?? ''),
+    [allowedDepts],
+  )
   const eligibleSale = useMemo(
-    () => users.filter(u => u.role === 'sale' && u.teamId !== team.id && inTargetDept(u)),
-    [users, team.id],
+    () => users.filter(u => u.role === 'sale' && u.teamId !== team.id && inAllowedDept(u)),
+    [users, team.id, inAllowedDept],
   )
   const availableHigherRoles = useMemo(
     () => users.filter(u =>
       (u.role === 'team_lead' || u.role === 'manager') &&
-      inTargetDept(u) &&
+      inAllowedDept(u) &&
       !(u.visibleTeamIds ?? []).includes(team.id)
     ),
-    [users, team.id],
+    [users, team.id, inAllowedDept],
   )
   const availableForAdd = useMemo(
     () => [...eligibleSale, ...availableHigherRoles],
@@ -634,7 +648,7 @@ function TeamCard({
             />
           ) : (
             <div className="flex items-center gap-1.5 group/name">
-              <h4 className="text-sm font-bold text-gray-900 truncate">{team.name}</h4>
+              <h4 className="text-base font-bold text-gray-900 truncate">{team.name}</h4>
               {canEdit && (
                 <button
                   onClick={() => setEditingName(true)}
@@ -732,7 +746,7 @@ function TeamCard({
       <div className="flex flex-col lg:flex-row lg:items-stretch gap-4">
 
       {/* Leadership — Manager above Team Lead */}
-      <div className="lg:w-64 lg:shrink-0 lg:border-r lg:border-gray-100 lg:pr-4 flex flex-col gap-3">
+      <div className="lg:w-72 lg:shrink-0 lg:border-r lg:border-gray-100 lg:pr-4 flex flex-col gap-3">
 
       {/* Manager */}
       <div>
@@ -813,7 +827,7 @@ function TeamCard({
         )}
         {canEdit && (
           <button
-            onClick={() => { setSelManagers(managerIds); setShowManagerPicker(v => !v) }}
+            onClick={() => { setSelManagers(managerIds); togglePicker('manager') }}
             className="text-xs text-purple-600 hover:underline mt-1.5 block"
           >
             + Assign
@@ -863,14 +877,14 @@ function TeamCard({
             <div className="flex gap-2 p-2 border-t border-gray-100">
               <button
                 type="button"
-                onClick={() => setShowManagerPicker(false)}
+                onClick={() => setPicker(null)}
                 className="flex-1 px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 font-bold hover:bg-gray-50 transition-colors"
               >
                 ยกเลิก
               </button>
               <button
                 type="button"
-                onClick={() => { onSetManagers(selManagers); setShowManagerPicker(false) }}
+                onClick={() => { onSetManagers(selManagers); setPicker(null) }}
                 className="flex-1 px-3 py-1.5 rounded-lg bg-purple-500 text-white font-bold hover:bg-purple-600 transition-colors"
               >
                 Confirm
@@ -969,7 +983,7 @@ function TeamCard({
         )}
         {canEdit && (
           <button
-            onClick={() => { setSelTeamLeads(teamLeadIds); setShowTLPicker(v => !v) }}
+            onClick={() => { setSelTeamLeads(teamLeadIds); togglePicker('teamLead') }}
             className="text-xs text-freshket-600 hover:underline mt-1.5 block"
           >
             + Set
@@ -1019,14 +1033,14 @@ function TeamCard({
             <div className="flex gap-2 p-2 border-t border-gray-100">
               <button
                 type="button"
-                onClick={() => setShowTLPicker(false)}
+                onClick={() => setPicker(null)}
                 className="flex-1 px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 font-bold hover:bg-gray-50 transition-colors"
               >
                 ยกเลิก
               </button>
               <button
                 type="button"
-                onClick={() => { onSetTeamLeads(selTeamLeads); setShowTLPicker(false) }}
+                onClick={() => { onSetTeamLeads(selTeamLeads); setPicker(null) }}
                 className="flex-1 px-3 py-1.5 rounded-lg bg-blue-500 text-white font-bold hover:bg-blue-600 transition-colors"
               >
                 Confirm
@@ -1093,7 +1107,7 @@ function TeamCard({
       {canEdit && (
         <div>
           <button
-            onClick={() => setShowAddMember(!showAddMember)}
+            onClick={() => togglePicker('member')}
             className="flex items-center gap-1.5 text-xs text-freshket-600 hover:text-freshket-700 font-normal mt-1 transition-colors"
           >
             <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
@@ -1107,7 +1121,7 @@ function TeamCard({
               availableUsers={availableForAdd}
               allTeams={allTeams}
               onAdd={handleAddMember}
-              onClose={() => setShowAddMember(false)}
+              onClose={() => setPicker(null)}
             />
           )}
         </div>
@@ -1275,25 +1289,6 @@ function DeptCard({
   )
   const deptMemberCount = useMemo(() => deptMembers.filter(u => isRosterRole(u.role)).length, [deptMembers])
 
-  // Unassigned-in-this-dept roster, computed once instead of inside the JSX
-  // IIFE below (which re-ran on every render regardless of whether teams/
-  // users/filters actually changed).
-  const deptTeamIds = useMemo(() => new Set(deptTeams.map(t => t.id)), [deptTeams])
-  const allUnassigned = useMemo(
-    () => users.filter(u => {
-      if (!u.department || !sourceNames.includes(u.department)) return false
-      if (!isRosterRole(u.role)) return false
-      if (!u.teamId) return true
-      // Show if their team is not visible in this card (orphan, wrong dept, or deleted team)
-      return !deptTeamIds.has(u.teamId)
-    }),
-    [users, sourceNames, deptTeamIds],
-  )
-  const visibleUnassigned = useMemo(
-    () => searchQuery ? allUnassigned.filter(u => matchesSearch(u, searchQuery)) : allUnassigned,
-    [allUnassigned, searchQuery],
-  )
-
   function commitAddTeam() {
     if (newTeamName.trim()) {
       onAddTeam(dept.id, newTeamName.trim())
@@ -1427,9 +1422,9 @@ function DeptCard({
       {/* The full team: Manager, Team Lead and every member */}
       {openTeam && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto" onClick={() => setOpenTeamId(null)}>
-          <div className="w-full max-w-5xl my-6 bg-slate-50 rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-7xl my-6 bg-slate-50 rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-white rounded-t-2xl">
-              <p className="text-sm font-bold text-gray-800">{dept.name} · {openTeam.name}</p>
+              <p className="text-base font-bold text-gray-800">{dept.name} · {openTeam.name}</p>
               <button type="button" onClick={() => setOpenTeamId(null)} aria-label="ปิด"
                 className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
                 <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -1447,6 +1442,7 @@ function DeptCard({
                 accent={accent}
                 deptName={dept.name}
                 sourceNames={sourceNames}
+                homeDept={teamHomeDepartment(openTeam, users, sourceNames[0])}
                 onRename={name => onRenameTeam(openTeam.id, name)}
                 onDelete={() => { onDeleteTeam(openTeam.id); setOpenTeamId(null) }}
                 onMoveUser={onMoveUser}
@@ -1461,40 +1457,6 @@ function DeptCard({
         </div>
       )}
 
-      {/* Unassigned members in this dept */}
-      {allUnassigned.length > 0 && (
-        <div className="border-t border-gray-100 px-5 py-4">
-          <p className="text-xs text-gray-400 font-normal mb-2">
-            Unassigned ({searchQuery ? `${visibleUnassigned.length}/${allUnassigned.length}` : allUnassigned.length})
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {visibleUnassigned.map(u => (
-              <div
-                key={u.uid}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('userId', u.uid)
-                  e.dataTransfer.effectAllowed = 'move'
-                }}
-                className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 cursor-grab active:cursor-grabbing hover:shadow-md hover:border-freshket-200 transition-all"
-              >
-                <span className={`size-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${rankColor(u.rank)}`}>
-                  {(u.displayNameEN || u.displayName).charAt(0)}
-                </span>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-gray-800 truncate">{u.displayNameEN || u.displayName}</p>
-                  <div className="flex items-center gap-1 min-w-0">
-                    {u.rank && (
-                      <span className={`shrink-0 text-xs font-bold px-1.5 py-0.5 rounded-full ${rankColor(u.rank)}`}>{u.rank}</span>
-                    )}
-                    {u.nickname && <p className="text-xs text-gray-400 truncate">{u.nickname}</p>}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -1539,7 +1501,8 @@ export function OrgBoard({
           })
         }
       } else {
-        result.push({ dept, sourceNames: [dept.name] })
+        // The Commercial tab is the Commercial org chart: Sales, Key Account and Portfolio teams too.
+        result.push({ dept, sourceNames: dept.name === 'Commercial' ? COMMERCIAL_FAMILY : [dept.name] })
       }
     }
     return result
