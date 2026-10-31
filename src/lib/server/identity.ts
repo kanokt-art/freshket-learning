@@ -24,6 +24,7 @@
 import { ROLES, type Doc } from './docMap'
 import { StoreError, type Store } from './store'
 import type { Role } from './policies'
+import { roleWithHeadFloor } from '@/lib/users/departmentHead'
 
 /** What a verified Firebase ID token tells us. Verification itself happens before this. */
 export interface VerifiedToken {
@@ -76,7 +77,10 @@ function preferred<T extends Doc>(rows: T[]): T {
   )[0]
 }
 
-const asPerson = (row: Doc & { authUid?: string }): Person => ({ ...row, role: toRole(row.role) }) as Person
+// A department head (JG11+) is at least a manager: see roleWithHeadFloor. Every gate and the session
+// answer start from this person, so the server and the browser agree on the role.
+const asPerson = (row: Doc & { authUid?: string }): Person =>
+  ({ ...row, role: roleWithHeadFloor(toRole(row.role), row as never) }) as Person
 
 export async function resolvePerson(
   store: IdentityStore,

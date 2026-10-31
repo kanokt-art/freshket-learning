@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isDepartmentHead, levelOf, departmentScope } from '@/lib/users/departmentHead'
+import { isDepartmentHead, levelOf, departmentScope, roleWithHeadFloor } from '@/lib/users/departmentHead'
 import { managedMembers, managedTeamIds } from '@/lib/users/managedMembers'
 import type { Team, UserProfile } from '@/types/user'
 
@@ -66,5 +66,26 @@ describe('what a department head sees', () => {
   it('gives a plain Manager nothing they were not assigned', () => {
     const manager = user({ uid: 'm', role: 'manager', rank: 'Manager' })
     expect(Array.from(managedTeamIds(manager, [manager, ...people], teams))).toEqual([])
+  })
+})
+
+describe('the role a department head acts under', () => {
+  const headFields = { rank: 'Head of', position: 'Head of People Experience', department: 'People Experience' }
+
+  it('is at least manager, set automatically', () => {
+    expect(roleWithHeadFloor('sale', headFields)).toBe('manager')
+    expect(roleWithHeadFloor('team_lead', headFields)).toBe('manager')
+    expect(roleWithHeadFloor('manager', headFields)).toBe('manager')
+  })
+
+  it('never lifts anyone to super_admin, and leaves a super_admin alone', () => {
+    expect(roleWithHeadFloor('super_admin', headFields)).toBe('super_admin')
+    expect(roleWithHeadFloor('sale', headFields)).not.toBe('super_admin')
+  })
+
+  it('leaves everyone who is not a head as they are', () => {
+    expect(roleWithHeadFloor('sale', { ...headFields, rank: 'Manager', position: 'People Manager' })).toBe('sale')
+    expect(roleWithHeadFloor('sale', { ...headFields, employmentStatus: 'Resigned' })).toBe('sale')
+    expect(roleWithHeadFloor('sale', { ...headFields, department: 'Marketing' })).toBe('sale')
   })
 })

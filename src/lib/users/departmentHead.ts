@@ -35,6 +35,19 @@ export function isDepartmentHead(
   return levelOf(u) >= DEPT_HEAD_GRADE
 }
 
+/**
+ * The role a person acts under. A department head (JG11+) is always at least a manager: they sit at
+ * the top of their department's team structure, so the app gives them manager access without anyone
+ * setting it. It is worked out from level and department each time, not written to their record,
+ * so it follows them if they move or leave. Never lifts anyone to super_admin.
+ */
+export function roleWithHeadFloor<R extends string>(
+  role: R,
+  u: Pick<UserProfile, 'rank' | 'position' | 'department' | 'employmentStatus'>,
+): R | 'manager' {
+  return (role === 'sale' || role === 'team_lead') && isDepartmentHead(u) ? 'manager' : role
+}
+
 /** The departments a head of `department` covers: Commercial covers the whole Commercial org chart. */
 export function departmentScope(department: string): string[] {
   return department === 'Commercial' ? COMMERCIAL_FAMILY : [department]
