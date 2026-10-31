@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { isDepartmentHead, levelOf, departmentScope, roleWithHeadFloor } from '@/lib/users/departmentHead'
-import { managedMembers, managedTeamIds } from '@/lib/users/managedMembers'
+import { managedMembers, managedTeamIds, canViewEmployeeReport } from '@/lib/users/managedMembers'
 import type { Team, UserProfile } from '@/types/user'
 
 const user = (over: Record<string, unknown>) =>
   ({ uid: 'u', role: 'sale', department: 'People Experience', ...over }) as unknown as UserProfile
-const team = (id: string, departmentId: string) => ({ id, name: id, departmentId }) as unknown as Team
+const team = (id: string, departmentId: string, extra: Record<string, unknown> = {}) => ({ id, name: id, departmentId, ...extra }) as unknown as Team
 
 describe('department head', () => {
   it('is anyone active at Head of Department level or above in a rollout department', () => {
@@ -126,5 +126,41 @@ describe('a super_admin who works in a team', () => {
   it('does not change what a manager is told about the admin: only the person is listed', () => {
     const [kanok] = managedMembers(asLead, [asLead, admin], teams)
     expect(kanok.uid).toBe('kanok')
+  })
+})
+
+describe('who may open an employee report', () => {
+  const teams = [
+    team('t1', 'dept-sales-management', { teamLeadIds: ['lead'], managerIds: ['mgr'] }),
+    team('t2', 'dept-sales-management', { teamLeadIds: ['other-lead'] }),
+  ]
+  const target = user({ uid: 'emp', department: 'Sales Management', teamId: 't1', rank: 'Staff' })
+  const lead = user({ uid: 'lead', role: 'team_lead', department: 'Sales Management', rank: 'JG6' })
+  const mgr = user({ uid: 'mgr', role: 'manager', department: 'Sales Management', rank: 'JG9' })
+  const otherLead = user({ uid: 'other-lead', role: 'team_lead', department: 'Sales Management', rank: 'JG6' })
+  const salesHead = user({ uid: 'shead', role: 'manager', department: 'Sales Management', rank: 'Head of' })
+  const peopleHead = user({ uid: 'phead', role: 'manager', department: 'People Experience', rank: 'Head of' })
+  const colleague = user({ uid: 'col', department: 'Sales Management', teamId: 't1', rank: 'Staff' })
+  const everyone = [target, lead, mgr, otherLead, salesHead, peopleHead, colleague]
+  const can = (v: UserProfile) => canViewEmployeeReport(v, target, everyone, teams)
+
+  it('lets in the Team Lead and Manager of their team, their department head, themself and a super_admin', () => {
+    expect(can(lead)).toBe(true)
+    expect(can(mgr)).toBe(true)
+    expect(can(salesHead)).toBe(true)
+    expect(can(target)).toBe(true)
+    expect(can(user({ uid: 'admin', role: 'super_admin' }))).toBe(true)
+  })
+
+  it('turns away everyone else: another team lead, another department head, a colleague, an ordinary employee', () => {
+    expect(can(otherLead)).toBe(false)
+    expect(can(peopleHead)).toBe(false)
+    expect(can(colleague)).toBe(false)
+    expect(can(user({ uid: 'nobody' }))).toBe(false)
+  })
+
+  it('still lets the people responsible read the history of someone who has resigned', () => {
+    const gone = { ...target, employmentStatus: 'Resigned' } as UserProfile
+    expect(canViewEmployeeReport(lead, gone, [gone, lead], teams)).toBe(true)
   })
 })

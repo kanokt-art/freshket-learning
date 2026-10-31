@@ -10,6 +10,7 @@ import { canAccess, type UserRole } from '@/types/user'
 import { functionalRole, FUNCTIONAL_ROLE_LABELS, type FunctionalRole } from '@/lib/users/functionalRole'
 import { formatTenure } from '@/lib/users/tenure'
 import { HoverCopy } from '@/components/common/EmployeeCells'
+import { canViewEmployeeReport } from '@/lib/users/managedMembers'
 import { STATUS_LABELS, STATUS_COLORS } from '@/types/tracking'
 import { formatDate } from '@/lib/utils/dateFormatter'
 import { getDemoMode } from '@/lib/demo/demoMode'
@@ -99,13 +100,19 @@ export default function UserReportPage() {
   //
   // The early return below still runs on the SAME render, so an unauthorized
   // viewer never sees the page: the effect only schedules the navigation.
-  useEffect(() => {
-    if (!allowed) router.replace('/sale')
-  }, [allowed, router])
-
-  if (!allowed) return null
-
+  // Beyond the role: only the people above this person in team management (their Team Lead / Manager,
+  // their department's head) and a super_admin may open the report. Anyone else — including someone
+  // who was sent the link — goes back to the home page. Judged only once the roster and teams are in.
   const loading = usersLoading || recordsLoading
+  const related = !!profile && canViewEmployeeReport(user, profile, allUsers, teams)
+  const denied = allowed && !loading && !!profile && !related
+
+  useEffect(() => {
+    if (!allowed || denied) router.replace('/sale')
+  }, [allowed, denied, router])
+
+  if (!allowed || denied) return null
+
 
   // Training stats
   const completed = records.filter((r) => r.status === 'completed').length

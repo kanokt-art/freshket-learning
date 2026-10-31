@@ -24,6 +24,43 @@ export function managedTeamIds(user: Viewer, allUsers: readonly UserProfile[], t
 }
 
 /**
+ * May this viewer open this person's report (profile, training record, role play, shadow)? Only the
+ * people above them in team management: the Team Lead or Manager of their team (or someone an admin
+ * granted that team), or the head of their department — plus the person themself and a super_admin.
+ * Everyone else, including any ordinary employee, is turned away.
+ *
+ * Unlike the team lists, this does not hide someone who has resigned: their history stays readable by
+ * the people who were responsible for them.
+ */
+export function canViewEmployeeReport(
+  viewer: Viewer | null | undefined,
+  target: UserProfile,
+  _allUsers: readonly UserProfile[],
+  teams: readonly Team[],
+): boolean {
+  if (!viewer) return false
+  if (viewer.role === 'super_admin') return true
+  if (viewer.uid === target.uid) return true
+
+  // Their Team Lead or Manager as set in team management, or a team an admin granted the viewer.
+  // (Not simply "on the same team": a colleague is not responsible for them.)
+  const tid = target.teamId
+  const inCharge = !!tid && (
+    teams.some((t) => t.id === tid && (getTeamManagerIds(t).includes(viewer.uid) || getTeamLeadIds(t).includes(viewer.uid))) ||
+    (viewer.visibleTeamIds ?? []).includes(tid)
+  )
+  // Only people at or below the viewer's level (a super_admin who works in the team counts by HR level).
+  const below = target.role === 'super_admin' ? levelOf(target) < levelOf(viewer) : canViewByLevel(viewer, target)
+  if (inCharge && below) return true
+
+  // The head of their department sees everyone in it, at or below the head's level.
+  if (isDepartmentHead(viewer) && viewer.department && !!target.department) {
+    return departmentScope(viewer.department).includes(target.department) && levelOf(target) <= levelOf(viewer)
+  }
+  return false
+}
+
+/**
  * The people a team lead / manager is responsible for: members of the teams they
  * lead or manage (plus any explicit visibleTeamIds and their own team), at or
  * below their own level. Used wherever "my team's report" is shown, so the home
@@ -45,7 +82,7 @@ export function managedMembers(
     .filter((u) => isActiveEmployee(u) && !isExcludedPosition(u.position))
 }
 
-function managedMembersUnfiltered(
+export function managedMembersUnfiltered(
   user: Viewer,
   allUsers: readonly UserProfile[],
   teams: readonly Team[],
