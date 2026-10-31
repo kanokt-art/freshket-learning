@@ -2,6 +2,7 @@
 
 import { formatPersonName } from '@/lib/users/displayName'
 import { isActiveEmployee } from '@/lib/users/active'
+import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
@@ -322,12 +323,15 @@ function LiveImpersonator() {
   const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
-  // Group real users by the role they hold, once. Only people still employed: someone
-  // who has resigned keeps their role on file but is not someone to view the app as.
+  // Group real users by the role they hold, once. Only people still employed (someone who has
+  // resigned keeps their role on file but is not someone to view the app as) and only in the
+  // departments of the current rollout, like every other people list.
   // Sorted by the name as it is shown (Firstname (Nickname) Lastname, in English).
   const usersByRole = useMemo(() => {
     const map: Record<string, UserProfile[]> = {}
-    for (const u of allUsers) if (isActiveEmployee(u)) (map[u.role] ??= []).push(u)
+    for (const u of allUsers) {
+      if (isActiveEmployee(u) && !!u.department && PHASE1_DEPARTMENTS.has(u.department)) (map[u.role] ??= []).push(u)
+    }
     for (const k of Object.keys(map)) {
       map[k].sort((a, b) => formatPersonName(a).localeCompare(formatPersonName(b)))
     }
