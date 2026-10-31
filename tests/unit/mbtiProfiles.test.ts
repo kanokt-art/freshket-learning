@@ -22,3 +22,9 @@ describe('MBTI type cards', () => {
     expect(getMbtiProfile(undefined)).toBeUndefined()
   })
 })
+
+describe('the MBTI result carries no sales-flavoured work text', () => {
+  it('has no per-type "detail" (the type card has its own work section)', () => {
+    for (const o of MBTI_DEFINITION.outcomes) expect((o as { detail?: string }).detail, o.code).toBeUndefined()
+  })
+})
