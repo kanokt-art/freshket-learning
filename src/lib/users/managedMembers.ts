@@ -52,7 +52,12 @@ function managedMembersUnfiltered(
 ): UserProfile[] {
   const managed = managedTeamIds(user, allUsers, teams)
   // Only members at or below the viewer's level (a team_lead never sees the manager).
-  const byTeam = allUsers.filter((u) => u.uid !== user.uid && u.teamId && managed.has(u.teamId) && canViewByLevel(user, u))
+  // A super_admin who works in the team (Kanok, in People) is a member like any other to the manager
+  // above them: seen by HR level, not turned away because the app role "super_admin" outranks
+  // "manager". Only the person, never anything of the admin side — that stays out of these views.
+  const canSee = (u: UserProfile) =>
+    u.role === 'super_admin' && user.role !== 'super_admin' ? levelOf(u) < levelOf(user) : canViewByLevel(user, u)
+  const byTeam = allUsers.filter((u) => u.uid !== user.uid && u.teamId && managed.has(u.teamId) && canSee(u))
   if (!isDepartmentHead(user) || !user.department) return byTeam
 
   const scope = new Set(departmentScope(user.department))

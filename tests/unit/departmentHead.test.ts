@@ -106,3 +106,25 @@ describe('who a team view leaves out', () => {
     expect(managedMembers(lead, roster, teams).map(u => u.uid)).toEqual(['ok'])
   })
 })
+
+describe('a super_admin who works in a team', () => {
+  const teams = [team('t1', 'dept-people-experience')]
+  const manager = user({ uid: 'por', role: 'manager', rank: 'JG9', position: 'Learning & OD Manager' })
+  const admin = user({ uid: 'kanok', role: 'super_admin', rank: 'Senior Staff', teamId: 't1' })
+  const peer = user({ uid: 'peer', teamId: 't1', rank: 'Staff' })
+  const asLead = { ...manager, teamId: 't1' } as UserProfile
+
+  it('is listed for the manager above them, by HR level', () => {
+    expect(managedMembers(asLead, [asLead, admin, peer], teams).map(u => u.uid).sort()).toEqual(['kanok', 'peer'])
+  })
+
+  it('is not listed for someone at or below their level', () => {
+    const junior = user({ uid: 'jr', role: 'team_lead', rank: 'Senior Staff', teamId: 't1' })
+    expect(managedMembers(junior, [junior, admin], teams).map(u => u.uid)).toEqual([])
+  })
+
+  it('does not change what a manager is told about the admin: only the person is listed', () => {
+    const [kanok] = managedMembers(asLead, [asLead, admin], teams)
+    expect(kanok.uid).toBe('kanok')
+  })
+})
