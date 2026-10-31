@@ -311,7 +311,7 @@ export default function CoursesPage() {
   // Quick publish/unpublish from the overview modal's Settings tab — bypasses
   // the full edit form but still runs the Firestore write and the same
   // notify-on-publish rules as a normal save (via notifyCoursePublishChanges).
-  async function handleTogglePublish(course: Course) {
+  async function handleTogglePublish(course: Course, reopenOverview = true) {
     const now = new Date()
     const updated: Course = { ...course, isPublished: !course.isPublished, updatedAt: now }
     if (DEMO_MODE) {
@@ -324,7 +324,28 @@ export default function CoursesPage() {
       setLocalUpdated((p) => ({ ...p, [course.id]: updated }))
     }
     notifyCoursePublishChanges(updated, course.isPublished, course.assignedUserIds, allUsers, allTrainingRecords, user?.uid)
-    setLearnerResultsCourse(updated)
+    if (reopenOverview) setLearnerResultsCourse(updated)
+  }
+
+  // Close or reopen a course for learners, after saying what it does. Closing hides it from EVERY
+  // learner — not yet started, in progress or finished — until it is published again; their records
+  // and scores are kept and come back with it.
+  async function togglePublishWithConfirm(course: Course, reopenOverview = false) {
+    const learners = enrollmentByCourseid[course.id]?.enrolled ?? 0
+    const yes = course.isPublished
+      ? await confirmAction({
+          title: 'ปิดการเผยแพร่หลักสูตรนี้?',
+          text: `ผู้เรียนทุกคน ทั้งที่ยังไม่เริ่ม กำลังเรียน และเรียนจบแล้ว จะไม่เห็นหลักสูตร "${course.title}" อีก จนกว่าจะเผยแพร่ใหม่ ประวัติและคะแนนของผู้เรียน${learners > 0 ? ` ${learners} คน` : ''}ยังอยู่ครบ และกลับมาเห็นเมื่อเผยแพร่อีกครั้ง`,
+          confirmText: 'ปิดการเผยแพร่',
+          danger: true,
+        })
+      : await confirmAction({
+          title: 'เผยแพร่หลักสูตรอีกครั้ง?',
+          text: `ผู้เรียนที่เกี่ยวข้องจะเห็นหลักสูตร "${course.title}" อีกครั้ง พร้อมความคืบหน้าเดิมของแต่ละคน`,
+          confirmText: 'เผยแพร่',
+        })
+    if (!yes) return
+    await handleTogglePublish(course, reopenOverview)
   }
 
   async function handleDelete(course: Course) {
@@ -545,6 +566,7 @@ export default function CoursesPage() {
                   allUsers={allUsers}
                   onEdit={() => setEditingCourse(course)}
                   onDelete={() => setConfirmDelete(course)}
+                  onTogglePublish={() => void togglePublishWithConfirm(course)}
                   onView={() => setLearnerResultsCourse(course)}
                   onClick={() => router.push(`/courses/${course.id}`)}
                 />
@@ -560,6 +582,7 @@ export default function CoursesPage() {
               enrollmentByCourseid={enrollmentByCourseid}
               onEdit={(course) => setEditingCourse(course)}
               onDelete={(course) => setConfirmDelete(course)}
+              onTogglePublish={(course) => void togglePublishWithConfirm(course)}
               onViewLearners={(course) => setLearnerResultsCourse(course)}
               onNavigate={(course) => router.push(`/courses/${course.id}`)}
             />
@@ -600,7 +623,7 @@ export default function CoursesPage() {
           allUsers={allUsers}
           allTrainingRecords={allTrainingRecords}
           onClose={() => setLearnerResultsCourse(null)}
-          onTogglePublish={() => handleTogglePublish(learnerResultsCourse)}
+          onTogglePublish={() => togglePublishWithConfirm(learnerResultsCourse, true)}
         />
       )}
 
@@ -683,10 +706,10 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
   )
 }
 
-function CourseCard({ course, status, isSuperAdmin, allAssessments, allUsers, onEdit, onDelete, onView, onClick }: {
+function CourseCard({ course, status, isSuperAdmin, allAssessments, allUsers, onEdit, onDelete, onTogglePublish, onView, onClick }: {
   course: Course; status?: TrainingStatus; isSuperAdmin: boolean
   allAssessments: Assessment[]; allUsers: UserProfile[]
-  onEdit: () => void; onDelete: () => void; onView: () => void; onClick: () => void
+  onEdit: () => void; onDelete: () => void; onTogglePublish: () => void; onView: () => void; onClick: () => void
 }) {
   const gradient = CAT_GRADIENT[course.category]
   const resolvedStatus = status ?? 'not_started'
@@ -729,6 +752,19 @@ function CourseCard({ course, status, isSuperAdmin, allAssessments, allUsers, on
             <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
             </svg>
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); onTogglePublish() }}
+            className={`absolute top-2.5 left-28 z-10 size-8 flex items-center justify-center rounded-full bg-white/90 backdrop-blur-sm shadow-sm transition-all duration-150 opacity-0 group-hover:opacity-100 ${course.isPublished ? 'text-gray-600 hover:bg-amber-500 hover:text-white' : 'text-amber-600 hover:bg-freshket-500 hover:text-white'}`}
+            title={course.isPublished ? 'ปิดการเผยแพร่' : 'เผยแพร่อีกครั้ง'}>
+            {course.isPublished ? (
+              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+            </svg>
+            ) : (
+              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5v-9m0 0l-3.5 3.5M12 7.5l3.5 3.5M4.5 19.5h15" />
+            </svg>
+            )}
           </button>
         </>
       )}
@@ -805,11 +841,11 @@ function CourseCard({ course, status, isSuperAdmin, allAssessments, allUsers, on
 }
 
 // ── Course Table (list view) ────────────────────────────────────────────────────
-function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMap = {}, enrollmentByCourseid, onEdit, onDelete, onViewLearners, onNavigate }: {
+function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMap = {}, enrollmentByCourseid, onEdit, onDelete, onTogglePublish, onViewLearners, onNavigate }: {
   courses: Course[]; allAssessments: Assessment[]; allUsers: UserProfile[]; isSuperAdmin: boolean
   recordMap?: Record<string, TrainingStatus>
   enrollmentByCourseid: Record<string, { enrolled: number; completed: number; in_progress: number }>
-  onEdit: (c: Course) => void; onDelete: (c: Course) => void; onViewLearners: (c: Course) => void; onNavigate: (c: Course) => void
+  onEdit: (c: Course) => void; onDelete: (c: Course) => void; onTogglePublish: (c: Course) => void; onViewLearners: (c: Course) => void; onNavigate: (c: Course) => void
 }) {
   // Learners get a clean, read-only list — no authoring/publish/enrolment columns
   // and no edit/delete. They only see the course, its category, and their own
@@ -917,8 +953,9 @@ function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMa
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <div className="flex items-center gap-1.5">
-                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${course.isPublished ? 'bg-freshket-100 text-freshket-700' : 'bg-gray-100 text-gray-500'}`}>
-                      {course.isPublished ? 'เผยแพร่แล้ว' : 'ร่าง'}
+                    {/* "ปิดเผยแพร่" = was open to learners (has records) and is now closed; "ร่าง" = never opened. */}
+                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${course.isPublished ? 'bg-freshket-100 text-freshket-700' : rec.enrolled > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
+                      {course.isPublished ? 'เผยแพร่แล้ว' : rec.enrolled > 0 ? 'ปิดเผยแพร่' : 'ร่าง'}
                     </span>
                     {isSuperAdmin && (
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
@@ -928,6 +965,18 @@ function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMa
                             <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                           </svg>
+                        </button>
+                        <button type="button" title={course.isPublished ? 'ปิดการเผยแพร่' : 'เผยแพร่อีกครั้ง'} onClick={(e) => { e.stopPropagation(); onTogglePublish(course) }}
+                          className={`size-7 flex items-center justify-center rounded-lg border border-gray-200 transition-all ${course.isPublished ? 'text-gray-400 hover:bg-amber-500 hover:text-white hover:border-amber-500' : 'text-amber-600 hover:bg-freshket-500 hover:text-white hover:border-freshket-500'}`}>
+                          {course.isPublished ? (
+                            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                            </svg>
+                          ) : (
+                            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5v-9m0 0l-3.5 3.5M12 7.5l3.5 3.5M4.5 19.5h15" />
+                            </svg>
+                          )}
                         </button>
                         <button type="button" title="ลบหลักสูตร" onClick={(e) => { e.stopPropagation(); onDelete(course) }}
                           className="size-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-rose-500 hover:text-white hover:border-rose-500 transition-all">
@@ -1180,7 +1229,7 @@ function CourseOverviewModal({ course, allUsers, allTrainingRecords, onClose, on
               <div className="min-w-0 pr-4">
                 <p className="text-sm font-bold text-gray-900">เผยแพร่หลักสูตร</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {course.isPublished ? 'ผู้เรียนที่เกี่ยวข้องมองเห็นคอร์สนี้อยู่' : 'ซ่อนจากผู้เรียน (สถานะร่าง)'}
+                  {course.isPublished ? 'ผู้เรียนที่เกี่ยวข้องมองเห็นคอร์สนี้อยู่ — ปิดการเผยแพร่เพื่อซ่อนจากทุกคน (รวมคนที่เรียนอยู่และเรียนจบแล้ว)' : 'ปิดการเผยแพร่อยู่: ซ่อนจากผู้เรียนทุกคน ประวัติยังอยู่ครบ'}
                 </p>
               </div>
               <button type="button" disabled={toggling} onClick={handleTogglePublish}

@@ -145,8 +145,14 @@ function HalfDonutChart({ counts }: { counts: TrainingCounts }) {
 export default function SaleDashboardPage() {
   const { user } = useAuth()
   const router = useRouter()
-  const { data: myRecords } = useMyTrainingRecords(user?.uid ?? '')
+  const { data: ownRecords } = useMyTrainingRecords(user?.uid ?? '')
   const { data: courses } = useCourses()
+  // Records of a closed course are left out: a course closed to learners disappears for everyone,
+  // including people who were learning it or had finished it, until it is published again.
+  const myRecords = useMemo(
+    () => ownRecords.filter((r) => courses.find((c) => c.id === r.courseId)?.isPublished !== false),
+    [ownRecords, courses],
+  )
   const { data: stats, loading: statsLoading } = useUserStats()
   // Was `stats.length > 0` — a GLOBAL check: one other user having a summary doc
   // was enough to consider stats "ready" for everyone, so a learner whose own

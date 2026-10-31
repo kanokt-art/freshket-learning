@@ -311,10 +311,12 @@ export default function CourseDetailPage() {
     )
   }
 
-  if (!course) {
+  // A closed course is gone for learners — including anyone who started or finished it — until it is
+  // published again. Admins (and a lead reading a team report) still open it.
+  if (!course || (!course.isPublished && !isAdmin)) {
     return (
       <div className="flex flex-col items-center justify-center h-full bg-white gap-3">
-        <p className="text-sm text-gray-400">ไม่พบหลักสูตรนี้</p>
+        <p className="text-sm text-gray-400">{course ? 'หลักสูตรนี้ปิดการเผยแพร่ชั่วคราว' : 'ไม่พบหลักสูตรนี้'}</p>
         <button onClick={() => router.back()} className="text-sm text-freshket-600 hover:underline">← กลับ</button>
       </div>
     )

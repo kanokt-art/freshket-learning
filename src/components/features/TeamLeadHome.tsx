@@ -24,8 +24,13 @@ export function TeamLeadHome() {
   // Only fall back to the whole trainingRecords collection while summaries
   // haven't been built yet.
   const { data: allRecords } = useAllTrainingRecords(!hasStats)
-  const { data: myRecords } = useMyTrainingRecords(user?.uid ?? '')
+  const { data: ownRecords } = useMyTrainingRecords(user?.uid ?? '')
   const { data: courses } = useCourses()
+  // Records of a closed course are left out until it is published again.
+  const myRecords = useMemo(
+    () => ownRecords.filter((r) => courses.find((c) => c.id === r.courseId)?.isPublished !== false),
+    [ownRecords, courses],
+  )
   const { data: announcements } = useAnnouncements()
   const { data: teams } = useTeams()
 
