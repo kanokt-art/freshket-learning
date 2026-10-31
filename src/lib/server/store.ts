@@ -394,7 +394,14 @@ export function createStore(config: StoreConfig) {
   ): Promise<void> {
     const { spec, parentUid } = resolve(path)
     const merge = opts.merge ?? false
-    const rows = docs.map((d) => (merge ? toPartialRow(spec, parentUid, d.id, d.data) : toRow(spec, parentUid, d.id, d.data)))
+    // One request may not name the same row twice: Postgres refuses it ("ON CONFLICT DO UPDATE
+    // command cannot affect row a second time") and the whole batch fails. An HR export that lists
+    // a person on two lines would do exactly that, so the later line wins here.
+    const rows = collapseDuplicateRows(
+      docs.map((d) => (merge ? toPartialRow(spec, parentUid, d.id, d.data) : toRow(spec, parentUid, d.id, d.data))),
+      spec.keyColumns,
+      merge,
+    )
 
     if (!merge) {
       const columns = allColumns(spec)
@@ -537,6 +544,20 @@ export function createStore(config: StoreConfig) {
 }
 
 export type Store = ReturnType<typeof createStore>
+
+/**
+ * Fold rows that share a key into one: the later row's fields win. A merge keeps the earlier row's
+ * columns the later one does not mention (so a partial update is not turned into a smaller one).
+ */
+export function collapseDuplicateRows(rows: Row[], keyColumns: readonly string[], merge: boolean): Row[] {
+  const byKey = new Map<string, Row>()
+  for (const row of rows) {
+    const key = JSON.stringify(keyColumns.map((c) => row[c]))
+    const prev = byKey.get(key)
+    byKey.set(key, prev && merge ? { ...prev, ...row } : row)
+  }
+  return Array.from(byKey.values())
+}
 
 /** Firestore-style deep merge: objects fold together, anything else replaces. */
 export function deepMerge(a: Record<string, unknown>, b: Record<string, unknown>): Record<string, unknown> {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createStore, buildParams, deepMerge, StoreError } from '@/lib/server/store'
+import { createStore, buildParams, deepMerge, collapseDuplicateRows, StoreError } from '@/lib/server/store'
 import { USERS, COURSES, NOTIFICATIONS, APP_CONFIG } from '@/lib/server/docMap'
 
 // The store talks to Postgres through its REST layer. These tests stand in a
@@ -526,6 +526,21 @@ describe('setMany', () => {
     expect(posts[0].params.columns.split(',')).toEqual(expect.arrayContaining(['id', 'title', 'extra']))
   })
 
+  it('names a person once even when the list has them twice (the later line wins)', async () => {
+    // The same employee on two CSV lines used to fail the whole import with
+    // "ON CONFLICT DO UPDATE command cannot affect row a second time".
+    const { tables, store, requests } = make()
+    tables.users = [{ uid: 'csv-1', email: 'a@x', nickname: 'Kept', department: 'Old' }]
+    await store.setMany('users', [
+      { id: 'csv-1', data: { email: 'a@x', department: 'First' } },
+      { id: 'csv-2', data: { email: 'b@x', department: 'D' } },
+      { id: 'csv-1', data: { email: 'a@x', department: 'Second' } },
+    ], { merge: true })
+    const sent = requests.filter((r) => r.method === 'POST').flatMap((r) => r.body as Row[])
+    expect(sent.filter((r) => r.uid === 'csv-1')).toHaveLength(1)
+    expect(tables.users.find((r) => r.uid === 'csv-1')).toMatchObject({ department: 'Second', nickname: 'Kept' })
+  })
+
   it('does nothing for an empty list', async () => {
     const { store, requests } = make()
     await store.setMany('courses', [])
@@ -823,5 +838,19 @@ describe('whole-document tables', () => {
     tables.app_config = [{ id: 'moduleAccess', value: { departments: { A: { lms: true } } } }]
     expect(await store.get('appConfig', 'moduleAccess')).toEqual({ id: 'moduleAccess', departments: { A: { lms: true } } })
     expect(APP_CONFIG.asJson).toBe('value')
+  })
+})
+
+describe('collapseDuplicateRows', () => {
+  it('keeps the later row; a merge also keeps columns only the earlier one had', () => {
+    const rows = [{ uid: 'a', x: 1, y: 1 }, { uid: 'b', x: 1 }, { uid: 'a', x: 2 }]
+    expect(collapseDuplicateRows(rows, ['uid'], false).find((r) => r.uid === 'a')).toEqual({ uid: 'a', x: 2 })
+    expect(collapseDuplicateRows(rows, ['uid'], true).find((r) => r.uid === 'a')).toEqual({ uid: 'a', x: 2, y: 1 })
+    expect(collapseDuplicateRows(rows, ['uid'], true)).toHaveLength(2)
+  })
+
+  it('treats the same id under different parents as different rows', () => {
+    const rows = [{ uid: 'u1', id: 'n1' }, { uid: 'u2', id: 'n1' }]
+    expect(collapseDuplicateRows(rows, ['uid', 'id'], false)).toHaveLength(2)
   })
 })
