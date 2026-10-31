@@ -74,6 +74,20 @@ export function isInCourseTarget(course: AudienceCourse, user: AudienceUser): bo
 }
 
 /**
+ * The published courses worth a lead's, manager's or department head's attention: the ones aimed at
+ * them or at someone they are responsible for. A course for other departments (a Sales course, to the
+ * Head of People) is not theirs to follow, so it is left out of their "all courses" list.
+ */
+export function coursesForTeam<C extends AudienceCourse & { isPublished?: boolean }, U extends AudienceUser>(
+  courses: readonly C[],
+  me: U | null | undefined,
+  members: readonly U[],
+): C[] {
+  if (!me) return []
+  return courses.filter((c) => c.isPublished && (isInCourseTarget(c, me) || members.some((m) => isInCourseTarget(c, m))))
+}
+
+/**
  * Everyone the course's results should list: its audience, plus anyone who has a
  * training record for it. A person who finished the course and was later taken
  * off the roster, or resigned, still has that work on file; dropping them would

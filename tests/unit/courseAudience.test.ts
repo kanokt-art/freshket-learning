@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { courseAudience, isInCourseTarget, resultsRoster } from '@/lib/courses/audience'
+import { courseAudience, coursesForTeam, isInCourseTarget, resultsRoster } from '@/lib/courses/audience'
 
 const users = [
   { uid: 'a', role: 'sale', department: 'Sales Management', teamId: 't1' },
@@ -166,5 +166,28 @@ describe('courseAudience: a new joiner due to start is reached', () => {
   it('shows the course to a Pending person, not to a resigned one', () => {
     expect(isInCourseTarget(dept, hired[1])).toBe(true)
     expect(isInCourseTarget(dept, hired[2])).toBe(false)
+  })
+})
+
+describe('coursesForTeam: a lead sees the courses of their own people, not the whole company', () => {
+  const pvp = { id: 'pvp', isPublished: true, assignedDepartments: ['Sales Management', 'Key Account Management'] }
+  const onboarding = { id: 'onb', isPublished: true, assignedDepartments: ['People Experience'] }
+  const draft = { id: 'draft', isPublished: false, assignedDepartments: ['People Experience'] }
+  const courses = [pvp, onboarding, draft]
+  const headOfPeople = { uid: 'head', role: 'manager', department: 'People Experience' }
+  const peopleMember = { uid: 'p1', role: 'sale', department: 'People Experience' }
+  const salesMember = { uid: 's1', role: 'sale', department: 'Sales Management' }
+
+  it('leaves out a course for other departments', () => {
+    expect(coursesForTeam(courses, headOfPeople, [peopleMember]).map((c) => c.id)).toEqual(['onb'])
+  })
+
+  it('includes a course aimed at someone they look after', () => {
+    expect(coursesForTeam(courses, headOfPeople, [peopleMember, salesMember]).map((c) => c.id).sort()).toEqual(['onb', 'pvp'])
+  })
+
+  it('never lists a draft, and nothing without a viewer', () => {
+    expect(coursesForTeam(courses, headOfPeople, [peopleMember]).some((c) => c.id === 'draft')).toBe(false)
+    expect(coursesForTeam(courses, null, [peopleMember])).toEqual([])
   })
 })

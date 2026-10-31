@@ -1,6 +1,6 @@
 'use client'
 
-import { isInCourseTarget } from '@/lib/courses/audience'
+import { coursesForTeam, isInCourseTarget } from '@/lib/courses/audience'
 import { useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
@@ -82,7 +82,8 @@ export function TeamLeadHome() {
       .map((c) => ({ course: c, status: recordStatus[c.id] }))
   }, [courses, user, recordStatus])
 
-  const publishedCourses = useMemo(() => courses.filter((c) => c.isPublished), [courses])
+  // Only courses aimed at me or at the people I look after, not every course in the company.
+  const publishedCourses = useMemo(() => coursesForTeam(courses, user, members), [courses, user, members])
   const publishedNews = announcements.filter((a) => isAnnouncementVisibleTo(a, user?.role, user?.department))
 
   return (
