@@ -6,6 +6,7 @@ import type { Department, Team, UserProfile } from '@/types/user'
 import { ROLE_LABELS, canAccess, getTeamManagerIds, getTeamLeadIds } from '@/types/user'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { canLeadAnyTeam } from '@/lib/users/teamManager'
+import { isExcludedPosition } from '@/lib/users/excludedPositions'
 import { MANAGER_BAND, MEMBER_MAX_GRADE, TEAM_LEAD_BAND, isDepartmentHead, levelOf } from '@/lib/users/departmentHead'
 import { COMMERCIAL_FAMILY, allowedMemberDepartments, deptId, teamHomeDepartment, teamsOfDepartment } from '@/lib/users/teamsOfDepartment'
 
@@ -1568,7 +1569,7 @@ function DeptCard({
 export function OrgBoard({
   departments,
   teams,
-  users,
+  users: allUsers,
   canManage,
   showRoleBadges,
   searchQuery,
@@ -1581,6 +1582,8 @@ export function OrgBoard({
   onSetManagers,
   onUpdateVisibility,
 }: OrgBoardProps) {
+  // Maids and masseuses are not part of the learning population: left out everywhere on the board.
+  const users = useMemo(() => allUsers.filter(u => !isExcludedPosition(u.position)), [allUsers])
   const [visibilityUser, setVisibilityUser] = useState<UserProfile | null>(null)
   const [activeDeptId, setActiveDeptId] = useState<string | null>(null)
 

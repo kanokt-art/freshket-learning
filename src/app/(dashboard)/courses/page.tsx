@@ -51,6 +51,7 @@ import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { alertError, alertSuccess, confirmAction } from '@/lib/ui/alert'
+import { formatTenure } from '@/lib/users/tenure'
 import { formatPersonName } from '@/lib/users/displayName'
 import { onlyCurrentOrIncoming, isCurrentOrIncoming, isActiveEmployee } from '@/lib/users/active'
 import { authedFetch } from '@/lib/api/authedFetch'
@@ -4352,37 +4353,9 @@ function tenureYears(startDate?: Date | string): number | null {
   return (Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000)
 }
 
-// Display form for the summary tab's tenure column — calendar-correct
-// (years/months/days via date-field subtraction, not a 365.25-day-average
-// division) so a joiner from a week ago reads "X วัน" instead of the old
-// version's Math.max(1, …) flooring anything under a month up to "1 เดือน".
+// Display form for the summary tab's tenure column (shared with the team views).
 function fmtTenure(startDate?: Date | string): string {
-  const d = startDate instanceof Date ? startDate : startDate ? new Date(startDate) : null
-  if (!d || isNaN(d.getTime())) return '—'
-
-  const now = new Date()
-  let years = now.getFullYear() - d.getFullYear()
-  let months = now.getMonth() - d.getMonth()
-  let days = now.getDate() - d.getDate()
-
-  if (days < 0) {
-    months -= 1
-    // Days in the month before `now` — the correct denominator for a
-    // negative day difference regardless of month length (28-31 days).
-    days += new Date(now.getFullYear(), now.getMonth(), 0).getDate()
-  }
-  if (months < 0) {
-    years -= 1
-    months += 12
-  }
-
-  if (years <= 0 && months <= 0 && days <= 0) return 'วันนี้'
-
-  const parts: string[] = []
-  if (years > 0) parts.push(`${years} ปี`)
-  if (months > 0) parts.push(`${months} เดือน`)
-  if (days > 0) parts.push(`${days} วัน`)
-  return parts.join(' ')
+  return formatTenure(startDate)
 }
 
 function CourseFormModal({ assessments, allUsers, allTrainingRecords, departments, teams, onDone, userId, editCourse, isSuperAdmin }: {

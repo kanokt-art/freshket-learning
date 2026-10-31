@@ -1,4 +1,6 @@
 import { canViewByLevel } from '@/lib/jobLevel'
+import { isActiveEmployee } from '@/lib/users/active'
+import { isExcludedPosition } from '@/lib/users/excludedPositions'
 import { departmentScope, isDepartmentHead, levelOf } from '@/lib/users/departmentHead'
 import { teamsOfDepartment } from '@/lib/users/teamsOfDepartment'
 import { getTeamManagerIds, getTeamLeadIds, type Team, type UserProfile } from '@/types/user'
@@ -30,6 +32,8 @@ export function managedTeamIds(user: Viewer, allUsers: readonly UserProfile[], t
  * A department head (JG11+) is responsible for the whole department, not only its teams: everyone
  * in it — with or without a team, whatever their app role (a super_admin who works in the
  * department included) — at or below the head's level.
+ *
+ * Only people who are Active now (not resigned, not yet started), and not maids or masseuses.
  */
 export function managedMembers(
   user: Viewer | null | undefined,
@@ -37,6 +41,15 @@ export function managedMembers(
   teams: readonly Team[],
 ): UserProfile[] {
   if (!user) return []
+  return managedMembersUnfiltered(user, allUsers, teams)
+    .filter((u) => isActiveEmployee(u) && !isExcludedPosition(u.position))
+}
+
+function managedMembersUnfiltered(
+  user: Viewer,
+  allUsers: readonly UserProfile[],
+  teams: readonly Team[],
+): UserProfile[] {
   const managed = managedTeamIds(user, allUsers, teams)
   // Only members at or below the viewer's level (a team_lead never sees the manager).
   const byTeam = allUsers.filter((u) => u.uid !== user.uid && u.teamId && managed.has(u.teamId) && canViewByLevel(user, u))

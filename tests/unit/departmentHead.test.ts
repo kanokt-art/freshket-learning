@@ -89,3 +89,20 @@ describe('the role a department head acts under', () => {
     expect(roleWithHeadFloor('sale', { ...headFields, department: 'Marketing' })).toBe('sale')
   })
 })
+
+describe('who a team view leaves out', () => {
+  const teams = [team('t1', 'dept-people-experience')]
+  const lead = user({ uid: 'lead', role: 'manager', rank: 'Head of' })
+  const roster = [
+    lead,
+    user({ uid: 'ok', teamId: 't1', rank: 'Staff' }),
+    user({ uid: 'gone', teamId: 't1', rank: 'Staff', employmentStatus: 'Resigned' }),
+    user({ uid: 'later', teamId: 't1', rank: 'Staff', employmentStatus: 'Pending' }),
+    user({ uid: 'maid', teamId: 't1', rank: 'Staff', position: 'Maid' }),
+    user({ uid: 'spa', teamId: 't1', rank: 'Staff', position: 'Masseuse' }),
+  ]
+
+  it('shows only people who are Active now, and not maids or masseuses', () => {
+    expect(managedMembers(lead, roster, teams).map(u => u.uid)).toEqual(['ok'])
+  })
+})

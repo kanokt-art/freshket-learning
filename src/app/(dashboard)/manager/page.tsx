@@ -24,6 +24,7 @@ import { canAccess, ROLE_LABELS, getTeamManagerIds, getTeamLeadIds, type UserPro
 import type { AssessmentScore } from '@/types/assessmentScore'
 import { canViewByLevel } from '@/lib/jobLevel'
 import { managedMembers, managedTeamIds } from '@/lib/users/managedMembers'
+import { tenureLabel } from '@/lib/users/tenure'
 import { formatDateEN } from '@/lib/utils/dateFormatter'
 import { MOCK_TAKEAWAYS } from '@/lib/utils/mockData'
 import { alertError } from '@/lib/ui/alert'
@@ -448,7 +449,16 @@ export default function ManagerPage() {
                             : <span className="text-gray-300 text-xs">—</span>}
                         </td>
                         <td className="px-4 py-3.5 text-xs text-gray-500 hidden lg:table-cell whitespace-nowrap">
-                          {u.startDate ? formatDateEN(u.startDate) : <span className="text-gray-300">—</span>}
+                          {u.startDate ? (
+                            <div className="flex flex-col items-start gap-1">
+                              <span>{formatDateEN(u.startDate)}</span>
+                              {tenureLabel(u.startDate) && (
+                                <span className="inline-flex items-center text-xs font-bold px-2.5 py-0.5 rounded-full bg-freshket-100 text-freshket-700 border border-freshket-200">
+                                  {tenureLabel(u.startDate)}
+                                </span>
+                              )}
+                            </div>
+                          ) : <span className="text-gray-300">—</span>}
                         </td>
                         <td className="px-4 py-3.5 hidden lg:table-cell">
                           {mbtiByUid[u.uid]
