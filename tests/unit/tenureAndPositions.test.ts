@@ -44,3 +44,13 @@ describe('isExcludedPosition', () => {
     expect(isExcludedPosition(undefined)).toBe(false)
   })
 })
+
+describe('maids and masseuses are not counted as employed', () => {
+  it('fails the active and incoming checks every roster starts from', async () => {
+    const { isActiveEmployee, isCurrentOrIncoming } = await import('@/lib/users/active')
+    expect(isActiveEmployee({ employmentStatus: 'Active', position: 'Maid' })).toBe(false)
+    expect(isCurrentOrIncoming({ employmentStatus: 'Pending', position: 'Masseuse' })).toBe(false)
+    expect(isActiveEmployee({ employmentStatus: 'Active', position: 'People Admin' })).toBe(true)
+    expect(isActiveEmployee({ position: undefined })).toBe(true)
+  })
+})

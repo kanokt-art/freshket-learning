@@ -1,3 +1,5 @@
+import { isExcludedPosition } from '@/lib/users/excludedPositions'
+
 // Who still works here.
 //
 // `employmentStatus` comes from column 1 of the HR CSV. Observed values in the
@@ -12,10 +14,13 @@
 
 interface EmploymentFields {
   employmentStatus?: string
+  /** Maids and masseuses are not part of the learning population: never counted as employed here. */
+  position?: string
 }
 
 /** True for someone still employed — see the whitelist rationale above. */
 export function isActiveEmployee(u: EmploymentFields): boolean {
+  if (isExcludedPosition(u.position)) return false
   return !u.employmentStatus || u.employmentStatus === 'Active'
 }
 
@@ -27,6 +32,7 @@ export function isActiveEmployee(u: EmploymentFields): boolean {
  * stays out, by the same whitelist rule as above.
  */
 export function isCurrentOrIncoming(u: EmploymentFields): boolean {
+  if (isExcludedPosition(u.position)) return false
   return isActiveEmployee(u) || u.employmentStatus === 'Pending'
 }
 

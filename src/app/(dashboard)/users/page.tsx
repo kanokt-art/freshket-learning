@@ -4,6 +4,8 @@ import { MbtiBadge } from '@/components/features/MbtiBadge'
 import { formatPersonName } from '@/lib/users/displayName'
 import { rankToRole } from '@/lib/users/rankToRole'
 import { resolveImportRows, type ImportRow } from '@/lib/users/importDedupe'
+import { isExcludedPosition } from '@/lib/users/excludedPositions'
+import { tenureLabel } from '@/lib/users/tenure'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
@@ -992,7 +994,14 @@ export default function UsersPage() {
 
                     {/* Start Date */}
                     <td className="px-4 py-3.5 text-xs text-gray-500 hidden lg:table-cell whitespace-nowrap">
-                      {u.startDate ? formatDateEN(u.startDate) : <span className="text-gray-300">—</span>}
+                      {u.startDate ? (
+                        <div className="flex flex-col items-start gap-1">
+                          <span>{formatDateEN(u.startDate)}</span>
+                          {tenureLabel(u.startDate) && (
+                            <span className="inline-flex items-center text-xs font-bold px-2.5 py-0.5 rounded-full bg-freshket-100 text-freshket-700 border border-freshket-200">{tenureLabel(u.startDate)}</span>
+                          )}
+                        </div>
+                      ) : <span className="text-gray-300">—</span>}
                     </td>
 
                     {/* Line Manager */}
@@ -1486,8 +1495,11 @@ function UserPanel({
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Employment</p>
               <div className="bg-gray-50 rounded-2xl divide-y divide-gray-100">
                 <InfoRow label="Start Date">
-                  <span className="text-sm text-gray-700">
+                  <span className="flex flex-col items-end gap-1 text-sm text-gray-700">
                     {profile?.startDate ? formatDateEN(profile.startDate) : '—'}
+                    {profile?.startDate && tenureLabel(profile.startDate) && (
+                      <span className="inline-flex items-center text-xs font-bold px-2.5 py-0.5 rounded-full bg-freshket-100 text-freshket-700 border border-freshket-200">{tenureLabel(profile.startDate)}</span>
+                    )}
                   </span>
                 </InfoRow>
                 <InfoRow label="Line Manager">
@@ -1845,6 +1857,8 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
 
     const displayName = fullNameTH || fullNameEN
     if (!displayName) continue
+    // Maids and masseuses are not target: left out of the import altogether.
+    if (isExcludedPosition(position)) continue
 
     // Reuse existing uid so saveLocalImportedUsers can upsert by uid.
     // UID is deterministic: csv-{empId} — same employee always gets same UID

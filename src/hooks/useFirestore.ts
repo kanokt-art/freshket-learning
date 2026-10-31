@@ -27,6 +27,7 @@ import { queryDocs, getDocument } from '@/lib/data/client'
 import { attachLive } from '@/lib/data/live'
 import { pollIntervalFor } from '@/lib/data/pollInterval'
 import { reviewId } from '@/lib/shadow/reviews'
+import { isExcludedPosition } from '@/lib/users/excludedPositions'
 
 // ── Local imported-user overlay (persists CSV-imported users in localStorage) ──
 /**
@@ -790,7 +791,8 @@ export function useAllUsers(enabled = true): UseResult<UserProfile> {
           !fbKeys.has(u.email?.toLowerCase() ?? '') &&
           !(u.employeeId && fbKeys.has(u.employeeId)),
       )
-    return [...mergedFb, ...uniqueLocal]
+    // Maids and masseuses are not target: dropped here so no screen lists them.
+    return [...mergedFb, ...uniqueLocal].filter((u) => !isExcludedPosition(u.position))
   }, [fbResult.data, patches, localOverlay])
 
   if (DEMO_MODE) return { data: demoData, loading: false, error: null }
