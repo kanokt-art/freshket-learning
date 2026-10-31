@@ -210,8 +210,14 @@ export default function UserReportPage() {
           <div className="rounded-2xl bg-white border border-gray-100 shadow-md">
             <div className="p-6 md:p-8">
               <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                <div className="size-16 rounded-2xl bg-freshket-100 border-2 border-freshket-200 flex items-center justify-center text-freshket-700 text-2xl font-bold shrink-0">
-                  {(profile.displayNameEN || profile.displayName).charAt(0)}
+                {/* Their own picture (the Google photo, once they have signed in); the initial until then. */}
+                <div className="size-16 rounded-2xl bg-freshket-100 border-2 border-freshket-200 flex items-center justify-center text-freshket-700 text-2xl font-bold shrink-0 overflow-hidden">
+                  {profile.photoURL ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={profile.photoURL} alt={profile.displayNameEN || profile.displayName} referrerPolicy="no-referrer" className="size-full object-cover" />
+                  ) : (
+                    (profile.displayNameEN || profile.displayName).charAt(0)
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   {/* English full name first; the Thai name sits under it. Each has a copy icon that
