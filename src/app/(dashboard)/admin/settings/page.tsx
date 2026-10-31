@@ -8,6 +8,7 @@ import { useAllUsers } from '@/hooks/useFirestore'
 import { useModuleConfig } from '@/hooks/useModuleAccess'
 import { MODULE_REGISTRY, ALL_MODULE_IDS, DEFAULT_MODULES, TARGET_DEPARTMENTS_DOC, type ModuleId } from '@/lib/modules'
 import { useTargetDepartmentList } from '@/lib/data/targetDepartments'
+import { isActiveEmployee } from '@/lib/users/active'
 import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -64,10 +65,12 @@ export default function ModuleSettingsPage() {
     setTargetsLoaded(true)
   }, [liveTargets, targetsLoaded])
 
-  // Every department on the roster, switched-on ones first.
+  // Departments that still have someone working in them (Active), plus the ones already switched on
+  // so they can be switched off. A department whose people have all resigned is closed: it is not
+  // listed (its saved settings are kept). Switched-on ones first.
   const departments = useMemo(() => {
     const depts = new Set<string>()
-    allUsers.forEach(u => { if (u.department) depts.add(u.department) })
+    allUsers.forEach(u => { if (u.department && isActiveEmployee(u)) depts.add(u.department) })
     targets.forEach(t => depts.add(t))
     return Array.from(depts).sort((a, b) => Number(targets.includes(b)) - Number(targets.includes(a)) || a.localeCompare(b))
   }, [allUsers, targets])
