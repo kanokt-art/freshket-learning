@@ -98,3 +98,48 @@ export function MandatoryMonthHeader({ group }: { group: MonthGroup }) {
     </div>
   )
 }
+
+/**
+ * Says which month is on screen and lets people widen to everything (or come back to this month).
+ * The page opens on the current month and year.
+ */
+export function MandatoryMonthFilter({
+  selectedKey,
+  currentKey,
+  currentLabel,
+  totalCount,
+  shownCount,
+  onSelect,
+}: {
+  selectedKey: string
+  currentKey: string
+  currentLabel: string
+  totalCount: number
+  shownCount: number
+  onSelect: (key: string) => void
+}) {
+  const showingAll = selectedKey === 'all'
+  return (
+    <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+      <p className="text-sm text-gray-700">
+        {showingAll ? (
+          <>กำลังแสดง <span className="font-bold">ทั้งหมด</span> · {totalCount} ฉบับ</>
+        ) : (
+          <>กำลังแสดง <span className="font-bold">{selectedKey === currentKey ? `${currentLabel} (เดือนนี้)` : 'เดือนที่เลือก'}</span> · {shownCount} ฉบับ</>
+        )}
+      </p>
+      <div className="flex items-center gap-2">
+        {!showingAll && selectedKey !== currentKey && (
+          <button type="button" onClick={() => onSelect(currentKey)}
+            className="px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-gray-50 transition-colors">
+            กลับเดือนนี้
+          </button>
+        )}
+        <button type="button" onClick={() => onSelect(showingAll ? currentKey : 'all')}
+          className="px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-freshket-50 hover:text-freshket-700 hover:border-freshket-200 transition-colors">
+          {showingAll ? 'แสดงเฉพาะเดือนนี้' : 'ดูทั้งหมด'}
+        </button>
+      </div>
+    </div>
+  )
+}

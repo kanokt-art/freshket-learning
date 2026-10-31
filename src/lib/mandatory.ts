@@ -114,6 +114,17 @@ export function mandatoryTitleFor(date: Date): string {
   return `Mandatory-Week${week} ${month} ${date.getFullYear()}`
 }
 
+/**
+ * "Mandatory-Week42 Oct 2026" for a week label such as "Week 42 / Oct 2026" — the title that goes
+ * with a week the admin set by hand. Undefined when the label is not in that shape.
+ */
+export function mandatoryTitleForWeekLabel(label: string): string | undefined {
+  const m = /^\s*Week\s*(\d{1,2})\s*\/\s*([A-Za-z]{3})[A-Za-z]*\s+(\d{4})\s*$/i.exec(label)
+  if (!m) return undefined
+  const month = m[2].charAt(0).toUpperCase() + m[2].slice(1).toLowerCase()
+  return `Mandatory-Week${Number(m[1])} ${month} ${m[3]}`
+}
+
 /** yyyy-mm-dd for an <input type="date"> value, in local time (not UTC). */
 export function toDateInputValue(d: Date): string {
   const y = d.getFullYear()
@@ -176,6 +187,12 @@ export function groupByMonth(items: MandatoryItem[]): MonthGroup[] {
   groups.sort((a, b) => b.key.localeCompare(a.key))
   groups.forEach(g => g.items.sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime()))
   return groups
+}
+
+/** Which month sections to show: one month by default (the current one), or all of them. */
+export const ALL_MONTHS = 'all'
+export function visibleMonthGroups(groups: MonthGroup[], selectedKey: string): MonthGroup[] {
+  return selectedKey === ALL_MONTHS ? groups : groups.filter((g) => g.key === selectedKey)
 }
 
 export function groupByYear(months: MonthGroup[]): YearGroup[] {

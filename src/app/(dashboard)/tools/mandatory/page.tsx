@@ -12,10 +12,10 @@ import { pushNotification } from '@/lib/notifications/push'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { MandatorySlideViewer } from '@/components/features/MandatorySlideViewer'
 import { SlidePreviewArea } from '@/components/features/MandatoryPreview'
-import { MandatoryArchiveRail, MandatoryMonthHeader } from '@/components/features/MandatoryArchive'
+import { MandatoryArchiveRail, MandatoryMonthFilter, MandatoryMonthHeader } from '@/components/features/MandatoryArchive'
 import {
   formatDate, weekLabelForDate, departmentAccessFromLast, mandatoryTitleFor, toDateInputValue, fromDateInputValue,
-  groupByMonth, groupByYear, mandatoryDepartments,
+  groupByMonth, groupByYear, mandatoryDepartments, monthKey, visibleMonthGroups, mandatoryTitleForWeekLabel,
   type MandatoryItem, type MandatoryDeptAccess,
 } from '@/lib/mandatory'
 import { confirmAction, alertError } from '@/lib/ui/alert'
@@ -35,6 +35,8 @@ interface FormState {
   description: string
   slidesUrl: string
   publishDate: Date
+  /** The Week badge. Follows the date until the admin sets it by hand. */
+  weekLabel: string
   isPublished: boolean
   departmentAccess: MandatoryDeptAccess[]
 }
@@ -53,6 +55,7 @@ function emptyForm(): FormState {
     description: '',
     slidesUrl: '',
     publishDate: now,
+    weekLabel: weekLabelForDate(now),
     isPublished: false,
     departmentAccess: [],
   }
@@ -74,6 +77,10 @@ export default function MandatoryPage() {
   const [showAdd, setShowAdd]         = useState(false)
   const [editItem, setEditItem]       = useState<MandatoryItem | null>(null)
   const [activeKey, setActiveKey]     = useState<string | null>(null)
+  // The page opens on the current month and year; the rail picks another month, or all of them.
+  const currentKey = monthKey(new Date())
+  const currentLabel = new Date().toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })
+  const [selectedKey, setSelectedKey] = useState<string>(currentKey)
 
   // An admin sees every item; an unpublished one is shown greyed out rather than
   // hidden, so unpublishing never makes a file seem to have vanished. Everyone
@@ -86,9 +93,13 @@ export default function MandatoryPage() {
   const monthGroups = useMemo(() => groupByMonth(visibleItems), [visibleItems])
   const yearGroups = useMemo(() => groupByYear(monthGroups), [monthGroups])
 
+  const shownGroups = useMemo(() => visibleMonthGroups(monthGroups, selectedKey), [monthGroups, selectedKey])
+  const shownCount = useMemo(() => shownGroups.reduce((n, g) => n + g.items.length, 0), [shownGroups])
+
+  // The rail now switches month (it used to scroll the long list).
   function jumpTo(key: string) {
     setActiveKey(key)
-    document.getElementById(`mandatory-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setSelectedKey(key)
   }
 
   // Notifies whoever can see the item once it goes from draft to published —
@@ -159,7 +170,7 @@ export default function MandatoryPage() {
       title: form.title,
       description: form.description,
       slidesUrl: form.slidesUrl,
-      weekLabel: weekLabelForDate(form.publishDate),
+      weekLabel: form.weekLabel.trim() || weekLabelForDate(form.publishDate),
       isPublished: form.isPublished,
       departmentAccess: form.departmentAccess,
       publishedAt: form.publishDate,
@@ -303,10 +314,24 @@ export default function MandatoryPage() {
         {/* ── Archive: rail + month-grouped sections ───────────────────────── */}
         {visibleItems.length > 0 && (
           <div className="flex gap-6 items-start">
-            <MandatoryArchiveRail years={yearGroups} activeKey={activeKey} onJump={jumpTo} />
+            <MandatoryArchiveRail years={yearGroups} activeKey={selectedKey === 'all' ? null : selectedKey} onJump={jumpTo} />
 
             <div className="flex-1 min-w-0 space-y-6">
-              {monthGroups.map(group => (
+              <MandatoryMonthFilter
+                selectedKey={selectedKey}
+                currentKey={currentKey}
+                currentLabel={currentLabel}
+                totalCount={visibleItems.length}
+                shownCount={shownCount}
+                onSelect={setSelectedKey}
+              />
+              {shownGroups.length === 0 && (
+                <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
+                  <p className="text-sm font-bold text-gray-500">ยังไม่มี Slide ในเดือนนี้</p>
+                  <p className="text-xs text-gray-400 mt-1">เลือกเดือนก่อนหน้าจากด้านซ้าย หรือกด &quot;ดูทั้งหมด&quot;</p>
+                </div>
+              )}
+              {shownGroups.map(group => (
                 <section key={group.key} id={`mandatory-${group.key}`} className="scroll-mt-4">
                   <MandatoryMonthHeader group={group} />
 
@@ -565,7 +590,7 @@ function MandatoryFormModal({
     if (initial) {
       return {
         title: initial.title, description: initial.description, slidesUrl: initial.slidesUrl,
-        publishDate: initial.publishedAt, isPublished: initial.isPublished,
+        publishDate: initial.publishedAt, weekLabel: initial.weekLabel, isPublished: initial.isPublished,
         departmentAccess: initial.departmentAccess,
       }
     }
@@ -592,8 +617,36 @@ function MandatoryFormModal({
     if (errors[key]) setErrors(prev => ({ ...prev, [key]: undefined }))
   }
 
+  // True once the admin has typed their own Week badge: the date then stops overwriting it.
+  const [weekTouched, setWeekTouched] = useState(!!initial && initial.weekLabel !== weekLabelForDate(initial.publishedAt))
+
   function setPublishDate(date: Date) {
-    setForm(prev => ({ ...prev, publishDate: date, title: initial ? prev.title : mandatoryTitleFor(date) }))
+    setForm(prev => ({
+      ...prev,
+      publishDate: date,
+      weekLabel: weekTouched ? prev.weekLabel : weekLabelForDate(date),
+      title: initial ? prev.title : mandatoryTitleFor(date),
+    }))
+  }
+
+  // The Week badge is set by hand when a week was skipped and the cover image says another one.
+  // A new item's title (still the standing "Mandatory-WeekNN Mon YYYY" wording) follows it.
+  function setWeekLabel(label: string) {
+    setWeekTouched(true)
+    setForm(prev => {
+      const autoBefore = mandatoryTitleForWeekLabel(prev.weekLabel) ?? mandatoryTitleFor(prev.publishDate)
+      const next = mandatoryTitleForWeekLabel(label)
+      const followsTitle = !initial && next !== undefined && prev.title === autoBefore
+      return { ...prev, weekLabel: label, title: followsTitle ? next : prev.title }
+    })
+  }
+
+  function resetWeekLabel() {
+    setWeekTouched(false)
+    setForm(prev => {
+      const autoBefore = mandatoryTitleForWeekLabel(prev.weekLabel) ?? mandatoryTitleFor(prev.publishDate)
+      return { ...prev, weekLabel: weekLabelForDate(prev.publishDate), title: !initial && prev.title === autoBefore ? mandatoryTitleFor(prev.publishDate) : prev.title }
+    })
   }
 
   function toggleDepartment(dept: string) {
@@ -674,12 +727,31 @@ function MandatoryFormModal({
               onChange={e => e.target.value && setPublishDate(fromDateInputValue(e.target.value))}
               className={inputCls()}
             />
-            {/* The Week badge on the card is worked out from this date, so changing the
-                date is how the badge is corrected. The title is separate and stays as typed. */}
+            {initial && (
+              <p className="text-xs text-gray-400 mt-1.5">ถ้าเปลี่ยนวันที่ รายการจะย้ายไปอยู่เดือนใหม่ในหน้าคลัง</p>
+            )}
+          </div>
+
+          {/* Week badge — worked out from the date, but the admin can set it to match the week the
+              merchandiser put on the slide (some weeks are skipped, so the date and the cover differ). */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-normal text-gray-700">ป้ายสัปดาห์ (Week)</label>
+              {weekTouched && (
+                <button type="button" onClick={resetWeekLabel} className="text-xs font-bold text-freshket-600 hover:underline">
+                  ใช้ค่าอัตโนมัติจากวันที่ ({weekLabelForDate(form.publishDate)})
+                </button>
+              )}
+            </div>
+            <input
+              type="text"
+              value={form.weekLabel}
+              onChange={e => setWeekLabel(e.target.value)}
+              placeholder="เช่น Week 42 / Oct 2026"
+              className={inputCls()}
+            />
             <p className="text-xs text-gray-400 mt-1.5">
-              ป้ายสัปดาห์ในการ์ดคำนวณจากวันที่นี้:{' '}
-              <span className="font-bold text-gray-600">{weekLabelForDate(form.publishDate)}</span>
-              {initial && ' — ถ้าเปลี่ยนวันที่ รายการจะย้ายไปอยู่เดือน/สัปดาห์ใหม่ในหน้าคลัง'}
+              ค่าเริ่มต้นคำนวณจากวันที่ แก้ให้ตรงกับ Week ที่ทีม Merchandise ใส่ไว้บนหน้า Slide (บางสัปดาห์ไม่มีการสอน) — ป้ายนี้แสดงบนการ์ดและเป็นข้อความในแจ้งเตือน
             </p>
           </div>
 

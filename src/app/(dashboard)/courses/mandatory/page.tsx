@@ -6,8 +6,8 @@ import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
 import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
 import { MandatorySlideViewer } from '@/components/features/MandatorySlideViewer'
 import { SlidePreviewArea } from '@/components/features/MandatoryPreview'
-import { MandatoryArchiveRail, MandatoryMonthHeader } from '@/components/features/MandatoryArchive'
-import { formatDate, groupByMonth, groupByYear, isMandatoryVisibleTo, type MandatoryItem } from '@/lib/mandatory'
+import { MandatoryArchiveRail, MandatoryMonthFilter, MandatoryMonthHeader } from '@/components/features/MandatoryArchive'
+import { formatDate, groupByMonth, groupByYear, isMandatoryVisibleTo, monthKey, visibleMonthGroups, type MandatoryItem } from '@/lib/mandatory'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { useMandatoryItems } from '@/hooks/useFirestore'
@@ -20,7 +20,10 @@ export default function MyMandatoryPage() {
   const { allowedModules, loading: moduleLoading } = useModuleAccess(user?.role, user?.department)
   const { data: allItems } = useMandatoryItems()
   const [viewing, setViewing] = useState<MandatoryItem | null>(null)
-  const [activeKey, setActiveKey] = useState<string | null>(null)
+  // The page opens on the current month and year; the rail picks another month, or all of them.
+  const currentKey = monthKey(new Date())
+  const currentLabel = new Date().toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })
+  const [selectedKey, setSelectedKey] = useState<string>(currentKey)
   const isSuperAdmin = user?.role === 'super_admin'
 
   // Published AND (no department restriction, or the learner's department is
@@ -32,10 +35,8 @@ export default function MyMandatoryPage() {
   const monthGroups = useMemo(() => groupByMonth(items), [items])
   const yearGroups = useMemo(() => groupByYear(monthGroups), [monthGroups])
 
-  function jumpTo(key: string) {
-    setActiveKey(key)
-    document.getElementById(`mandatory-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+  const shownGroups = useMemo(() => visibleMonthGroups(monthGroups, selectedKey), [monthGroups, selectedKey])
+  const shownCount = useMemo(() => shownGroups.reduce((n, g) => n + g.items.length, 0), [shownGroups])
 
   if (!user) return null
 
@@ -65,10 +66,24 @@ export default function MyMandatoryPage() {
               </div>
             ) : (
               <div className="flex gap-6 items-start">
-                <MandatoryArchiveRail years={yearGroups} activeKey={activeKey} onJump={jumpTo} />
+                <MandatoryArchiveRail years={yearGroups} activeKey={selectedKey === 'all' ? null : selectedKey} onJump={setSelectedKey} />
 
                 <div className="flex-1 min-w-0 space-y-6">
-                  {monthGroups.map((group) => (
+                  <MandatoryMonthFilter
+                    selectedKey={selectedKey}
+                    currentKey={currentKey}
+                    currentLabel={currentLabel}
+                    totalCount={items.length}
+                    shownCount={shownCount}
+                    onSelect={setSelectedKey}
+                  />
+                  {shownGroups.length === 0 && (
+                    <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
+                      <p className="text-sm font-bold text-gray-500">ยังไม่มี Slide ในเดือนนี้</p>
+                      <p className="text-xs text-gray-400 mt-1">เลือกเดือนก่อนหน้าจากด้านซ้าย หรือกด &quot;ดูทั้งหมด&quot;</p>
+                    </div>
+                  )}
+                  {shownGroups.map((group) => (
                     <section key={group.key} id={`mandatory-${group.key}`} className="scroll-mt-4">
                       <MandatoryMonthHeader group={group} />
                       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5 mt-3">

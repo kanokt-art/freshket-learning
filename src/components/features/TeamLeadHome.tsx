@@ -9,10 +9,8 @@ import { relativeTime } from '@/lib/utils/dateFormatter'
 import { isAnnouncementVisibleTo } from '@/types/announcement'
 import { managedMembers } from '@/lib/users/managedMembers'
 import { statsAvgScore, type UserStats } from '@/types/stats'
-import { CalendarCard } from '@/components/features/CalendarCard'
 
 // Team-lead / manager home — 3-column dashboard:
-//   left   → calendar + team member scores
 //   center → news feed (announcements)
 //   right  → continue-learning
 export function TeamLeadHome() {
@@ -84,23 +82,6 @@ export function TeamLeadHome() {
       .map((c) => ({ course: c, status: recordStatus[c.id] }))
   }, [courses, user, recordStatus])
 
-  // Calendar tasks = upcoming deadlines of courses assigned to me that I haven't
-  // finished. (Real Google-Calendar events can be merged in here later.)
-  const myDone = useMemo(() => new Set(myRecords.filter((r) => r.status === 'completed').map((r) => r.courseId)), [myRecords])
-  const tasks = useMemo(() => {
-    if (!user) return []
-    const toDate = (d: unknown): Date | null => {
-      if (!d) return null
-      const dt = d instanceof Date ? d : new Date(d as string)
-      return isNaN(dt.getTime()) ? null : dt
-    }
-    return courses
-      .filter((c) => c.isPublished && !myDone.has(c.id) && isInCourseTarget(c, user))
-      .map((c) => ({ date: toDate(c.endDate), title: c.title, courseId: c.id }))
-      .filter((t): t is { date: Date; title: string; courseId: string } => t.date !== null)
-      .sort((a, b) => a.date.getTime() - b.date.getTime())
-  }, [courses, myDone, user])
-
   const publishedCourses = useMemo(() => courses.filter((c) => c.isPublished), [courses])
   const publishedNews = announcements.filter((a) => isAnnouncementVisibleTo(a, user?.role, user?.department))
 
@@ -130,15 +111,8 @@ export function TeamLeadHome() {
 
       <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0">
 
-        {/* ── LEFT ─────────────────────────────────────────────── */}
-        <div className="lg:col-span-3 space-y-5">
-          <CalendarCard tasks={tasks} onOpenTask={(id) => router.push(`/courses/${id}`)} />
-          {/* TeamScoresCard removed from the dashboard for now — not in use yet
-              (kept the component below in case it's wired back up later). */}
-        </div>
-
         {/* ── CENTER: News feed (one card, posts split by dividers) ─── */}
-        <div className="lg:col-span-6 flex flex-col gap-5">
+        <div className="lg:col-span-9 flex flex-col gap-5">
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             {/* Header */}
             <div className="px-5 py-3.5 flex items-center justify-between border-b border-gray-100">

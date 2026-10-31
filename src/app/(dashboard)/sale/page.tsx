@@ -16,7 +16,6 @@ import { formatDateEN } from '@/lib/utils/dateFormatter'
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
 import { RADAR_GROUPS, type RoleplayAssessment } from '@/types/roleplay'
 import type { ShadowRecord } from '@/types/shadow'
-import { CalendarCard } from '@/components/features/CalendarCard'
 import { LearnerCourseGridCard } from '@/components/features/LearnerCourseDashboard'
 import { TeamLeadHome } from '@/components/features/TeamLeadHome'
 
@@ -285,19 +284,6 @@ export default function SaleDashboardPage() {
 
   const pendingCourseCount = pendingCourses.length
 
-  // Calendar deadlines — same source as pendingCourses, just reshaped into the
-  // {date, title, courseId} triple CalendarCard renders. Courses with no
-  // endDate (or an unparseable one) carry no deadline to show on a calendar.
-  const calendarTasks = useMemo(() => {
-    return pendingCourses
-      .map((c) => {
-        if (!c.endDate) return null
-        const d = c.endDate instanceof Date ? c.endDate : new Date(c.endDate as unknown as string)
-        return isNaN(d.getTime()) ? null : { date: d, title: c.title, courseId: c.id }
-      })
-      .filter((t): t is { date: Date; title: string; courseId: string } => t !== null)
-  }, [pendingCourses])
-
   // Training Status donut — real backend state. Each assigned+published course
   // falls into exactly one bucket (priority: completed → failed → overdue →
   // in_progress → not started), so the segments always sum to the course total.
@@ -408,23 +394,16 @@ export default function SaleDashboardPage() {
             </>)}
           </div>
 
-          {/* Empty state — ไม่มีหลักสูตรคงค้าง (left, when nothing's outstanding) + Calendar (right).
-              Sale-role only — super_admin's overview has no personal course schedule to show. */}
+          {/* Outstanding courses. Sale-role only — super_admin's overview has no personal course
+              schedule to show. */}
           {!isAdmin && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
-              {/* Left column always has a card now. It used to render only when
-                  the learner had NOTHING assigned at all, so the normal case —
-                  courses assigned, none outstanding — left a blank half-width gap
-                  beside the calendar. */}
+            <div className="grid grid-cols-1 gap-4">
               <PendingCoursesCard
                 courses={pendingCourses}
                 recordMap={recordMap}
                 onOpenCourse={(id) => router.push(`/courses/${id}`)}
                 onSeeAll={() => router.push('/courses')}
               />
-              <div className="lg:col-start-2 h-full">
-                <CalendarCard tasks={calendarTasks} onOpenTask={(id) => router.push(`/courses/${id}`)} />
-              </div>
             </div>
           )}
 
