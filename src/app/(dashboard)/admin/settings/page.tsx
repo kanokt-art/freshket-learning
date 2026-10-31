@@ -65,13 +65,12 @@ export default function ModuleSettingsPage() {
     setTargetsLoaded(true)
   }, [liveTargets, targetsLoaded])
 
-  // Departments that still have someone working in them (Active), plus the ones already switched on
-  // so they can be switched off. A department whose people have all resigned is closed: it is not
-  // listed (its saved settings are kept). Switched-on ones first.
+  // Only departments that still have someone working in them (Active). A department whose people
+  // have all resigned is closed and is not listed, switched on or not (its saved settings are kept).
+  // Switched-on ones first.
   const departments = useMemo(() => {
     const depts = new Set<string>()
     allUsers.forEach(u => { if (u.department && isActiveEmployee(u)) depts.add(u.department) })
-    targets.forEach(t => depts.add(t))
     return Array.from(depts).sort((a, b) => Number(targets.includes(b)) - Number(targets.includes(a)) || a.localeCompare(b))
   }, [allUsers, targets])
 
