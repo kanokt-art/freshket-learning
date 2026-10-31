@@ -6,7 +6,7 @@ import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers } from '@/hooks/useFirestore'
 import { useModuleConfig } from '@/hooks/useModuleAccess'
-import { MODULE_REGISTRY, ALL_MODULE_IDS, DEFAULT_MODULES, type ModuleId } from '@/lib/modules'
+import { MODULE_REGISTRY, ALL_MODULE_IDS, DEFAULT_MODULES, PHASE1_DEPARTMENTS, type ModuleId } from '@/lib/modules'
 import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -52,12 +52,13 @@ export default function ModuleSettingsPage() {
   // moment an admin toggles a module.
   const [dirty, setDirty] = useState(false)
 
-  // Derive unique departments from users
+  // Derive unique departments from users — only those in the current rollout (PHASE1_DEPARTMENTS).
+  // The other departments' saved settings stay in the config untouched; they just are not listed.
   const departments = useMemo(() => {
     const depts = new Set<string>()
-    allUsers.forEach(u => { if (u.department) depts.add(u.department) })
+    allUsers.forEach(u => { if (u.department && (isDemo || PHASE1_DEPARTMENTS.has(u.department))) depts.add(u.department) })
     return Array.from(depts).sort()
-  }, [allUsers])
+  }, [allUsers, isDemo])
 
   // Seed the editable copy ONCE from the shared warm config (or demo mock).
   // Seed only once (guarded by `loaded`) so a later listener re-fire never
@@ -115,7 +116,9 @@ export default function ModuleSettingsPage() {
     }
   }
 
-  const allDepts = departments.length > 0 ? departments : Object.keys(config).filter(k => k !== 'default')
+  const allDepts = departments.length > 0
+    ? departments
+    : Object.keys(config).filter(k => k !== 'default' && (isDemo || PHASE1_DEPARTMENTS.has(k)))
 
   // Placed after every hook so the hook order stays stable across renders
   // (the same shape the sibling /admin/announcements page uses).
