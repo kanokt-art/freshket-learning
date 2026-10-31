@@ -4,25 +4,24 @@ import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { useAuth } from '@/hooks/useAuth'
-import { useAllUsers, useMyTrainingRecords } from '@/hooks/useFirestore'
+import { useAllUsers, useMyTrainingRecords, useTeams } from '@/hooks/useFirestore'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
-import { canAccess, ROLE_LABELS, type UserRole } from '@/types/user'
+import { canAccess, type UserRole } from '@/types/user'
+import { functionalRole, FUNCTIONAL_ROLE_LABELS, type FunctionalRole } from '@/lib/users/functionalRole'
+import { formatTenure } from '@/lib/users/tenure'
+import { HoverCopy } from '@/components/common/EmployeeCells'
 import { STATUS_LABELS, STATUS_COLORS } from '@/types/tracking'
 import { formatDate } from '@/lib/utils/dateFormatter'
 import { getDemoMode } from '@/lib/demo/demoMode'
 
 const DEMO_MODE = getDemoMode()
 
-const ROLE_BADGE: Record<UserRole, string> = {
+const ROLE_BADGE: Record<FunctionalRole, string> = {
   super_admin: 'bg-orange-100 text-orange-700 border border-orange-200',
+  head:        'bg-indigo-100 text-indigo-700 border border-indigo-200',
   manager:     'bg-purple-100 text-purple-700 border border-purple-200',
   team_lead:   'bg-blue-100 text-blue-700 border border-blue-200',
-  sale:        'bg-freshket-100 text-freshket-700 border border-freshket-200',
-}
-
-const TEAM_LABELS: Record<string, string> = {
-  'team-north': 'ทีมเหนือ',
-  'team-south': 'ทีมใต้',
+  member:      'bg-freshket-100 text-freshket-700 border border-freshket-200',
 }
 
 function scoreColor(score: number): string {
@@ -75,6 +74,7 @@ export default function UserReportPage() {
   const [activeTab, setActiveTab] = useState<'profile' | 'training' | 'roleplay' | 'shadow'>('profile')
 
   const { data: allUsers, loading: usersLoading } = useAllUsers()
+  const { data: teams } = useTeams()
   const { data: records, loading: recordsLoading } = useMyTrainingRecords(userId)
 
   const profile = allUsers.find((u) => u.uid === userId)
@@ -112,10 +112,6 @@ export default function UserReportPage() {
   const inProgress = records.filter((r) => r.status === 'in_progress').length
   const failed = records.filter((r) => r.status === 'failed').length
   const notStarted = records.filter((r) => r.status === 'not_started').length
-  const scores = records.filter((r) => r.score !== undefined && r.score !== null).map((r) => r.score!)
-  const avgScore = scores.length > 0
-    ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
-    : null
 
   const handleShare = async () => {
     try {
@@ -154,6 +150,9 @@ export default function UserReportPage() {
       </div>
     )
   }
+
+  // What they are in the team structure (not the app role stored on their record).
+  const role = functionalRole(profile, teams)
 
   const TABS = [
     { id: 'profile' as const,   label: 'Profile' },
@@ -212,17 +211,30 @@ export default function UserReportPage() {
             <div className="p-6 md:p-8">
               <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                 <div className="size-16 rounded-2xl bg-freshket-100 border-2 border-freshket-200 flex items-center justify-center text-freshket-700 text-2xl font-bold shrink-0">
-                  {profile.displayName.charAt(0)}
+                  {(profile.displayNameEN || profile.displayName).charAt(0)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <h2 className="text-xl font-bold text-gray-900">{profile.displayName}</h2>
+                  {/* English full name first; the Thai name sits under it. Each has a copy icon that
+                      shows only while the pointer is on it. */}
+                  <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                    <HoverCopy text={profile.displayNameEN || profile.displayName}>
+                      <h2 className="text-xl font-bold text-gray-900">{profile.displayNameEN || profile.displayName}</h2>
+                    </HoverCopy>
                     {profile.nickname && <span className="text-sm text-gray-500">({profile.nickname})</span>}
-                    <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full border ${ROLE_BADGE[profile.role]}`}>
-                      {ROLE_LABELS[profile.role]}
+                    <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full border ${ROLE_BADGE[role]}`}>
+                      {FUNCTIONAL_ROLE_LABELS[role]}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-500">{profile.email}</p>
+                  {profile.displayNameEN && profile.displayName && profile.displayName !== profile.displayNameEN && (
+                    <div className="mb-0.5">
+                      <HoverCopy text={profile.displayName}>
+                        <p className="text-sm text-gray-600">{profile.displayName}</p>
+                      </HoverCopy>
+                    </div>
+                  )}
+                  <HoverCopy text={profile.email}>
+                    <p className="text-sm text-gray-500">{profile.email}</p>
+                  </HoverCopy>
                 </div>
               </div>
 
@@ -257,22 +269,16 @@ export default function UserReportPage() {
                   <InfoItem label="ตำแหน่ง" value={profile.position} />
                   <InfoItem label="ชื่อเล่น" value={profile.nickname} />
                   <InfoItem label="วันเริ่มงาน" value={profile.startDate ? formatDate(profile.startDate) : undefined} />
-                  <InfoItem label="ทีม" value={profile.teamId ? (TEAM_LABELS[profile.teamId] ?? profile.teamId) : undefined} />
+                  <InfoItem label="อายุงาน" value={profile.startDate ? formatTenure(profile.startDate) : undefined} />
                 </div>
               </div>
 
               {/* Stat cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <StatCard label="ผ่านแล้ว"   value={completed}      unit="วิชา"  color="text-freshket-600" bg="bg-freshket-100" />
-                <StatCard label="ทั้งหมด"    value={records.length} unit="วิชา"  color="text-blue-600"     bg="bg-blue-50" />
-                <StatCard label="ไม่ผ่าน"    value={failed}         unit="วิชา"  color="text-rose-600"     bg="bg-rose-50" />
-                <StatCard
-                  label="คะแนนเฉลี่ย"
-                  value={avgScore ?? '—'}
-                  unit={avgScore !== null ? 'คะแนน' : ''}
-                  color={avgScore !== null ? scoreColor(avgScore) : 'text-gray-400'}
-                  bg="bg-gray-50"
-                />
+                <StatCard label="หลักสูตรทั้งหมด" value={records.length} unit="วิชา" color="text-blue-600"     bg="bg-blue-50" />
+                <StatCard label="ผ่านแล้ว"        value={completed}      unit="วิชา" color="text-freshket-600" bg="bg-freshket-100" />
+                <StatCard label="ไม่ผ่าน"         value={failed}         unit="วิชา" color="text-rose-600"     bg="bg-rose-50" />
+                <StatCard label="อยู่ระหว่างเรียน" value={inProgress}     unit="วิชา" color="text-amber-600"    bg="bg-amber-50" />
               </div>
             </>
           )}

@@ -12,7 +12,7 @@ import { tenureLabel } from '@/lib/users/tenure'
  * A small copy-to-clipboard icon. A span, not a button, so it can sit inside a row that is itself
  * a button; it stops the click from reaching the row.
  */
-export function CopyIcon({ text, label = 'Copy' }: { text: string; label?: string }) {
+export function CopyIcon({ text, label = 'Copy', hoverOnly = false }: { text: string; label?: string; hoverOnly?: boolean }) {
   const [copied, setCopied] = useState(false)
 
   function copy(e: React.SyntheticEvent) {
@@ -33,7 +33,7 @@ export function CopyIcon({ text, label = 'Copy' }: { text: string; label?: strin
       aria-label={label}
       onClick={copy}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') copy(e) }}
-      className="shrink-0 inline-flex p-0.5 rounded text-gray-300 hover:text-freshket-500 hover:bg-freshket-50 transition-colors cursor-pointer"
+      className={`shrink-0 inline-flex p-0.5 rounded text-gray-300 hover:text-freshket-500 hover:bg-freshket-50 transition-all cursor-pointer ${hoverOnly ? 'opacity-0 group-hover/copy:opacity-100 focus:opacity-100' : ''}`}
     >
       {copied ? (
         <svg className="size-3.5 text-freshket-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
@@ -72,5 +72,15 @@ export function StartDateCell({ startDate }: { startDate?: Date | string | null 
         </span>
       )}
     </div>
+  )
+}
+
+/** Text with a copy icon that only shows while the pointer is over it. */
+export function HoverCopy({ text, className = '', children }: { text: string; className?: string; children: React.ReactNode }) {
+  return (
+    <span className={`group/copy inline-flex items-center gap-1.5 min-w-0 ${className}`}>
+      {children}
+      <CopyIcon text={text} hoverOnly />
+    </span>
   )
 }
