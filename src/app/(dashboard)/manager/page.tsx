@@ -23,6 +23,7 @@ import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types
 import { canAccess, ROLE_LABELS, getTeamManagerIds, getTeamLeadIds, type UserProfile } from '@/types/user'
 import type { AssessmentScore } from '@/types/assessmentScore'
 import { canViewByLevel } from '@/lib/jobLevel'
+import { managedTeamIds } from '@/lib/users/managedMembers'
 import { formatDateEN } from '@/lib/utils/dateFormatter'
 import { MOCK_TAKEAWAYS } from '@/lib/utils/mockData'
 import { alertError } from '@/lib/ui/alert'
@@ -107,22 +108,20 @@ export default function ManagerPage() {
   // visibleTeamIds and their own teamId. Relying on visibleTeamIds alone broke
   // when a manager was linked via team.managerId but their visibleTeamIds was
   // never populated — the roster then showed 0 members.
-  const managedTeamIds = useMemo(() => {
-    const set = new Set<string>()
-    teams.forEach(t => { if (getTeamManagerIds(t).includes(user?.uid ?? '') || getTeamLeadIds(t).includes(user?.uid ?? '')) set.add(t.id) })
-    ;(user?.visibleTeamIds ?? []).forEach(id => set.add(id))
-    if (user?.teamId) set.add(user.teamId)
-    return set
-  }, [teams, user?.uid, user?.visibleTeamIds, user?.teamId])
+  // A department head (JG11+) also oversees every team of their department.
+  const managedTeamIdSet = useMemo(
+    () => (user ? managedTeamIds(user, allUsers, teams) : new Set<string>()),
+    [user, allUsers, teams],
+  )
 
   // Exclude the manager themselves, and anyone more senior — a viewer only sees
   // members at or below their own level (a team_lead never sees the manager).
   const users = useMemo(
     () => allUsers.filter(u =>
       u.uid !== user?.uid &&
-      u.teamId && managedTeamIds.has(u.teamId) &&
+      u.teamId && managedTeamIdSet.has(u.teamId) &&
       !!user && canViewByLevel(user, u)),
-    [allUsers, managedTeamIds, user],
+    [allUsers, managedTeamIdSet, user],
   )
 
   // Records scoped to the managed members. This used to stream the ENTIRE
@@ -376,7 +375,7 @@ export default function ManagerPage() {
             </div>
           ) : filteredUsers.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-6 text-center text-gray-400">
-              {managedTeamIds.size === 0 ? (
+              {managedTeamIdSet.size === 0 ? (
                 <>
                   {/* The menu is there by role, the members come from teams: no team, no members. */}
                   <p className="text-sm font-bold text-gray-600">ยังไม่ได้ถูกกำหนดให้ดูแลทีมใด</p>

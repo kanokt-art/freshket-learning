@@ -6,6 +6,7 @@ import type { Department, Team, UserProfile } from '@/types/user'
 import { ROLE_LABELS, canAccess, getTeamManagerIds, getTeamLeadIds } from '@/types/user'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { canLeadAnyTeam } from '@/lib/users/teamManager'
+import { MANAGER_BAND, MEMBER_MAX_GRADE, TEAM_LEAD_BAND, isDepartmentHead, levelOf } from '@/lib/users/departmentHead'
 import { COMMERCIAL_FAMILY, allowedMemberDepartments, deptId, teamHomeDepartment, teamsOfDepartment } from '@/lib/users/teamsOfDepartment'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -413,12 +414,16 @@ function AddMemberDropdown({
   teamId,
   availableUsers,
   allTeams,
+  showAllLevels,
+  onToggleAll,
   onAdd,
   onClose,
 }: {
   teamId: string
   availableUsers: UserProfile[]
   allTeams: Team[]
+  showAllLevels: boolean
+  onToggleAll: (v: boolean) => void
   onAdd: (user: UserProfile, teamId: string) => void
   onClose: () => void
 }) {
@@ -427,7 +432,9 @@ function AddMemberDropdown({
   // database by nickname or real name, not just people in the same department.
   const filtered = availableUsers.filter(u => !q || matchesSearch(u, q))
 
-  if (availableUsers.length === 0) {
+  // Only when every level is already shown is an empty list truly empty; otherwise keep the
+  // dropdown (and its "show all levels" switch) so the rest can be reached.
+  if (availableUsers.length === 0 && showAllLevels) {
     return (
       <div className="mt-2 p-3 rounded-xl border border-gray-100 bg-gray-50 text-xs text-gray-400 text-center">
         No available members
@@ -447,6 +454,10 @@ function AddMemberDropdown({
           onChange={e => setQ(e.target.value)}
           className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-1 focus:ring-freshket-300"
         />
+        <label className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+          <input type="checkbox" checked={showAllLevels} onChange={e => onToggleAll(e.target.checked)} />
+          แสดงทุก level (ปกติเห็น JG5 ลงไป)
+        </label>
       </div>
       <div className="max-h-56 overflow-y-auto py-1">
         {filtered.map(u => {
@@ -532,6 +543,9 @@ function TeamCard({
   const showTLPicker = picker === 'teamLead'
   const showManagerPicker = picker === 'manager'
   const [pickerQuery, setPickerQuery] = useState('')
+  // Each picker offers its own level band (Team Lead JG6-8, Manager JG9-10, members JG5 and below);
+  // this opens all of them to every level.
+  const [allLevels, setAllLevels] = useState(false)
   const togglePicker = (which: 'member' | 'teamLead' | 'manager') => {
     setPickerQuery('')
     setPicker(cur => (cur === which ? null : which))
@@ -573,9 +587,15 @@ function TeamCard({
     () => (u: UserProfile) => inTargetDept(u) && allowedDepts.has(u.department ?? ''),
     [allowedDepts],
   )
+  // Head of Department / VP (JG11+) of the departments this team draws on: set by level and
+  // department, never assigned here.
+  const heads = useMemo(
+    () => users.filter(u => isDepartmentHead(u) && allowedDepts.has(u.department ?? '')),
+    [users, allowedDepts],
+  )
   const eligibleSale = useMemo(
-    () => users.filter(u => (u.role === 'sale' || u.role === 'super_admin') && u.teamId !== team.id && inAllowedDept(u)),
-    [users, team.id, inAllowedDept],
+    () => users.filter(u => (u.role === 'sale' || u.role === 'super_admin') && u.teamId !== team.id && inAllowedDept(u) && (allLevels || levelOf(u) <= MEMBER_MAX_GRADE)),
+    [users, team.id, inAllowedDept, allLevels],
   )
   const availableHigherRoles = useMemo(
     () => users.filter(u =>
@@ -592,14 +612,14 @@ function TeamCard({
   // Same people as managerCandidates below: Assistant Managers and Managers can lead a
   // team too, with no quota — a team can pull one in from anywhere.
   const tlCandidates = useMemo(
-    () => users.filter(u => canLeadAnyTeam(u) && allowedDepts.has(u.department ?? '')),
-    [users, allowedDepts],
+    () => users.filter(u => canLeadAnyTeam(u) && allowedDepts.has(u.department ?? '') && (allLevels || (levelOf(u) >= TEAM_LEAD_BAND.min && levelOf(u) <= TEAM_LEAD_BAND.max))),
+    [users, allowedDepts, allLevels],
   )
   // Manager slot: Supervisor level and above in the rollout departments, for any team and
   // with no limit on how many teams one person manages (see canLeadAnyTeam).
   const managerCandidates = useMemo(
-    () => users.filter(u => canLeadAnyTeam(u) && allowedDepts.has(u.department ?? '')),
-    [users, allowedDepts],
+    () => users.filter(u => canLeadAnyTeam(u) && allowedDepts.has(u.department ?? '') && (allLevels || (levelOf(u) >= MANAGER_BAND.min && levelOf(u) <= MANAGER_BAND.max))),
+    [users, allowedDepts, allLevels],
   )
 
   // The Manager / Team Lead pickers search by name, English name and nickname.
@@ -757,6 +777,43 @@ function TeamCard({
       {/* Leadership — Manager above Team Lead */}
       <div className="lg:w-72 lg:shrink-0 lg:border-r lg:border-gray-100 lg:pr-4 flex flex-col gap-3">
 
+      {/* Head of Department / VP — read-only: set by level (JG11+) and department, never assigned here */}
+      <div className="lg:border-b lg:border-gray-100 lg:pb-3">
+      <div className="rounded-xl p-2">
+        <p className="text-xs text-gray-400 mb-1.5 font-normal">Head of Department</p>
+        {heads.length > 0 ? (
+          <div className="space-y-1.5">
+            {heads.map(h => (
+              <button
+                key={h.uid}
+                type="button"
+                onClick={() => router.push(`/users/${h.uid}`)}
+                title="ดูผลการเรียน"
+                className="flex w-full items-center gap-2 text-left"
+              >
+                <div className="size-7 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 text-xs font-bold shrink-0">
+                  {(h.nickname ?? h.displayName).charAt(0)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-gray-800 break-words hover:text-freshket-600 hover:underline">
+                    {h.displayNameEN || h.displayName}
+                    {h.nickname && <span className="text-gray-400 font-normal ml-1">({h.nickname})</span>}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 mt-0.5">
+                    <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border bg-indigo-100 text-indigo-700 border-indigo-200">Head</span>
+                    {h.position && <p className="text-xs text-gray-400 break-words">{h.position}</p>}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs italic text-gray-400">ไม่มี Head / VP ในแผนกนี้</span>
+        )}
+        <p className="text-xs text-gray-400 mt-1.5">กำหนดอัตโนมัติจาก level (JG11 ขึ้นไป) แก้ไขไม่ได้ และเห็นทุกทีมของแผนก</p>
+      </div>
+      </div>
+
       {/* Manager */}
       <div>
       <div
@@ -845,7 +902,7 @@ function TeamCard({
         {canEdit && showManagerPicker && (
           <div className="mt-2 relative z-20 w-[22rem] max-w-[calc(100vw-3rem)] bg-white rounded-xl border border-gray-200 shadow-lg text-xs overflow-hidden">
             <div className="px-3 pt-2.5 pb-1.5 text-xs font-bold text-gray-500 border-b border-gray-100">
-              เลือก Manager ได้หลายคน (ระดับ Supervisor ขึ้นไป ในแผนกของทีมนี้)
+              เลือก Manager ได้หลายคน (JG9–JG10 ในแผนกของทีมนี้)
             </div>
             <div className="px-3 py-2 border-b border-gray-100">
               <input
@@ -856,6 +913,10 @@ function TeamCard({
                 placeholder="ค้นหาชื่อจริง หรือชื่อเล่น..."
                 className="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 bg-white"
               />
+              <label className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+                <input type="checkbox" checked={allLevels} onChange={e => setAllLevels(e.target.checked)} />
+                แสดงทุก level
+              </label>
             </div>
             <div className="max-h-72 overflow-y-auto py-1">
               {managerCandidates.length === 0 && (
@@ -1014,7 +1075,7 @@ function TeamCard({
         {canEdit && showTLPicker && (
           <div className="mt-2 relative z-20 w-[22rem] max-w-[calc(100vw-3rem)] bg-white rounded-xl border border-gray-200 shadow-lg text-xs overflow-hidden">
             <div className="px-3 pt-2.5 pb-1.5 text-xs font-bold text-gray-500 border-b border-gray-100">
-              เลือก Team Lead ได้หลายคน (ระดับ Supervisor ขึ้นไป ในแผนกของทีมนี้)
+              เลือก Team Lead ได้หลายคน (JG6–JG8 ในแผนกของทีมนี้)
             </div>
             <div className="px-3 py-2 border-b border-gray-100">
               <input
@@ -1025,6 +1086,10 @@ function TeamCard({
                 placeholder="ค้นหาชื่อจริง หรือชื่อเล่น..."
                 className="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 bg-white"
               />
+              <label className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+                <input type="checkbox" checked={allLevels} onChange={e => setAllLevels(e.target.checked)} />
+                แสดงทุก level
+              </label>
             </div>
             <div className="max-h-72 overflow-y-auto py-1">
               {tlCandidates.length === 0 && (
@@ -1155,6 +1220,8 @@ function TeamCard({
               teamId={team.id}
               availableUsers={availableForAdd}
               allTeams={allTeams}
+              showAllLevels={allLevels}
+              onToggleAll={setAllLevels}
               onAdd={handleAddMember}
               onClose={() => setPicker(null)}
             />
