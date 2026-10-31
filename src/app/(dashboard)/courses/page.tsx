@@ -4540,6 +4540,15 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
       }))
       .filter((g) => g.teamNames.length > 0)
   }, [form.assignedTeamIds, deptTree])
+  // The conditions live in a pop-up card (opened from the compact row), so the learner list below
+  // gets the screen.
+  const [showCond, setShowCond] = useState(false)
+  // One line for the compact row: what the saved department/team condition covers.
+  const condSummary = useMemo(() => {
+    if (!condMasterOn) return 'ปิดอยู่'
+    const names = Array.from(new Set([...form.assignedDepartments, ...assignedTeamsByDept.map((g) => g.deptName)]))
+    return names.length > 0 ? 'สังกัด: ' + names.join(', ') : 'ยังไม่ได้ตั้งเงื่อนไข — กด "ตั้งเงื่อนไข"'
+  }, [condMasterOn, form.assignedDepartments, assignedTeamsByDept])
   const [showConfirm, setShowConfirm] = useState(false)
   const [showAssignedTable, setShowAssignedTable] = useState(false)
   const [showLessonPreview, setShowLessonPreview] = useState(false)
@@ -5140,120 +5149,37 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                   </div>
                 </div>
 
-                {/* Card: Conditional assignment */}
+                {/* Card: Conditional assignment — a compact row; the conditions open in a card */}
                 <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
-                  <div className="flex items-center justify-between gap-3 px-4 py-3.5">
-                    <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex items-center justify-between gap-3 px-4 py-3">
+                    <button type="button" onClick={() => setShowCond(true)} disabled={!condMasterOn}
+                      className="flex items-center gap-3 min-w-0 flex-1 text-left disabled:cursor-default">
                       <div className={`size-9 rounded-lg flex items-center justify-center shrink-0 ${condMasterOn ? 'bg-freshket-100 text-freshket-600' : 'bg-gray-100 text-gray-400'}`}>
                         <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.107-1.204l-.527-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
                         </svg>
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-bold text-gray-800">มอบหมายตามเงื่อนไข</p>
-                        <p className="text-xs text-gray-400">กำหนดเกณฑ์ให้ผู้ที่เข้าเงื่อนไขเป็นผู้เรียนของคอร์สนี้อัตโนมัติ</p>
+                        <p className="text-xs text-gray-400 truncate">{condSummary}</p>
                       </div>
-                    </div>
+                    </button>
+                    {condMasterOn && (
+                      <button type="button" onClick={() => setShowCond(true)}
+                        className="shrink-0 px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-freshket-500 hover:text-white hover:border-freshket-500 transition-all">
+                        ตั้งเงื่อนไข
+                      </button>
+                    )}
                     <button type="button" onClick={() => setCondMasterOn((v) => !v)}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 shrink-0 ${condMasterOn ? 'bg-freshket-500' : 'bg-gray-200'}`}>
                       <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${condMasterOn ? 'translate-x-6' : 'translate-x-1'}`} />
                     </button>
                   </div>
-
-                  {condMasterOn && (
-                    <div className="border-t border-gray-100 divide-y divide-gray-50">
-                      {([
-                        { key: 'department' as const, label: 'สังกัด' },
-                        { key: 'rank' as const, label: 'ระดับตำแหน่ง' },
-                        { key: 'position' as const, label: 'ตำแหน่ง' },
-                        { key: 'tenure' as const, label: 'อายุงาน' },
-                      ]).map((row) => {
-                        // Only "สังกัด" has a saved-condition summary today — see
-                        // deptConditionSaved above for why rank/position/tenure
-                        // don't yet.
-                        const isSaved = row.key === 'department' && deptConditionSaved
-                        return (
-                        <div key={row.key} className="px-4 py-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm text-gray-700 font-normal">{row.label}</span>
-                              {condToggles[row.key] && (
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                                  isSaved ? 'bg-freshket-100 text-freshket-700' : 'bg-amber-100 text-amber-700'
-                                }`}>
-                                  {isSaved ? 'บันทึกแล้ว' : 'Standby — ยังไม่ได้ตั้งค่า'}
-                                </span>
-                              )}
-                            </div>
-                            <button type="button" onClick={() => setCondToggles((p) => ({ ...p, [row.key]: !p[row.key] }))}
-                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${condToggles[row.key] ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                              <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${condToggles[row.key] ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-                            </button>
-                          </div>
-                          {condToggles[row.key] && (
-                            isSaved ? (
-                              <div className="mt-2 flex items-start justify-between gap-2">
-                                {/* One block per department (not a single
-                                    comma-joined line, which "truncate" was
-                                    cutting off silently whenever two names
-                                    didn't fit — Portfolio Management, Key
-                                    Account Management showed as just the
-                                    first). Team names underneath are what's
-                                    actually included: every team for a WHOLE
-                                    department (assignedDepartments), or the
-                                    specific team(s) picked when only part of
-                                    a department was checked (assignedTeamIds,
-                                    e.g. "just the Chain team"). */}
-                                <div className="min-w-0 space-y-1.5">
-                                  {form.assignedDepartments.map((deptName) => {
-                                    const dept = deptTree.find((d) => d.name === deptName)
-                                    return (
-                                      <div key={deptName}>
-                                        <p className="text-xs font-bold text-gray-700 truncate">{deptName}</p>
-                                        {dept && dept.teams.length > 0 && (
-                                          <p className="text-xs text-gray-400 truncate">
-                                            {dept.teams.map((t) => t.name).join(', ')}
-                                          </p>
-                                        )}
-                                      </div>
-                                    )
-                                  })}
-                                  {assignedTeamsByDept.map((g) => (
-                                    <div key={g.deptName}>
-                                      <p className="text-xs font-bold text-gray-700 truncate">{g.deptName}</p>
-                                      <p className="text-xs text-gray-400 truncate">{g.teamNames.join(', ')}</p>
-                                    </div>
-                                  ))}
-                                </div>
-                                <button type="button" onClick={() => setOpenPanel(row.key)}
-                                  title={`แก้ไข${row.label}`}
-                                  className="shrink-0 size-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-freshket-500 hover:text-white hover:border-freshket-500 transition-all">
-                                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-                                  </svg>
-                                </button>
-                              </div>
-                            ) : (
-                              <button type="button" onClick={() => setOpenPanel(row.key)}
-                                className="mt-2 flex items-center gap-1 text-xs font-bold text-freshket-600 hover:text-freshket-700 transition-colors">
-                                <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                                </svg>
-                                เลือก{row.label}
-                              </button>
-                            )
-                          )}
-                        </div>
-                        )
-                      })}
-                    </div>
-                  )}
                 </div>
 
                 {form.assignedUserIds.length > 0 && (
                   <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
-                    <div className="max-h-80 overflow-auto">
+                    <div className="max-h-[calc(100vh-17rem)] min-h-[20rem] overflow-auto">
                       <AssignedLearnersTable
                         rows={assignedRows}
                         enrolledUserIds={enrolledUserIds}
@@ -5443,6 +5369,120 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
           </div>
         </div>
       </form>
+
+      {showCond && condMasterOn && openPanel === null && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowCond(false)}>
+          <div className="w-full max-w-lg max-h-[85vh] flex flex-col bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
+              <div>
+                <p className="text-sm font-bold text-gray-900">มอบหมายตามเงื่อนไข</p>
+                <p className="text-xs text-gray-400">เลือกเงื่อนไข แล้วกด ตกลง เพื่อใช้กับรายชื่อผู้เรียน</p>
+              </div>
+              <button type="button" onClick={() => setShowCond(false)} aria-label="ปิด"
+                className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
+                <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+                  <div className="border-t border-gray-100 divide-y divide-gray-50">
+                    {([
+                      { key: 'department' as const, label: 'สังกัด' },
+                      { key: 'rank' as const, label: 'ระดับตำแหน่ง' },
+                      { key: 'position' as const, label: 'ตำแหน่ง' },
+                      { key: 'tenure' as const, label: 'อายุงาน' },
+                    ]).map((row) => {
+                      // Only "สังกัด" has a saved-condition summary today — see
+                      // deptConditionSaved above for why rank/position/tenure
+                      // don't yet.
+                      const isSaved = row.key === 'department' && deptConditionSaved
+                      return (
+                      <div key={row.key} className="px-4 py-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-700 font-normal">{row.label}</span>
+                            {condToggles[row.key] && (
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                isSaved ? 'bg-freshket-100 text-freshket-700' : 'bg-amber-100 text-amber-700'
+                              }`}>
+                                {isSaved ? 'บันทึกแล้ว' : 'Standby — ยังไม่ได้ตั้งค่า'}
+                              </span>
+                            )}
+                          </div>
+                          <button type="button" onClick={() => setCondToggles((p) => ({ ...p, [row.key]: !p[row.key] }))}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${condToggles[row.key] ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                            <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${condToggles[row.key] ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                          </button>
+                        </div>
+                        {condToggles[row.key] && (
+                          isSaved ? (
+                            <div className="mt-2 flex items-start justify-between gap-2">
+                              {/* One block per department (not a single
+                                  comma-joined line, which "truncate" was
+                                  cutting off silently whenever two names
+                                  didn't fit — Portfolio Management, Key
+                                  Account Management showed as just the
+                                  first). Team names underneath are what's
+                                  actually included: every team for a WHOLE
+                                  department (assignedDepartments), or the
+                                  specific team(s) picked when only part of
+                                  a department was checked (assignedTeamIds,
+                                  e.g. "just the Chain team"). */}
+                              <div className="min-w-0 space-y-1.5">
+                                {form.assignedDepartments.map((deptName) => {
+                                  const dept = deptTree.find((d) => d.name === deptName)
+                                  return (
+                                    <div key={deptName}>
+                                      <p className="text-xs font-bold text-gray-700 truncate">{deptName}</p>
+                                      {dept && dept.teams.length > 0 && (
+                                        <p className="text-xs text-gray-400 truncate">
+                                          {dept.teams.map((t) => t.name).join(', ')}
+                                        </p>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                                {assignedTeamsByDept.map((g) => (
+                                  <div key={g.deptName}>
+                                    <p className="text-xs font-bold text-gray-700 truncate">{g.deptName}</p>
+                                    <p className="text-xs text-gray-400 truncate">{g.teamNames.join(', ')}</p>
+                                  </div>
+                                ))}
+                              </div>
+                              <button type="button" onClick={() => setOpenPanel(row.key)}
+                                title={`แก้ไข${row.label}`}
+                                className="shrink-0 size-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-freshket-500 hover:text-white hover:border-freshket-500 transition-all">
+                                <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                                </svg>
+                              </button>
+                            </div>
+                          ) : (
+                            <button type="button" onClick={() => setOpenPanel(row.key)}
+                              className="mt-2 flex items-center gap-1 text-xs font-bold text-freshket-600 hover:text-freshket-700 transition-colors">
+                              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                              </svg>
+                              เลือก{row.label}
+                            </button>
+                          )
+                        )}
+                      </div>
+                      )
+                    })}
+                  </div>
+            </div>
+            <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-gray-100 shrink-0">
+              <p className="text-xs text-gray-500">รายชื่อผู้เรียนตอนนี้ <span className="font-bold text-gray-800">{form.assignedUserIds.length - hiddenAssignedCount}</span> คน</p>
+              <button type="button" onClick={() => setShowCond(false)}
+                className="px-6 py-2 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors">
+                ตกลง
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {openPanel === 'individual' && (
         <IndividualAssignmentPanel
