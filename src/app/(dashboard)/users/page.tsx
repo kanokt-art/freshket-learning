@@ -3,6 +3,7 @@
 import { MbtiBadge } from '@/components/features/MbtiBadge'
 import { formatPersonName } from '@/lib/users/displayName'
 import { rankToRole } from '@/lib/users/rankToRole'
+import { resolveImportRows, type ImportRow } from '@/lib/users/importDedupe'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
@@ -1816,14 +1817,8 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
       .map(u => [u.employeeId!, u]),
   )
 
-  // Track within-CSV duplicates only
-  const seenEmpIds = new Set<string>()
-  const seenEmails = new Set<string>()
-
-  const valid: UserProfile[] = []
-  const updated: string[] = []
-  const duplicates: string[] = []
-  let hidden = 0
+  // Every usable line; people who appear more than once are reduced afterwards (resolveImportRows).
+  const rows: ImportRow[] = []
 
   for (const line of lines.slice(1)) {
     const cols = parseCSVLine(line)
@@ -1851,28 +1846,16 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
     const displayName = fullNameTH || fullNameEN
     if (!displayName) continue
 
-    // Dedup within this CSV only
-    if (empId && seenEmpIds.has(empId)) {
-      duplicates.push(`${displayName} (รหัส ${empId} ซ้ำในไฟล์)`)
-      continue
-    }
-    if (email && seenEmails.has(email.toLowerCase())) {
-      duplicates.push(`${displayName} (อีเมล ${email} ซ้ำในไฟล์)`)
-      continue
-    }
-
     // Reuse existing uid so saveLocalImportedUsers can upsert by uid.
     // UID is deterministic: csv-{empId} — same employee always gets same UID
     // across different browsers/sessions, preventing duplicate Firestore docs.
     const existingMatch = (empId ? existingByEmpId.get(empId) : undefined) ?? (email ? existingByEmail.get(email.toLowerCase()) : undefined) ?? null
     const uid = existingMatch?.uid ?? `csv-${empId || email.split('@')[0].replace(/[^a-z0-9]/gi, '-').toLowerCase()}`
-    if (existingMatch) updated.push(displayName)
-    if (employmentStatus && employmentStatus !== 'Active') hidden++
 
     // A blank cell in this row means "not set in this export" — it must not
     // erase a value the employee already had on file, so every optional field
     // falls back to the existing record instead of being wiped to undefined.
-    valid.push({
+    rows.push({ matched: !!existingMatch, profile: {
       uid,
       email: email || existingMatch?.email || `${empId || uid}@freshket.co`,
       displayName,
@@ -1890,10 +1873,10 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
       employmentStatus: employmentStatus ?? existingMatch?.employmentStatus,
       createdAt: existingMatch?.createdAt ?? new Date(),
       updatedAt: new Date(),
-    })
-    if (empId) seenEmpIds.add(empId)
-    if (email) seenEmails.add(email.toLowerCase())
+    } })
     if (empId) unaccountedFor.delete(empId)
+    // Matched by email under another employee id (a rehire): the person is in the file.
+    if (existingMatch?.employeeId) unaccountedFor.delete(existingMatch.employeeId)
   }
 
   // Everyone still left in unaccountedFor was Active on file but absent from this
@@ -1906,7 +1889,7 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
     updatedAt: new Date(),
   }))
 
-  return { valid, updated, duplicates, hidden, missing }
+  return resolveImportRows(rows, missing)
 }
 
 
