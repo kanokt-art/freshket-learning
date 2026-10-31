@@ -531,7 +531,11 @@ function TeamCard({
   const showAddMember = picker === 'member'
   const showTLPicker = picker === 'teamLead'
   const showManagerPicker = picker === 'manager'
-  const togglePicker = (which: 'member' | 'teamLead' | 'manager') => setPicker(cur => (cur === which ? null : which))
+  const [pickerQuery, setPickerQuery] = useState('')
+  const togglePicker = (which: 'member' | 'teamLead' | 'manager') => {
+    setPickerQuery('')
+    setPicker(cur => (cur === which ? null : which))
+  }
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
   const [dragOverMembers, setDragOverMembers] = useState(false)
@@ -597,6 +601,10 @@ function TeamCard({
     () => users.filter(u => canLeadAnyTeam(u) && allowedDepts.has(u.department ?? '')),
     [users, allowedDepts],
   )
+
+  // The Manager / Team Lead pickers search by name, English name and nickname.
+  const shownManagers = useMemo(() => managerCandidates.filter(u => matchesSearch(u, pickerQuery)), [managerCandidates, pickerQuery])
+  const shownLeads = useMemo(() => tlCandidates.filter(u => matchesSearch(u, pickerQuery)), [tlCandidates, pickerQuery])
 
   function handleAddMember(user: UserProfile, teamId: string) {
     if (user.role === 'sale' || user.role === 'super_admin') {
@@ -839,11 +847,24 @@ function TeamCard({
             <div className="px-3 pt-2.5 pb-1.5 text-xs font-bold text-gray-500 border-b border-gray-100">
               เลือก Manager ได้หลายคน (ระดับ Supervisor ขึ้นไป ในแผนกของทีมนี้)
             </div>
+            <div className="px-3 py-2 border-b border-gray-100">
+              <input
+                autoFocus
+                type="text"
+                value={pickerQuery}
+                onChange={e => setPickerQuery(e.target.value)}
+                placeholder="ค้นหาชื่อจริง หรือชื่อเล่น..."
+                className="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 bg-white"
+              />
+            </div>
             <div className="max-h-72 overflow-y-auto py-1">
               {managerCandidates.length === 0 && (
                 <p className="px-3 py-3 text-gray-400 text-center">ไม่มีพนักงานระดับ Supervisor ขึ้นไปที่เลือกได้</p>
               )}
-              {managerCandidates.map(u => {
+              {managerCandidates.length > 0 && shownManagers.length === 0 && (
+                <p className="px-3 py-3 text-gray-400 text-center">ไม่พบคนที่ตรงกับการค้นหา</p>
+              )}
+              {shownManagers.map(u => {
                 const checked = selManagers.includes(u.uid)
                 return (
                   <button
@@ -995,11 +1016,24 @@ function TeamCard({
             <div className="px-3 pt-2.5 pb-1.5 text-xs font-bold text-gray-500 border-b border-gray-100">
               เลือก Team Lead ได้หลายคน (ระดับ Supervisor ขึ้นไป ในแผนกของทีมนี้)
             </div>
+            <div className="px-3 py-2 border-b border-gray-100">
+              <input
+                autoFocus
+                type="text"
+                value={pickerQuery}
+                onChange={e => setPickerQuery(e.target.value)}
+                placeholder="ค้นหาชื่อจริง หรือชื่อเล่น..."
+                className="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 bg-white"
+              />
+            </div>
             <div className="max-h-72 overflow-y-auto py-1">
               {tlCandidates.length === 0 && (
                 <p className="px-3 py-3 text-gray-400 text-center">ไม่มีพนักงานระดับ Supervisor ขึ้นไปที่เลือกได้</p>
               )}
-              {tlCandidates.map(u => {
+              {tlCandidates.length > 0 && shownLeads.length === 0 && (
+                <p className="px-3 py-3 text-gray-400 text-center">ไม่พบคนที่ตรงกับการค้นหา</p>
+              )}
+              {shownLeads.map(u => {
                 const checked = selTeamLeads.includes(u.uid)
                 return (
                   <button
