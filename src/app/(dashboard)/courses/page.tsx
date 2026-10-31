@@ -168,6 +168,7 @@ function notifyCoursePublishChanges(
         kind: 'course_published',
         courseId: c.id,
         courseTitle: c.title,
+        courseDescription: c.description,
         recipientCount: recipients.length,
       })
     }
@@ -193,6 +194,7 @@ function notifyCoursePublishChanges(
         kind: 'course_published',
         courseId: c.id,
         courseTitle: c.title,
+        courseDescription: c.description,
         recipientCount: recipients.length,
         isAddition: true,
       })

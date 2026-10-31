@@ -28,6 +28,23 @@ export function describeAnnouncement(event: AnnounceEvent): string {
 export async function confirmAndAnnounce(event: AnnounceEvent): Promise<AnnounceResult | null> {
   if (getDemoMode()) return null
   try {
+    // A course announcement shows its preview first, and the admin can reword the title and the
+    // description. What they leave alone is not sent, so the server uses the course's own text.
+    if (event.kind === 'course_published') {
+      const { composeCourseAnnouncement } = await import('@/lib/ui/announceComposer')
+      const own = { title: event.courseTitle, description: event.courseDescription ?? '' }
+      const composed = await composeCourseAnnouncement({
+        ...own,
+        recipientCount: event.recipientCount,
+        isAddition: event.isAddition,
+      })
+      if (!composed) return null
+      return await announce({
+        ...event,
+        ...(composed.title !== own.title ? { customTitle: composed.title } : {}),
+        ...(composed.description !== own.description ? { customDescription: composed.description } : {}),
+      })
+    }
     const { confirmAction } = await import('@/lib/ui/alert')
     const yes = await confirmAction({
       title: 'ประกาศลง Slack ด้วยไหม?',

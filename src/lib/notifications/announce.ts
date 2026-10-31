@@ -24,8 +24,16 @@ export type AnnounceEvent =
       kind: 'course_published'
       /** The course announced. The server reads its title from the database; super_admin only. */
       courseId: string
-      /** For the confirmation dialog only: the server ignores it. */
+      /** The course's own title, the default of the preview (the server reads the real one). */
       courseTitle: string
+      /** The course's own description, the default of the preview. */
+      courseDescription?: string
+      /**
+       * What the admin changed in the preview, if anything (super_admin only; the server clamps
+       * and escapes it). Left out when unchanged, so the course's own text is used.
+       */
+      customTitle?: string
+      customDescription?: string
       recipientCount: number
       /** True when the course was already live and people were added to it. */
       isAddition?: boolean

@@ -45,6 +45,14 @@ describe('messages built from a title or a name carry no live markup of the call
     expect(body).toContain('&lt;!here&gt;')
   })
 
+  it('a course description is shown under the headline and cannot inject a mention or link', async () => {
+    await postCoursePublishedToSlack({ courseTitle: 'Nice', description: 'เนื้อหา <!here> <https://evil.example|click>', recipientCount: 3, isAddition: false })
+    const body = sent[0]
+    expect(body).toContain('เนื้อหา')
+    expect(body).not.toContain('<!here>')
+    expect(body).not.toContain('<https://evil.example')
+  })
+
   it('a Shadow Visit summary or name cannot inject a mention or link', async () => {
     await postShadowSubmittedToSlack({ observerName: '<!channel> Boss', visitSummary: '<https://evil.example|here> ร้าน' })
     const body = sent[0]

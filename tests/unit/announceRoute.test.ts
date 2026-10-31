@@ -63,7 +63,7 @@ beforeEach(() => {
   Object.values(posts).forEach((f) => f.mockClear())
   dm.mockClear()
   docs = {
-    courses: [{ id: 'c1', title: 'PVP (Private Price Process)', isPublished: true }, { id: 'draft', title: 'Draft', isPublished: false }],
+    courses: [{ id: 'c1', title: 'PVP (Private Price Process)', description: 'ขั้นตอนตั้งราคาพิเศษ', isPublished: true }, { id: 'draft', title: 'Draft', isPublished: false }],
     mandatoryItems: [{ id: 'm1', title: 'ราคาผัก', isPublished: true, weekLabel: 'Week 44', departmentAccess: [{ department: 'Sales Management' }] }],
     shadowRecords: [{ id: 'v1', observerUid: 'sale1', storeName: 'ร้านข้าวมันไก่', segment: 'Chain' }, { id: 'v2', observerUid: 'someone-else', storeName: 'Other' }],
     shadowAcknowledgments: [{ id: 'v2__lead1', recordId: 'v2', reviewerUid: 'lead1', rating: 4, comment: 'good' }],
@@ -94,6 +94,35 @@ describe('publishing announcements are for a super_admin', () => {
     expect(posts.course).toHaveBeenCalledTimes(1)
     const sent = posts.course.mock.calls[0][0] as { courseTitle: string; courseUrl?: string }
     expect(sent.courseTitle).toBe('PVP (Private Price Process)')
+  })
+
+  it('uses the course\'s own description when the admin changed nothing', async () => {
+    asAdmin()
+    await call({ kind: 'course_published', courseId: 'c1', recipientCount: 5 })
+    const sent = posts.course.mock.calls[0][0] as { courseTitle: string; description?: string }
+    expect(sent.courseTitle).toBe('PVP (Private Price Process)')
+    expect(sent.description).toBe('ขั้นตอนตั้งราคาพิเศษ')
+  })
+
+  it('uses the title and description the admin reworded, trimmed and cut to length', async () => {
+    asAdmin()
+    await call({ kind: 'course_published', courseId: 'c1', recipientCount: 5, customTitle: '  PVP รอบใหม่  ', customDescription: 'x'.repeat(500) })
+    const sent = posts.course.mock.calls[0][0] as { courseTitle: string; description?: string }
+    expect(sent.courseTitle).toBe('PVP รอบใหม่')
+    expect(sent.description).toHaveLength(300)
+  })
+
+  it('posts no description when the admin cleared it', async () => {
+    asAdmin()
+    await call({ kind: 'course_published', courseId: 'c1', recipientCount: 5, customDescription: '' })
+    expect((posts.course.mock.calls[0][0] as { description?: string }).description).toBeUndefined()
+  })
+
+  it('a learner cannot send custom text either', async () => {
+    asSale()
+    const res = await call({ kind: 'course_published', courseId: 'c1', recipientCount: 5, customTitle: '<!channel> hi', customDescription: 'x' })
+    expect(res.status).toBe(403)
+    expect(posts.course).not.toHaveBeenCalled()
   })
 
   it('refuses a course that does not exist or is not published', async () => {

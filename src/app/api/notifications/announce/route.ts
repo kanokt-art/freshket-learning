@@ -6,6 +6,7 @@ import { reviewId } from '@/lib/shadow/reviews'
 import { requireStaff } from '@/lib/server/auth'
 import { formatPersonName } from '@/lib/users/displayName'
 import { slackText } from '@/lib/notifications/slackText'
+import { resolveAnnouncementText } from '@/lib/notifications/courseAnnouncement'
 import type { UserProfile } from '@/types/user'
 import {
   postCoursePublishedToSlack,
@@ -94,11 +95,15 @@ export async function POST(req: NextRequest) {
         if (!gate.isSuperAdmin) return notAllowed()
         const courseId = idOf(body.courseId)
         if (!courseId) return bad('Invalid courseId')
-        const course = (await store.get('courses', courseId)) as (Doc & { isPublished?: boolean; title?: string }) | null
+        const course = (await store.get('courses', courseId)) as (Doc & { isPublished?: boolean; title?: string; description?: string }) | null
         if (!course?.isPublished || typeof course.title !== 'string' || !course.title) return bad('Course not found or not published')
 
+        // The admin's edits from the preview (super_admin only, clamped, escaped when posted) replace
+        // the course's own title and description; what they left alone comes from the course.
+        const text = resolveAnnouncementText({ title: course.title, description: course.description }, body)
         posted = await postCoursePublishedToSlack({
-          courseTitle: course.title,
+          courseTitle: text.title,
+          description: text.description || undefined,
           recipientCount: count(body.recipientCount),
           isAddition: body.isAddition === true,
           courseUrl: appUrl(`/courses/${courseId}`),

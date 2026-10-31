@@ -11,6 +11,7 @@
 
 import { sendSlackDm } from '@/lib/notifications/slackDm'
 import { slackText } from '@/lib/notifications/slackText'
+import { COURSE_ADDED_PREFIX, COURSE_NEW_PREFIX } from '@/lib/notifications/courseAnnouncement'
 
 /**
  * Which departments count as "sales" for Slack purposes.
@@ -216,6 +217,8 @@ export async function postShadowSubmittedToSlack(ev: SlackShadowSubmittedEvent):
 
 export interface SlackCoursePublishedEvent {
   courseTitle: string
+  /** A line or two about the course, shown under the headline. Optional. */
+  description?: string
   /** How many people the course reached — the channel's cue for how big this is. */
   recipientCount: number
   /** True when the course was already live and people were added to it. */
@@ -234,8 +237,8 @@ export interface SlackCoursePublishedEvent {
 export async function postCoursePublishedToSlack(ev: SlackCoursePublishedEvent): Promise<boolean> {
   // A brand-new course tags the whole channel (<!channel>); people added to a live course do not.
   const headline = ev.isAddition
-    ? `มีผู้เรียนใหม่ถูกเพิ่มเข้าหลักสูตร *${slackText(ev.courseTitle)}*`
-    : `<!channel> 📚 หลักสูตรใหม่: *${slackText(ev.courseTitle)}*`
+    ? `${COURSE_ADDED_PREFIX}*${slackText(ev.courseTitle)}*`
+    : `<!channel> ${COURSE_NEW_PREFIX}*${slackText(ev.courseTitle)}*`
 
   return postToCourseChannel({
     text: ev.isAddition
@@ -243,6 +246,7 @@ export async function postCoursePublishedToSlack(ev: SlackCoursePublishedEvent):
       : `<!channel> หลักสูตรใหม่: ${slackText(ev.courseTitle)}`,
     blocks: [
       { type: 'section', text: { type: 'mrkdwn', text: headline } },
+      ...(ev.description ? [{ type: 'section', text: { type: 'mrkdwn', text: slackText(ev.description) } }] : []),
       {
         type: 'context',
         elements: [{ type: 'mrkdwn', text: `ถึงผู้เรียน ${ev.recipientCount} คน` }],
