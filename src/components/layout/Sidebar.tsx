@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { canAccess, ROLE_HIERARCHY, type UserRole } from '@/types/user'
@@ -219,7 +219,8 @@ function SidebarLabel({ expanded, children, className = '' }: { expanded: boolea
 // ── Component ─────────────────────────────────────────────────────────────────
 export function Sidebar({ className = 'flex' }: { className?: string }) {
   const pathname = usePathname()
-  const { user, signOut } = useAuth()
+  const { user, signOut, realRole, roleOverride, setRoleOverride } = useAuth()
+  const router = useRouter()
   // Icon-only by default — hovering (or pinning via the toggle button) reveals full labels
   const [collapsed, setCollapsed] = useState(true)
   const [hovered, setHovered] = useState(false)
@@ -363,6 +364,23 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
             collapsed={!expanded}
           />
         ))}
+        {/* A super_admin learns like anyone else: this opens the app as a learner (same account,
+            same records) with My Course, Tools and the rest; the button at the bottom comes back. */}
+        {realRole === 'super_admin' && !roleOverride && (
+          <button
+            type="button"
+            onClick={() => { setRoleOverride('sale'); router.push('/courses') }}
+            title={!expanded ? 'My Course (เรียนเหมือนผู้เรียน)' : 'เปิดมุมมองผู้เรียนเพื่อเรียนหลักสูตร'}
+            className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-normal text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-all [&_svg]:text-gray-400 hover:[&_svg]:text-gray-600"
+          >
+            <span className="shrink-0 flex">
+              <svg className="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />
+              </svg>
+            </span>
+            <SidebarLabel expanded={expanded} className="flex-1 text-left">My Course</SidebarLabel>
+          </button>
+        )}
       </nav>
 
       {/* ── 3. Manage section (flat — no group label, sub-nav lives in page tabs) ── */}
@@ -379,6 +397,21 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
       <div className="flex-1" />
 
       {/* ── 4. Footer ───────────────────────────────────────────────────────── */}
+      {realRole === 'super_admin' && !!roleOverride && (
+        <div className="px-3 pb-2">
+          <button
+            type="button"
+            onClick={() => { setRoleOverride(null); router.push('/users') }}
+            title="กลับเป็น Super Admin"
+            className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold text-orange-700 bg-orange-50 border border-orange-200 hover:bg-orange-100 transition-colors"
+          >
+            <svg className="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+            </svg>
+            <SidebarLabel expanded={expanded} className="flex-1 text-left">กลับเป็น Super Admin</SidebarLabel>
+          </button>
+        </div>
+      )}
       {user && (
         <div className="border-t border-gray-100 px-3 pb-3 pt-2">
           <button
