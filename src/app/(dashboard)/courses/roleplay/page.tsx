@@ -416,7 +416,7 @@ function RadarChart({ assessments, colors = RADAR_COLORS }: {
         const p = pt(0, maxR * gridPcts[idx])
         return (
           <text key={idx} x={p.x + 4} y={p.y + 1} fontSize="7" fill="#cbd5e1"
-            fontFamily="Inter, sans-serif">
+            fontFamily="Noto Sans Thai, sans-serif">
             {v}
           </text>
         )
@@ -452,7 +452,7 @@ function RadarChart({ assessments, colors = RADAR_COLORS }: {
                 <g key={ai}>
                   <rect x={x} y={y} width={24} height={10} rx="2"
                     fill={`${color}1a`} stroke={color} strokeWidth="1.5" />
-                  <text x={x + 29} y={y + 8} fontSize="9" fill="#64748b" fontFamily="Inter, sans-serif">
+                  <text x={x + 29} y={y + 8} fontSize="9" fill="#64748b" fontFamily="Noto Sans Thai, sans-serif">
                     {a.type === 'pre' ? 'Pre Avg' : 'Post Avg'}
                   </text>
                 </g>
@@ -469,7 +469,7 @@ function RadarChart({ assessments, colors = RADAR_COLORS }: {
         return (
           <text key={i} x={p.x} y={p.y} textAnchor={anchor} dominantBaseline="middle"
             fontSize="9.5" fill={AXIS_TEXT_COLORS[i]}
-            fontFamily="Noto Sans Thai, Inter, sans-serif" fontWeight="700">
+            fontFamily="Noto Sans Thai, sans-serif" fontWeight="700">
             {g.shortLabel}
           </text>
         )

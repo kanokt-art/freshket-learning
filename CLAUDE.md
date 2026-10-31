@@ -57,7 +57,7 @@ Anything that touches security — auth and sign-in, roles and access rules (`po
 Always use **inline SVG** icons — do NOT use icon libraries (lucide-react, heroicons, etc.) unless already installed. When adding a new icon, write it as a `<svg>` element directly in JSX.
 
 ### Font
-Use **Noto Sans Thai** as the primary font, with Inter as fallback.
+Use **Noto Sans Thai** as the font. Do not use Inter.
 
 Never use `text-[10px]` or `text-[11px]` — minimum label size is `text-xs` (12px).
 

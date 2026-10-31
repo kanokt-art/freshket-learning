@@ -14,7 +14,8 @@ import { save } from '@/lib/data/collection'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
 import { useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAllShadowAcknowledgments, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList, useBucketResultsFor } from '@/hooks/useFirestore'
-import { MbtiPill } from '@/components/features/MbtiBadge'
+import { OpenableMbtiPill } from '@/components/features/MbtiBadge'
+import { formatPersonName } from '@/lib/users/displayName'
 import { MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { RoleplayRadar } from '@/components/features/RoleplayRadar'
@@ -457,7 +458,7 @@ export default function ManagerPage() {
                         </td>
                         <td className="px-4 py-3.5 hidden lg:table-cell">
                           {mbtiByUid[u.uid]
-                            ? <MbtiPill code={mbtiByUid[u.uid]} />
+                            ? <OpenableMbtiPill code={mbtiByUid[u.uid]} ownerName={formatPersonName(u)} />
                             : <span className="text-gray-400 text-sm">-</span>}
                         </td>
                         {showTeamColumn && (

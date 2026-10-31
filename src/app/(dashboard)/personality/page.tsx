@@ -156,6 +156,18 @@ export default function BucketAssessmentPage() {
               </div>
             )}
 
+            {/* Tells the person this is kept, and where to read it again. */}
+            {!isPreview && (
+              <div className="rounded-2xl border border-freshket-200 bg-freshket-50 px-4 py-3 flex items-start gap-3">
+                <svg className="size-5 text-freshket-600 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+                <p className="text-xs text-freshket-700 leading-relaxed">
+                  <span className="font-bold">บันทึกผลลงโปรไฟล์ของคุณแล้ว</span> ป้าย {result.code} จะแสดงที่โปรไฟล์ คลิกที่ป้ายเพื่อกลับมาอ่านรายละเอียดด้านล่างนี้ได้ทุกเมื่อ
+                </p>
+              </div>
+            )}
+
             {/* The full type card — also reachable later from the MBTI pill on the profile. */}
             {def.id === MBTI_DEFINITION.id && (
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">

@@ -347,7 +347,7 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
                   {user.nickname.trim()}
                 </span>
               )}
-              <MbtiBadge uid={user.uid} />
+              <MbtiBadge uid={user.uid} openable />
             </span>
           </SidebarLabel>
         </Link>

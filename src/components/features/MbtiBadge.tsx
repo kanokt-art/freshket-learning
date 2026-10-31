@@ -21,19 +21,47 @@ const AXIS_TONE: Record<string, string> = {
 const FALLBACK_TONE = 'bg-freshket-100 text-freshket-700 border-freshket-200'
 const EMPTY_TONE = 'bg-gray-100 text-gray-400 border-gray-200'
 
-/** The pill for a code that is already in hand — a roster loads everyone's codes in one query. */
-export function MbtiPill({ code, className = '' }: { code: string | undefined; className?: string }) {
+/**
+ * The pill for a code that is already in hand — a roster loads everyone's codes in one query.
+ * `openable` only changes how it looks (pointer, hover lift and ring, a small arrow) so people can
+ * tell it is clickable; the click itself is wired by OpenableMbtiPill.
+ */
+export function MbtiPill({ code, className = '', openable = false }: { code: string | undefined; className?: string; openable?: boolean }) {
   const tone = !code
     ? EMPTY_TONE
     : AXIS_TONE[code.charAt(0).toUpperCase()] ?? FALLBACK_TONE
+  const cue = openable && code
+    ? 'cursor-pointer transition-all duration-150 group-hover:-translate-y-px group-hover:shadow-md group-hover:ring-2 group-hover:ring-freshket-300'
+    : ''
+  const hint = openable ? ' · คลิกเพื่ออ่านรายละเอียด' : ''
 
   return (
     <span
-      title={code ? `${MBTI_DEFINITION.title}: ${code}` : `ยังไม่ได้ทำ${MBTI_DEFINITION.title}`}
-      className={`inline-flex items-center gap-1 text-xs font-bold px-3 py-1 rounded-full border tracking-wide ${tone} ${className}`}
+      title={code ? `${MBTI_DEFINITION.title}: ${code}${hint}` : `ยังไม่ได้ทำ${MBTI_DEFINITION.title}`}
+      className={`inline-flex items-center gap-1 text-xs font-bold px-3 py-1 rounded-full border tracking-wide ${tone} ${cue} ${className}`}
     >
       {code ?? '—'}
+      {openable && code && (
+        <svg className="size-3 opacity-60 group-hover:opacity-100 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+      )}
     </span>
+  )
+}
+
+/** A pill that opens the type card when clicked — for a code already in hand (rosters). */
+export function OpenableMbtiPill({ code, ownerName, className = '' }: { code: string | undefined; ownerName?: string; className?: string }) {
+  const [open, setOpen] = useState(false)
+  if (!code || !getMbtiProfile(code)) return <MbtiPill code={code} className={className} />
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}
+        className="group rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-freshket-300">
+        <MbtiPill code={code} openable className={className} />
+      </button>
+      {open && <MbtiProfileModal code={code} ownerName={ownerName} onClose={() => setOpen(false)} />}
+    </>
   )
 }
 
@@ -78,7 +106,7 @@ export function MbtiProfileContent({ code }: { code: string | undefined }) {
 }
 
 /** The type card as a pop-up, so it can be read again any time. */
-export function MbtiProfileModal({ code, onClose }: { code: string; onClose: () => void }) {
+export function MbtiProfileModal({ code, ownerName, onClose }: { code: string; ownerName?: string; onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -91,7 +119,7 @@ export function MbtiProfileModal({ code, onClose }: { code: string; onClose: () 
         className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-gray-100 shrink-0">
-          <p className="text-sm font-bold text-gray-800">{MBTI_DEFINITION.title} ของคุณ</p>
+          <p className="text-sm font-bold text-gray-800">{MBTI_DEFINITION.title} {ownerName ? `ของ ${ownerName}` : 'ของคุณ'}</p>
           <button type="button" onClick={onClose} aria-label="ปิด"
             className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
             <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -108,22 +136,11 @@ export function MbtiProfileModal({ code, onClose }: { code: string; onClose: () 
 }
 
 /**
- * `openable`: clicking the pill opens that person's type card. Meant for a person's own
- * profile — the card is a description of the type, so it is the same for anyone who has it.
+ * `openable`: clicking the pill opens that person's type card (a team lead / manager / admin
+ * reading a member's, or a person reading their own). `ownerName` titles the card for someone else.
  */
-export function MbtiBadge({ uid, className = '', openable = false }: { uid: string | undefined; className?: string; openable?: boolean }) {
+export function MbtiBadge({ uid, className = '', openable = false, ownerName }: { uid: string | undefined; className?: string; openable?: boolean; ownerName?: string }) {
   const { data: result } = useMyBucketResult(uid, MBTI_DEFINITION.id)
-  const [open, setOpen] = useState(false)
-  const code = result?.code
-
-  if (!openable || !code || !getMbtiProfile(code)) return <MbtiPill code={code} className={className} />
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} title="คลิกเพื่ออ่านรายละเอียดประเภทของคุณ"
-        className="rounded-full hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-freshket-300 transition-opacity">
-        <MbtiPill code={code} className={`cursor-pointer ${className}`} />
-      </button>
-      {open && <MbtiProfileModal code={code} onClose={() => setOpen(false)} />}
-    </>
-  )
+  if (!openable) return <MbtiPill code={result?.code} className={className} />
+  return <OpenableMbtiPill code={result?.code} ownerName={ownerName} className={className} />
 }

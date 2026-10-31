@@ -1,5 +1,7 @@
 'use client'
 
+import { MbtiBadge } from '@/components/features/MbtiBadge'
+import { formatPersonName } from '@/lib/users/displayName'
 import { rankToRole } from '@/lib/users/rankToRole'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
@@ -1453,6 +1455,9 @@ function UserPanel({
                     </span>
                   </InfoRow>
                 )}
+                <InfoRow label="MBTI">
+                  <MbtiBadge uid={userId} openable ownerName={profile ? formatPersonName(profile) : undefined} />
+                </InfoRow>
                 {profile?.department && (
                   <InfoRow label="Department">
                     <span className="inline-flex items-center text-xs font-bold px-3 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">

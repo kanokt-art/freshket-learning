@@ -39,7 +39,7 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ['Noto Sans Thai', 'Inter', 'sans-serif'],
+        sans: ['Noto Sans Thai', 'sans-serif'],
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
       },
       boxShadow: {

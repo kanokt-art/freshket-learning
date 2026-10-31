@@ -1514,7 +1514,7 @@ function ProfileRadarChart({ radarSets }: { radarSets: { scores: number[]; color
       <path d={gridPolys[4]} fill="#f8fafc" />
       {gridPolys.map((d, i) => <path key={i} d={d} fill="none" stroke={i === 4 ? '#d1d5db' : '#e5e7eb'} strokeWidth={i === 4 ? '1' : '0.75'} />)}
       {RADAR_GROUPS.map((_, i) => { const o = pt(i, maxR); return <line key={i} x1={cx} y1={cy} x2={o.x} y2={o.y} stroke="#e5e7eb" strokeWidth="0.75" /> })}
-      {[2,4,6,8,10].map((v, idx) => { const p = pt(0, maxR * gridPcts[idx]); return <text key={idx} x={p.x+4} y={p.y+1} fontSize="7" fill="#cbd5e1" fontFamily="Inter,sans-serif">{v}</text> })}
+      {[2,4,6,8,10].map((v, idx) => { const p = pt(0, maxR * gridPcts[idx]); return <text key={idx} x={p.x+4} y={p.y+1} fontSize="7" fill="#cbd5e1" fontFamily="Noto Sans Thai, sans-serif">{v}</text> })}
       {radarSets.map((rs, ri) => (
         <g key={ri}>
           <path d={poly(rs.scores)} fill={`${rs.color}1a`} stroke={rs.color} strokeWidth="2" strokeLinejoin="round" />
@@ -1524,12 +1524,12 @@ function ProfileRadarChart({ radarSets }: { radarSets: { scores: number[]; color
       {radarSets.length > 1 && radarSets.map((rs, ri) => {
         const x = cx - (radarSets.length * 45) / 2 + ri * 90
         const y = cy + maxR + 32
-        return <g key={ri}><rect x={x} y={y} width={22} height={9} rx="2" fill={`${rs.color}1a`} stroke={rs.color} strokeWidth="1.5" /><text x={x+27} y={y+7.5} fontSize="8.5" fill="#64748b" fontFamily="Inter,sans-serif">{rs.label}</text></g>
+        return <g key={ri}><rect x={x} y={y} width={22} height={9} rx="2" fill={`${rs.color}1a`} stroke={rs.color} strokeWidth="1.5" /><text x={x+27} y={y+7.5} fontSize="8.5" fill="#64748b" fontFamily="Noto Sans Thai, sans-serif">{rs.label}</text></g>
       })}
       {RADAR_GROUPS.map((g, i) => {
         const p = pt(i, maxR + 22)
         const anchor = Math.abs(p.x - cx) < 10 ? 'middle' : p.x > cx ? 'start' : 'end'
-        return <text key={i} x={p.x} y={p.y} textAnchor={anchor} dominantBaseline="middle" fontSize="9" fill={AXIS_COLORS[i]} fontFamily="Noto Sans Thai,Inter,sans-serif" fontWeight="700">{g.shortLabel}</text>
+        return <text key={i} x={p.x} y={p.y} textAnchor={anchor} dominantBaseline="middle" fontSize="9" fill={AXIS_COLORS[i]} fontFamily="Noto Sans Thai, sans-serif" fontWeight="700">{g.shortLabel}</text>
       })}
     </svg>
   )

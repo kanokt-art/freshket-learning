@@ -275,7 +275,7 @@ Reference สำหรับตอนเขียนหรือแก้ skill 
 | Rule | Value |
 |---|---|
 | Icons | SVG inline เท่านั้น (ห้าม lucide/heroicons เว้นแต่ติดตั้งอยู่แล้ว) |
-| Font | `'Noto Sans Thai', 'Inter', sans-serif` |
+| Font | `'Noto Sans Thai', sans-serif` |
 | Primary color | `freshket-500` = `#00ce7c` |
 | Background | `white` หรือ `slate-50` เท่านั้น (ห้าม gradient เป็น bg หลัก) |
 | Minimum text size | `text-xs` (12px) |

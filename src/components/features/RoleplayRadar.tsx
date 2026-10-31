@@ -42,7 +42,7 @@ export function RoleplayRadar({ assessments }: { assessments: RoleplayAssessment
       })}
       {[2, 4, 6, 8, 10].map((v, idx) => {
         const p = pt(0, maxR * gridPcts[idx])
-        return <text key={idx} x={p.x + 4} y={p.y + 1} fontSize="7" fill="#cbd5e1" fontFamily="Inter, sans-serif">{v}</text>
+        return <text key={idx} x={p.x + 4} y={p.y + 1} fontSize="7" fill="#cbd5e1" fontFamily="Noto Sans Thai, sans-serif">{v}</text>
       })}
 
       {shown.map((a, ai) => {
@@ -71,7 +71,7 @@ export function RoleplayRadar({ assessments }: { assessments: RoleplayAssessment
               return (
                 <g key={ai}>
                   <rect x={x} y={y} width={24} height={10} rx="2" fill={`${color}1a`} stroke={color} strokeWidth="1.5" />
-                  <text x={x + 29} y={y + 8} fontSize="9" fill="#64748b" fontFamily="Inter, sans-serif">
+                  <text x={x + 29} y={y + 8} fontSize="9" fill="#64748b" fontFamily="Noto Sans Thai, sans-serif">
                     {a.type === 'pre' ? 'Pre' : 'Post'}
                   </text>
                 </g>
@@ -86,7 +86,7 @@ export function RoleplayRadar({ assessments }: { assessments: RoleplayAssessment
         const anchor = Math.abs(p.x - cx) < 10 ? 'middle' : p.x > cx ? 'start' : 'end'
         return (
           <text key={i} x={p.x} y={p.y} textAnchor={anchor} dominantBaseline="middle"
-            fontSize="9.5" fill={AXIS_TEXT_COLORS[i]} fontFamily="Noto Sans Thai, Inter, sans-serif" fontWeight="700">
+            fontSize="9.5" fill={AXIS_TEXT_COLORS[i]} fontFamily="Noto Sans Thai, sans-serif" fontWeight="700">
             {g.shortLabel}
           </text>
         )
