@@ -3,9 +3,13 @@
 // learner who closed the tab, or went to their profile, finished the questionnaire and still showed no
 // progress. The server now writes the progress as part of the submission, so it can no longer be lost.
 //
-// It records the LESSON, never the course as finished: a course is finished when the learner presses
-// "จบการเรียน" after every lesson is done (the course page), or when its graded post-test is passed. The
-// server must not decide that for them, or the course page would take it back the next time it syncs.
+// It also finishes the course when this was the last thing left: every lesson done, nothing graded to
+// pass and no take-away to write. A questionnaire has no "finish" step worth asking for, so a learner who
+// has answered it must not sit under "in progress". A course with a graded post-test is finished only by
+// grading, and one that asks for a take-away waits for it. (The course page can no longer write a
+// finished course back to in progress, so this sticks.)
+
+import { requiresPostTest } from '@/lib/courses/completion'
 
 type Doc = Record<string, unknown>
 
@@ -14,6 +18,7 @@ interface CourseShape {
   id?: string
   title?: string
   isPublished?: boolean
+  hasKeyTakeAway?: boolean
   endDate?: unknown
   topics?: Array<{ lessons?: LessonShape[] }>
 }
@@ -21,13 +26,15 @@ interface CourseShape {
 export interface ProgressWrite {
   /** The record to merge into trainingRecords/{uid}_{courseId}. */
   record: Doc
+  /** True when this submission is what finishes the course. */
+  completedNow: boolean
 }
 
 const lessonsOf = (course: CourseShape): LessonShape[] => (course.topics ?? []).flatMap((t) => t.lessons ?? [])
 
 /**
- * What a submitted questionnaire does to the learner's record for its course (the lesson is ticked and
- * the course is in progress), or null when the lesson is not really a questionnaire lesson of this course
+ * What a submitted questionnaire does to the learner's record for its course (the lesson is ticked; the
+ * course is finished when nothing else is left), or null when the lesson is not really a questionnaire lesson of this course
  * (so a request cannot tick anything it names).
  */
 export function questionnaireProgress(
@@ -51,6 +58,9 @@ export function questionnaireProgress(
 
   // A result already recorded (finished or failed) is never taken back by a tick.
   const alreadyFinal = prev?.status === 'completed' || prev?.status === 'failed'
+  const finishesByLessons = !requiresPostTest(course) && !course.hasKeyTakeAway
+  const allDone = lessons.every((l) => !!l.id && completedLessonIds.includes(l.id))
+  const completedNow = finishesByLessons && allDone && prev?.status !== 'completed' && prev?.status !== 'failed'
 
   const record: Doc = {
     userId: uid,
@@ -62,8 +72,9 @@ export function questionnaireProgress(
     source: prev?.source ?? 'manual',
     updatedAt: now,
   }
-  if (!alreadyFinal) record.status = 'in_progress'
+  if (!alreadyFinal) record.status = completedNow ? 'completed' : 'in_progress'
   if (!prev?.startedAt) record.startedAt = now
+  if (completedNow && !prev?.completedAt) record.completedAt = now
   if (course.endDate && !prev?.dueDate) record.dueDate = new Date(course.endDate as string)
-  return { record }
+  return { record, completedNow }
 }

@@ -9,11 +9,31 @@ const course = (over: Record<string, unknown> = {}) => ({
 const now = new Date('2026-11-02T10:00:00Z')
 
 describe('questionnaireProgress', () => {
-  it('ticks the lesson and starts the course: in progress, never finished (the learner presses finish)', () => {
+  it('finishes a course whose only lesson is the questionnaire, and says it finished it now', () => {
     const r = questionnaireProgress(course(), 'personality_mbti', 'mbti', null, 'u1', 'Somchai', now)!
-    expect(r.record).toMatchObject({ userId: 'u1', courseId: 'mbti_personality', status: 'in_progress', completedLessonIds: ['personality_mbti'], totalLessons: 1 })
+    expect(r.completedNow).toBe(true)
+    expect(r.record).toMatchObject({ userId: 'u1', courseId: 'mbti_personality', status: 'completed', completedLessonIds: ['personality_mbti'], totalLessons: 1 })
     expect(r.record.startedAt).toEqual(now)
+    expect(r.record.completedAt).toEqual(now)
+  })
+
+  it('is in progress while other lessons are still to do', () => {
+    const c = course({ topics: [{ lessons: [{ id: 'v1', type: 'video' }, { id: 'personality_mbti', type: 'personality' }] }] })
+    const r = questionnaireProgress(c, 'personality_mbti', 'mbti', null, 'u1', 'S', now)!
+    expect(r.completedNow).toBe(false)
+    expect(r.record.status).toBe('in_progress')
     expect(r.record.completedAt).toBeUndefined()
+  })
+
+  it('leaves a graded course to the grading, and waits for a take-away when the course asks for one', () => {
+    const graded = course({ topics: [{ lessons: [{ id: 'personality_mbti', type: 'personality' }, { id: 'q', type: 'quiz', quizRole: 'post_test' }] }] })
+    expect(questionnaireProgress(graded, 'personality_mbti', 'mbti', null, 'u1', 'S', now)!.record.status).toBe('in_progress')
+    expect(questionnaireProgress(course({ hasKeyTakeAway: true }), 'personality_mbti', 'mbti', null, 'u1', 'S', now)!.record.status).toBe('in_progress')
+  })
+
+  it('does not announce a completion twice', () => {
+    const r = questionnaireProgress(course(), 'personality_mbti', 'mbti', { status: 'completed', completedLessonIds: ['personality_mbti'], completedAt: now }, 'u1', 'S', now)!
+    expect(r.completedNow).toBe(false)
   })
 
   it('keeps earlier ticks and the first start time', () => {
@@ -23,6 +43,7 @@ describe('questionnaireProgress', () => {
     expect(r.record.completedLessonIds).toEqual(['v1', 'personality_mbti'])
     expect(r.record).not.toHaveProperty('startedAt')
     expect(r.record.totalLessons).toBe(2)
+    expect(r.record.status).toBe('completed')
   })
 
   it('never takes back a result already recorded', () => {
