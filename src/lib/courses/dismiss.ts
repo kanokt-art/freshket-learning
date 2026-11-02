@@ -5,11 +5,9 @@
 
 export type DismissVerdict = { ok: true } | { ok: false; reason: 'not_completed' | 'failed_first_attempt' }
 
-interface AttemptShape { attemptNumber?: unknown; passed?: unknown }
-
 export function canDismissCourse(
   record: Record<string, unknown> | null | undefined,
-  attempts: readonly AttemptShape[],
+  attempts: readonly Record<string, unknown>[],
 ): DismissVerdict {
   if (record?.status !== 'completed') return { ok: false, reason: 'not_completed' }
   // The first attempt of any quiz of the course decides. A course without a quiz has no attempts.
