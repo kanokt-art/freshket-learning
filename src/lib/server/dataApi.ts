@@ -33,6 +33,7 @@ import {
 import { StoreError, type Store, type Query } from './store'
 import { refusesClientStatus } from '@/lib/courses/completion'
 import { refreshManyUserStats } from './userStats'
+import { announceCourseCompleted } from './courseCompleted'
 
 // ── Results ─────────────────────────────────────────────────────────────────
 
@@ -268,6 +269,8 @@ export async function runWrite(store: Store, actor: Actor, body: unknown): Promi
 
   // Whose training records this request changes: their summary is refreshed after the write.
   const statsUids = new Set<string>()
+  // Records that this request turns into "completed": the trainer group hears about each, once.
+  const completions: Array<{ userId: string; courseId: string }> = []
 
   // Judge every document first. `state` moves forward as we go, so a document is
   // judged as it would be after the operations before it in this same request.
@@ -308,6 +311,10 @@ export async function runWrite(store: Store, actor: Actor, body: unknown): Promi
     if (p.collection === 'trainingRecords') {
       const owner = incoming?.userId ?? existing?.userId
       if (typeof owner === 'string' && owner) statsUids.add(owner)
+      if (p.kind !== 'delete' && incoming?.status === 'completed' && existing?.status !== 'completed') {
+        const courseId = String(incoming.courseId ?? existing?.courseId ?? '')
+        if (typeof owner === 'string' && owner && courseId) completions.push({ userId: owner, courseId })
+      }
     }
 
     state.set(keyOf(p.path, p.id), incoming)
@@ -336,6 +343,8 @@ export async function runWrite(store: Store, actor: Actor, body: unknown): Promi
       console.error('userStats refresh after a write failed', e)
     }
   }
+
+  for (const c of completions) await announceCourseCompleted(store as never, c.userId, c.courseId)
 
   return { ok: true, value: { results: planned.map((p) => ({ id: p.id })) } }
 }

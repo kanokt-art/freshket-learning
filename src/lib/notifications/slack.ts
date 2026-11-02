@@ -102,6 +102,40 @@ export async function postCompletionToSlack(ev: SlackCompletionEvent): Promise<b
   return postToTeam(payload)
 }
 
+export interface SlackCourseCompletedEvent {
+  learnerName: string
+  position?: string
+  department?: string
+  courseTitle: string
+  /** The learner's card on the team page. */
+  memberUrl?: string
+}
+
+/**
+ * A learner finished a course that is finished by its lessons (no graded post-test): a video, a slide
+ * deck, a questionnaire. The graded ones are announced by the quiz route with their score, so this is
+ * the other half: every kind of completion now reaches the trainer × team-lead group.
+ */
+export async function postCourseCompletedToSlack(ev: SlackCourseCompletedEvent): Promise<boolean> {
+  const meta = slackText([ev.position, ev.department].filter(Boolean).join(' · '))
+  return postToTeam({
+    text: `${slackText(ev.learnerName)} เรียนจบ "${slackText(ev.courseTitle)}"`,
+    blocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `🎓 *${slackText(ev.learnerName)}* เรียนจบหลักสูตร\n*${slackText(ev.courseTitle)}*` },
+      },
+      ...(meta ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: meta }] }] : []),
+      ...(ev.memberUrl
+        ? [{
+            type: 'actions',
+            elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูประวัติการเรียน' }, url: ev.memberUrl }],
+          }]
+        : []),
+    ],
+  })
+}
+
 /**
  * Post to the trainer × team-lead group. Goes through the Slack app (bot) into the group
  * channel when SLACK_BOT_TOKEN and SLACK_TRAINER_CHANNEL_ID are set — the bot must be a
