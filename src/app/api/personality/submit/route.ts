@@ -5,7 +5,6 @@ import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { scoreBuckets, minAnswersFor, type BucketAnswers } from '@/lib/bucketAssessments/scoreBuckets'
 import { questionnaireProgress } from '@/lib/server/questionnaireProgress'
 import { refreshUserStats } from '@/lib/server/userStats'
-import { announceCourseCompleted } from '@/lib/server/courseCompleted'
 
 // Scoring for bucket assessments (MBTI, selling style, and any future one).
 //
@@ -112,7 +111,6 @@ export async function POST(req: NextRequest) {
         if (progress) {
           await store.set('trainingRecords', recordId, progress.record, { merge: true })
           await refreshUserStats(store, uid)
-          if (progress.completedNow) await announceCourseCompleted(store as never, uid, courseId)
         }
       } catch (e) {
         console.error('questionnaire progress write failed', e)
