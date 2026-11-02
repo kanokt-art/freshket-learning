@@ -36,6 +36,12 @@ describe('statusTheBrowserMayWrite', () => {
     expect(statusTheBrowserMayWrite(lessonsOnly, 'in_progress', 'completed')).toBe('completed')
   })
 
+  it('a finished course stays finished when the learner comes back and the browser says in progress', () => {
+    expect(statusTheBrowserMayWrite(lessonsOnly, 'completed', 'in_progress')).toBeUndefined()
+    expect(statusTheBrowserMayWrite(lessonsOnly, 'completed', 'not_started')).toBeUndefined()
+    expect(statusTheBrowserMayWrite(lessonsOnly, 'in_progress', 'in_progress')).toBe('in_progress')
+  })
+
   it('never says "completed" for a course with a graded test: it says in progress', () => {
     expect(statusTheBrowserMayWrite(withPost, undefined, 'completed')).toBe('in_progress')
     expect(statusTheBrowserMayWrite(withPost, 'in_progress', 'completed')).toBe('in_progress')

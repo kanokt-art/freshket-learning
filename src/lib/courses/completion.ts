@@ -46,6 +46,9 @@ export function statusTheBrowserMayWrite(
   stored: string | undefined,
   wanted: TrainingStatus,
 ): TrainingStatus | undefined {
+  // Finished stays finished: someone who completed a course and opens it (or retakes a lesson) again
+  // — possibly on a device whose local progress is empty — must not be shown as "in progress".
+  if (stored === 'completed') return undefined
   if (!requiresPostTest(course)) return wanted
   if (isFinal(stored)) return undefined
   return wanted === 'completed' || wanted === 'failed' ? 'in_progress' : wanted
