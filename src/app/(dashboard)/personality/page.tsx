@@ -84,7 +84,7 @@ export default function BucketAssessmentPage() {
       const res = await authedFetch('/api/personality/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ definitionId: def.id, answers: finalAnswers, ...(courseId ? { courseId } : {}) }),
+        body: JSON.stringify({ definitionId: def.id, answers: finalAnswers, ...(courseId ? { courseId } : {}), ...(courseId && lessonId ? { lessonId } : {}) }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'ส่งคำตอบไม่สำเร็จ')

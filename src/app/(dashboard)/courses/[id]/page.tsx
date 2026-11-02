@@ -20,7 +20,7 @@ import { syncTrainingRecord, countCourseLessons } from '@/lib/progress'
 import { lessonLabel, topicLabel } from '@/lib/courses/labels'
 import { readVideoProgress, furthest, videoProgressKey, NO_VIDEO_PROGRESS, type VideoProgress } from '@/lib/courses/videoProgress'
 import { progKey, statusKey, takeawayKey, readScoped } from '@/lib/courseProgressKeys'
-import { save } from '@/lib/data/collection'
+import { get, save } from '@/lib/data/collection'
 
 // ── Progress tracking via localStorage (mirrored to Firestore, see persist()) ──
 // preDone/postDone/preScore/postScore were dropped along with the course-level
@@ -207,6 +207,29 @@ export default function CourseDetailPage() {
   useEffect(() => {
     if (!user?.uid) return
     setProgress(loadProgress(user.uid, id))
+  }, [id, user?.uid])
+
+  // Lessons the server already recorded (a questionnaire ticks its own lesson when it is submitted) join
+  // the local progress, so this page neither misses them nor writes a shorter list back over them.
+  useEffect(() => {
+    if (!user?.uid) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const rec = await get<{ completedLessonIds?: string[] }>('trainingRecords', `${user.uid}_${id}`)
+        const server = (rec?.completedLessonIds ?? []).filter((l) => !l.endsWith(':post'))
+        if (cancelled || server.length === 0) return
+        setProgress((prev) => {
+          const done = prev.completedLessonIds ?? []
+          const missing = server.filter((l) => !done.includes(l))
+          if (missing.length === 0) return prev
+          const next = { ...prev, completedLessonIds: [...done, ...missing] }
+          saveProgress(user.uid, id, next)
+          return next
+        })
+      } catch { /* offline: the local progress stands */ }
+    })()
+    return () => { cancelled = true }
   }, [id, user?.uid])
 
   // Re-read progress when user navigates back (window focus / visibility)

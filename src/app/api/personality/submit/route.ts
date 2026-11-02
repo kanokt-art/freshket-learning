@@ -3,6 +3,9 @@ import { getStore } from '@/lib/server/store'
 import { requireStaff } from '@/lib/server/auth'
 import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { scoreBuckets, minAnswersFor, type BucketAnswers } from '@/lib/bucketAssessments/scoreBuckets'
+import { questionnaireProgress } from '@/lib/server/questionnaireProgress'
+import { refreshUserStats } from '@/lib/server/userStats'
+import { announceCourseCompleted } from '@/lib/server/courseCompleted'
 
 // Scoring for bucket assessments (MBTI, selling style, and any future one).
 //
@@ -63,6 +66,12 @@ export async function POST(req: NextRequest) {
     return bad('Invalid courseId')
   }
 
+  // Which lesson of the course this is (when it was taken from a course).
+  const lessonId = body.lessonId
+  if (lessonId !== undefined && (typeof lessonId !== 'string' || !ID_RE.test(lessonId))) {
+    return bad('Invalid lessonId')
+  }
+
   const answers = parseAnswers(body.answers, def.questions.length)
   if (!answers) return bad('Invalid answers payload')
 
@@ -87,6 +96,28 @@ export async function POST(req: NextRequest) {
       ...(typeof courseId === 'string' ? { courseId } : {}),
       takenAt: new Date(),
     }, { merge: false })
+
+    // Tick the course lesson as part of the submission, so progress does not depend on the learner
+    // returning to the course page. Best effort: the result is already saved, and the course page
+    // still ticks it when they come back.
+    if (typeof courseId === 'string' && typeof lessonId === 'string') {
+      try {
+        const store = getStore()
+        const course = await store.get('courses', courseId)
+        const recordId = `${uid}_${courseId}`
+        const prev = await store.get('trainingRecords', recordId)
+        const name = String((gate.person as { displayNameEN?: string; displayName?: string }).displayNameEN
+          || (gate.person as { displayName?: string }).displayName || '')
+        const progress = questionnaireProgress(course as never, lessonId, def.id, prev, uid, name)
+        if (progress) {
+          await store.set('trainingRecords', recordId, progress.record, { merge: true })
+          await refreshUserStats(store, uid)
+          if (progress.completedNow) await announceCourseCompleted(store as never, uid, courseId)
+        }
+      } catch (e) {
+        console.error('questionnaire progress write failed', e)
+      }
+    }
 
     return NextResponse.json(result)
   } catch (err) {
