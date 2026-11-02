@@ -5064,7 +5064,8 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                         className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.allowRetake ? 'bg-freshket-500' : 'bg-gray-200'}`}>
                         <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.allowRetake ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                       </button>
-                      <span className="text-xs text-gray-600 font-normal">ให้เรียน/สอบซ้ำได้หลังเรียนจบ (ปิด = อ่านเนื้อหาได้ แต่ทำแบบทดสอบใหม่ไม่ได้)</span>
+                      <span className="text-xs text-gray-600 font-normal">ให้เรียน/สอบซ้ำได้หลังเรียนจบ</span>
+                      <InfoTooltip text="ปิด: ผู้เรียนที่เรียนจบแล้วยังเปิดอ่าน slide/วิดีโอได้ แต่ทำแบบทดสอบหรือแบบประเมินใหม่ไม่ได้ เพื่อกันการแก้คะแนน เปิด: ทำซ้ำได้ ถ้าต้องการให้ผู้เรียนบางคนทำใหม่ในคอร์สที่ปิดอยู่ ให้ Super Admin กด ล้างประวัติ ที่ผลของผู้เรียนคนนั้น" />
                     </div>
                     <div className="flex items-center gap-2">
                       <button type="button" onClick={() => set('openEnrollment', !form.openEnrollment)}
@@ -5072,6 +5073,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                         <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.openEnrollment ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                       </button>
                       <span className="text-xs text-gray-600 font-normal">เปิดให้ทุกคนเลือกเรียนเอง (Library)</span>
+                      <InfoTooltip text="หลักสูตรไม่บังคับ: ทุกคนเห็นในแท็บ Library ของ My Course และกด Enroll เพื่อเรียนเองได้ แม้ไม่ได้อยู่ในกลุ่มเป้าหมาย คนที่ Enroll จะถูกนับในรายงานของ Team Lead และแจ้ง Slack ตอนเรียนจบเหมือนผู้เรียนปกติ ปิด: เห็นเฉพาะกลุ่มเป้าหมาย" />
                     </div>
                   </div>
                 </div>
