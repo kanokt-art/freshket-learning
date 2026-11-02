@@ -4,6 +4,7 @@ import { isInCourseTarget } from '@/lib/courses/audience'
 import { CopyableText, CopyIcon, StartDateCell } from '@/components/common/EmployeeCells'
 import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { authedFetch } from '@/lib/api/authedFetch'
 import { useAuth } from '@/hooks/useAuth'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
@@ -284,6 +285,27 @@ export default function SaleDashboardPage() {
 
   const pendingCourseCount = pendingCourses.length
 
+  // A finished course the learner has taken off their list stays in the stats above, just not in this grid.
+  const listedForYou = useMemo(
+    () => forYouCourses.filter((c) => !recordByCourse[c.id]?.dismissedAt),
+    [forYouCourses, recordByCourse],
+  )
+  const dismissCourse = async (courseId: string) => {
+    try {
+      const res = await authedFetch('/api/training-records/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ courseId }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        window.alert(typeof data.error === 'string' ? data.error : 'ซ่อนหลักสูตรไม่สำเร็จ')
+      }
+    } catch {
+      window.alert('ซ่อนหลักสูตรไม่สำเร็จ')
+    }
+  }
+
   // Training Status donut — real backend state. Each assigned+published course
   // falls into exactly one bucket (priority: completed → failed → overdue →
   // in_progress → not started), so the segments always sum to the course total.
@@ -514,11 +536,11 @@ export default function SaleDashboardPage() {
               selectedUid={selectedUser?.uid}
             />
           ) : (
-            forYouCourses.length > 0 && (
+            listedForYou.length > 0 && (
               <section>
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-sm font-bold text-gray-900">
-                    For You <span className="ml-2 text-xs font-normal text-gray-400">{forYouCourses.length} หลักสูตร</span>
+                    For You <span className="ml-2 text-xs font-normal text-gray-400">{listedForYou.length} หลักสูตร</span>
                   </h2>
                   <button onClick={() => router.push('/courses')} className="text-xs font-bold text-indigo-500 hover:text-indigo-600 flex items-center gap-1">
                     My Course
@@ -526,12 +548,13 @@ export default function SaleDashboardPage() {
                   </button>
                 </div>
                 <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {forYouCourses.map((course) => (
+                  {listedForYou.map((course) => (
                     <LearnerCourseGridCard
                       key={course.id}
                       course={course}
                       record={recordByCourse[course.id]}
                       onClick={() => router.push(`/courses/${course.id}`)}
+                      onDismiss={() => void dismissCourse(course.id)}
                     />
                   ))}
                 </div>

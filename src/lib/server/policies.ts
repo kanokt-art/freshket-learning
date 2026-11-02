@@ -139,7 +139,7 @@ const superWrites: Pick<Policy, 'create' | 'update' | 'delete'> = {
 }
 
 /** Fields the server owns on a training record: a score must come from grading, not from the learner. */
-const SERVER_OWNED_RECORD_FIELDS = ['score', 'passScore', 'attemptCount']
+const SERVER_OWNED_RECORD_FIELDS = ['score', 'passScore', 'attemptCount', 'dismissedAt']
 
 /** Fields only a super_admin may change on a user. */
 const SELF_PROTECTED_USER_FIELDS = ['role', 'teamId', 'managerId', 'visibleTeamIds', 'slackUserId']

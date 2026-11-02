@@ -269,18 +269,32 @@ function Thumb({ course, size = 'sm' }: { course: Course; size?: 'sm' | 'lg' }) 
 // ── My Course grid card — thumbnail + level badge, category, title,
 // lesson/duration meta, progress bar + status (replaces price on the
 // reference layout, since that's the number that matters to a learner). ────
-export function LearnerCourseGridCard({ course, record, onClick }: {
+export function LearnerCourseGridCard({ course, record, onClick, onDismiss }: {
   course: Course; record?: TrainingRecord; onClick: () => void
+  /** Take a finished course off the learner's list. Offered only on a finished course. */
+  onDismiss?: () => void
 }) {
   const status: TrainingStatus = record?.status ?? 'not_started'
   const total = countLessons(course)
   const pct = recordProgressPercent(record)
   const isImg = !!course.thumbnailUrl && (course.thumbnailUrl.startsWith('http') || course.thumbnailUrl.startsWith('/'))
   return (
+    <div className="relative flex flex-col">
+    {onDismiss && status === 'completed' && (
+      <button
+        type="button"
+        onClick={onDismiss}
+        title="ซ่อนหลักสูตรนี้จากรายการ"
+        aria-label="ซ่อนหลักสูตรนี้จากรายการ"
+        className="absolute top-2 right-2 z-10 size-7 flex items-center justify-center rounded-full bg-white/90 border border-gray-200 text-gray-500 hover:text-rose-600 hover:border-rose-200 transition-all duration-150"
+      >
+        <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+      </button>
+    )}
     <button
       onClick={onClick}
       style={{ border: 'var(--card-border)' }}
-      className="flex flex-col text-left bg-white rounded-2xl overflow-hidden hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 group"
+      className="flex flex-col flex-1 text-left bg-white rounded-2xl overflow-hidden hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 group"
     >
       <div className="h-32 w-full relative shrink-0" style={{ background: isImg ? undefined : `${DONUT_COLORS[course.category]}22` }}>
         {isImg && (
@@ -326,5 +340,6 @@ export function LearnerCourseGridCard({ course, record, onClick }: {
         </div>
       </div>
     </button>
+    </div>
   )
 }

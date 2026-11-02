@@ -258,6 +258,8 @@ export default function CoursesPage() {
     myRecords.forEach((r) => { m[r.courseId] = r.status })
     return m
   }, [myRecords])
+  // Finished courses the learner took off their own lists.
+  const dismissedIds = useMemo(() => new Set(myRecords.filter((r) => r.dismissedAt).map((r) => r.courseId)), [myRecords])
 
   const visible = useMemo(() => {
     // Includes the saved department/team conditions, so someone who joined after
@@ -280,11 +282,11 @@ export default function CoursesPage() {
         .filter((c) => {
           if (localDeleted.has(c.id)) return false
           if (isSuperAdmin) return true
-          return c.isPublished && isTargeted(c)
+          return c.isPublished && isTargeted(c) && !dismissedIds.has(c.id)
         })
         .map((c) => localUpdated[c.id] ?? c),
     ]
-  }, [allCourses, localCreated, localUpdated, localDeleted, user, isSuperAdmin])
+  }, [allCourses, localCreated, localUpdated, localDeleted, user, isSuperAdmin, dismissedIds])
 
   const filtered = useMemo(() => {
     let list = activeCategory === 'all' ? visible : visible.filter((c) => c.category === activeCategory)

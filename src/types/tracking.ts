@@ -29,6 +29,8 @@ export interface TrainingRecord {
   // and lets admins see real progress instead of only a coarse status.
   completedLessonIds?: string[]
   totalLessons?: number
+  // Set by POST /api/training-records/dismiss when the learner takes a finished course off their own lists.
+  dismissedAt?: Date
 }
 
 // Fraction of a course's lessons the learner has completed (0-100).
