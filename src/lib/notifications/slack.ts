@@ -38,7 +38,27 @@ export function isSalesDepartment(department: string | undefined): boolean {
   return prefixes.some((p) => d.startsWith(p))
 }
 
+/** A Team Lead to name in a post: mentioned when their Slack id is known. */
+export interface SlackTeamLead {
+  name: string
+  slackUserId?: string
+}
+
+/**
+ * "Team Lead: @A @B" — a real mention where the Slack id is on file (so they are pinged), the name in
+ * plain text where it is not. Empty when there is no Team Lead. The mention is built here from a
+ * validated id; every name goes through slackText, so nothing typed anywhere can add a mention.
+ */
+export function teamLeadLine(leads: readonly SlackTeamLead[] | undefined): string {
+  const parts = (leads ?? [])
+    .map((l) => (l.slackUserId && /^[UW][A-Z0-9]{6,}$/.test(l.slackUserId) ? `<@${l.slackUserId}>` : slackText(l.name)))
+    .filter(Boolean)
+  return parts.length > 0 ? `Team Lead: ${parts.join(' ')}` : ''
+}
+
 export interface SlackCompletionEvent {
+  /** The learner's Team Lead(s), tagged under the card. */
+  teamLeads?: SlackTeamLead[]
   learnerName: string
   position?: string
   department?: string
@@ -69,8 +89,9 @@ export async function postCompletionToSlack(ev: SlackCompletionEvent): Promise<b
   // Block Kit rather than a bare `text`, so the message renders as a card in
   // the channel. `text` is still set because Slack uses it for the notification
   // preview and for clients that can't render blocks.
+  const leadLine = teamLeadLine(ev.teamLeads)
   const payload = {
-    text: `${slackText(ev.learnerName)} เรียนจบ "${slackText(ev.courseTitle)}" — ${ev.passed ? 'ผ่าน' : 'ยังไม่ผ่าน'}`,
+    text: `${slackText(ev.learnerName)} เรียนจบ "${slackText(ev.courseTitle)}" — ${ev.passed ? 'ผ่าน' : 'ยังไม่ผ่าน'}${leadLine ? ` · ${leadLine}` : ''}`,
     blocks: [
       {
         type: 'section',
@@ -86,6 +107,7 @@ export async function postCompletionToSlack(ev: SlackCompletionEvent): Promise<b
           ...(meta ? [{ type: 'mrkdwn' as const, text: meta }] : []),
         ],
       },
+      ...(leadLine ? [{ type: 'section', text: { type: 'mrkdwn', text: leadLine } }] : []),
       ...(ev.courseUrl
         ? [{
             type: 'actions',
@@ -103,6 +125,8 @@ export async function postCompletionToSlack(ev: SlackCompletionEvent): Promise<b
 }
 
 export interface SlackCourseCompletedEvent {
+  /** The learner's Team Lead(s), tagged under the card. */
+  teamLeads?: SlackTeamLead[]
   learnerName: string
   position?: string
   department?: string
@@ -118,14 +142,16 @@ export interface SlackCourseCompletedEvent {
  */
 export async function postCourseCompletedToSlack(ev: SlackCourseCompletedEvent): Promise<boolean> {
   const meta = slackText([ev.position, ev.department].filter(Boolean).join(' · '))
+  const leadLine = teamLeadLine(ev.teamLeads)
   return postToTeam({
-    text: `${slackText(ev.learnerName)} เรียนจบ "${slackText(ev.courseTitle)}"`,
+    text: `${slackText(ev.learnerName)} เรียนจบ "${slackText(ev.courseTitle)}"${leadLine ? ` · ${leadLine}` : ''}`,
     blocks: [
       {
         type: 'section',
         text: { type: 'mrkdwn', text: `🎓 *${slackText(ev.learnerName)}* เรียนจบหลักสูตร\n*${slackText(ev.courseTitle)}*` },
       },
       ...(meta ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: meta }] }] : []),
+      ...(leadLine ? [{ type: 'section', text: { type: 'mrkdwn', text: leadLine } }] : []),
       ...(ev.memberUrl
         ? [{
             type: 'actions',

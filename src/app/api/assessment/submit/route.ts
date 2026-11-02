@@ -8,6 +8,7 @@ import { gradeSubmission, type GivenAnswers } from '@/lib/assessment/grade'
 import { postCompletionToSlack, isSalesDepartment } from '@/lib/notifications/slack'
 import { dmPeople } from '@/lib/notifications/slackDm'
 import { quizNotice, type QuizNotice } from '@/lib/notifications/quizNotice'
+import { teamLeadsOf } from '@/lib/server/teamLeads'
 import type { Assessment, Question } from '@/types/assessment'
 import type { Course } from '@/types/course'
 import type { UserProfile } from '@/types/user'
@@ -126,6 +127,8 @@ async function notifyManagerOfCompletion(
         score,
         passed,
         awaitingReview,
+        // Their Team Lead(s) are tagged under the card.
+        teamLeads: await teamLeadsOf(store as never, { teamId: learner.teamId, uid }),
         // The learner's card on the team page, not the course: whoever reads
         // this in Slack wants the person's history and their own comment box.
         courseUrl: appUrl ? `${appUrl}/manager?user=${encodeURIComponent(uid)}` : undefined,

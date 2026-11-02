@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { slackText } from '@/lib/notifications/slackText'
-import { postCoursePublishedToSlack, postShadowSubmittedToSlack } from '@/lib/notifications/slack'
+import { postCoursePublishedToSlack, postShadowSubmittedToSlack, postCourseCompletedToSlack, postCompletionToSlack, teamLeadLine } from '@/lib/notifications/slack'
 
 describe('slackText', () => {
   it('turns Slack\'s special markup into plain text', () => {
@@ -58,5 +58,44 @@ describe('messages built from a title or a name carry no live markup of the call
     const body = sent[0]
     expect(body).not.toContain('<!channel>')
     expect(body).not.toContain('<https://evil.example')
+  })
+})
+
+describe('tagging the Team Lead', () => {
+  it('mentions a lead whose Slack id is known and names one whose is not', () => {
+    expect(teamLeadLine([{ name: 'Malee', slackUserId: 'U01ABCDEF2' }, { name: 'Somsak' }])).toBe('Team Lead: <@U01ABCDEF2> Somsak')
+    expect(teamLeadLine([])).toBe('')
+    expect(teamLeadLine(undefined)).toBe('')
+  })
+
+  it('cannot be made to mention anyone else: a bad id is shown as the escaped name, markup in a name is escaped', () => {
+    expect(teamLeadLine([{ name: '<!channel> Boss', slackUserId: 'not an id' }])).toBe('Team Lead: &lt;!channel&gt; Boss')
+    expect(teamLeadLine([{ name: 'X', slackUserId: 'U1> <!channel' }])).not.toContain('<!channel>')
+  })
+
+  describe('in the cards', () => {
+    let sent: string[]
+    beforeEach(() => {
+      sent = []
+      vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+      vi.stubEnv('SLACK_TRAINER_CHANNEL_ID', 'C0TRAINER')
+      vi.stubGlobal('fetch', vi.fn(async (_u: string, init: RequestInit) => { sent.push(String(init.body)); return new Response(JSON.stringify({ ok: true })) }))
+    })
+    afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals() })
+
+    it('the lessons-completed card tags the lead', async () => {
+      await postCourseCompletedToSlack({ learnerName: 'Somchai', courseTitle: 'MBTI', teamLeads: [{ name: 'Malee', slackUserId: 'U01ABCDEF2' }] })
+      expect(sent[0]).toContain('<@U01ABCDEF2>')
+    })
+
+    it('the quiz card tags the lead', async () => {
+      await postCompletionToSlack({ learnerName: 'Somchai', courseTitle: 'PVP', score: 80, passed: true, awaitingReview: false, teamLeads: [{ name: 'Malee', slackUserId: 'U01ABCDEF2' }] })
+      expect(sent[0]).toContain('<@U01ABCDEF2>')
+    })
+
+    it('says nothing extra when there is no lead', async () => {
+      await postCourseCompletedToSlack({ learnerName: 'Somchai', courseTitle: 'MBTI' })
+      expect(sent[0]).not.toContain('Team Lead')
+    })
   })
 })

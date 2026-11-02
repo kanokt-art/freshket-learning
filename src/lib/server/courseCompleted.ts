@@ -1,5 +1,6 @@
 import { isSalesDepartment, postCourseCompletedToSlack } from '@/lib/notifications/slack'
 import { formatPersonName } from '@/lib/users/displayName'
+import { teamLeadsOf } from './teamLeads'
 import { isActiveEmployee } from '@/lib/users/active'
 import type { UserProfile } from '@/types/user'
 
@@ -12,6 +13,7 @@ type Doc = Record<string, unknown>
 
 interface CompletionStore {
   get(path: string, id: string): Promise<Doc | null>
+  getMany(path: string, ids: string[]): Promise<Doc[]>
   claim(path: string, id: string, data: Doc): Promise<boolean>
 }
 
@@ -39,6 +41,7 @@ export async function announceCourseCompleted(store: CompletionStore, userId: st
       position: learner.position,
       department: learner.department,
       courseTitle: course.title,
+      teamLeads: await teamLeadsOf(store, { teamId: learner.teamId, uid: userId }),
       memberUrl: appUrl(`/manager?user=${encodeURIComponent(userId)}`),
     })
   } catch (e) {
