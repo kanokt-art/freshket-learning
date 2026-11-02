@@ -1281,6 +1281,30 @@ function OverrideRecordModal({ row, courseId, courseTitle, hasPreTest, hasPostTe
     return Number.isFinite(n) ? n : undefined
   }
 
+  async function handleReset() {
+    if (DEMO_MODE) { onClose(); return }
+    const ok = await confirmAction({ title: 'ล้างประวัติการเรียนของคอร์สนี้?', text: 'ลบสถานะ คะแนน และประวัติการสอบของผู้เรียนคนนี้ในหลักสูตรนี้ เพื่อให้เริ่มเรียน/ทำแบบทดสอบใหม่ได้ ย้อนกลับไม่ได้', confirmText: 'ล้างประวัติ', danger: true })
+    if (!ok) return
+    setSaving(true)
+    try {
+      const res = await authedFetch('/api/training-records/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: row.user.uid, courseId }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        void alertError('ล้างประวัติไม่สำเร็จ', json.error ?? `HTTP ${res.status}`)
+        return
+      }
+      onClose()
+    } catch (e) {
+      void alertError('ล้างประวัติไม่สำเร็จ', e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function handleSave() {
     // Demo mode has no writable training-records backend — ALL_RECORDS is a
     // static mock array, not React state, so there's nothing to persist to
@@ -1359,6 +1383,12 @@ function OverrideRecordModal({ row, courseId, courseTitle, hasPreTest, hasPostTe
           )}
         </div>
         <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          {row.record && (
+            <button type="button" onClick={handleReset} disabled={saving}
+              className="mr-auto px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 transition-all disabled:opacity-60">
+              ล้างประวัติ
+            </button>
+          )}
           <button type="button" onClick={onClose} disabled={saving}
             className="px-4 py-2 rounded-xl text-sm font-bold text-gray-500 hover:bg-gray-100 transition-all disabled:opacity-60">
             ยกเลิก
@@ -5034,7 +5064,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                         className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.allowRetake ? 'bg-freshket-500' : 'bg-gray-200'}`}>
                         <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.allowRetake ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                       </button>
-                      <span className="text-xs text-gray-600 font-normal">เรียนอีกครั้งเมื่อถึงกำหนด</span>
+                      <span className="text-xs text-gray-600 font-normal">ให้เรียน/สอบซ้ำได้หลังเรียนจบ (ปิด = อ่านเนื้อหาได้ แต่ทำแบบทดสอบใหม่ไม่ได้)</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button type="button" onClick={() => set('openEnrollment', !form.openEnrollment)}

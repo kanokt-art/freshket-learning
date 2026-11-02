@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/server/store'
 import { requireStaff } from '@/lib/server/auth'
 import { newId } from '@/lib/server/dataApi'
+import { retakeRefusal } from '@/lib/server/retakeGuard'
 import type { Assessment } from '@/types/assessment'
 
 // Opens a timed attempt session.
@@ -41,6 +42,12 @@ export async function POST(req: NextRequest) {
 
   try {
     const store = getStore()
+
+    // A finished course whose retake is off cannot be sat again.
+    if (typeof courseId === 'string') {
+      const refused = await retakeRefusal(store, gate.uid, courseId)
+      if (refused) return refused
+    }
 
     const assessmentDoc = await store.get('assessments', assessmentId)
     if (!assessmentDoc) return NextResponse.json({ error: 'ไม่พบแบบทดสอบนี้' }, { status: 404 })

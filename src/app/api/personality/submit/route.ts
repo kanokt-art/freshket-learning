@@ -4,6 +4,7 @@ import { requireStaff } from '@/lib/server/auth'
 import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { scoreBuckets, minAnswersFor, type BucketAnswers } from '@/lib/bucketAssessments/scoreBuckets'
 import { questionnaireProgress } from '@/lib/server/questionnaireProgress'
+import { retakeRefusal } from '@/lib/server/retakeGuard'
 import { refreshUserStats } from '@/lib/server/userStats'
 import { announceCourseCompleted } from '@/lib/server/courseCompleted'
 
@@ -84,6 +85,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // Taken from a course that is finished and has retake off: the result stays as it is.
+    if (typeof courseId === 'string') {
+      const refused = await retakeRefusal(getStore(), uid, courseId)
+      if (refused) return refused
+    }
+
     // One result per user per questionnaire: retaking replaces the previous
     // result rather than appending, so the profile shows the current answer.
     await getStore().set('userBucketResults', `${uid}_${def.id}`, {

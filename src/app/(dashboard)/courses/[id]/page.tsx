@@ -21,6 +21,8 @@ import { lessonLabel, topicLabel } from '@/lib/courses/labels'
 import { readVideoProgress, furthest, videoProgressKey, NO_VIDEO_PROGRESS, type VideoProgress } from '@/lib/courses/videoProgress'
 import { progKey, statusKey, takeawayKey, readScoped } from '@/lib/courseProgressKeys'
 import { get, save } from '@/lib/data/collection'
+import { retakeBlocked, RETAKE_REFUSAL } from '@/lib/courses/retake'
+import { alertError } from '@/lib/ui/alert'
 
 // ── Progress tracking via localStorage (mirrored to Firestore, see persist()) ──
 // preDone/postDone/preScore/postScore were dropped along with the course-level
@@ -200,6 +202,8 @@ export default function CourseDetailPage() {
   )
 
   const [progress, setProgress] = useState<Progress>(EMPTY_PROG)
+  // The status the server holds for this learner's record (the local copy can lag or be edited).
+  const [serverStatus, setServerStatus] = useState<string | undefined>(undefined)
   const [activeStep, setActiveStep] = useState<StepId>('slide')
 
   // Load progress from localStorage on mount. Keyed by uid, so it has to wait
@@ -216,7 +220,8 @@ export default function CourseDetailPage() {
     let cancelled = false
     void (async () => {
       try {
-        const rec = await get<{ completedLessonIds?: string[] }>('trainingRecords', `${user.uid}_${id}`)
+        const rec = await get<{ status?: string; completedLessonIds?: string[] }>('trainingRecords', `${user.uid}_${id}`)
+        if (!cancelled) setServerStatus(rec?.status)
         const server = (rec?.completedLessonIds ?? []).filter((l) => !l.endsWith(':post'))
         if (cancelled || server.length === 0) return
         setProgress((prev) => {
@@ -557,6 +562,7 @@ export default function CourseDetailPage() {
               done={isDone(currentStep.id)}
               progress={progress}
               courseId={id}
+              retakeLocked={retakeBlocked(course, { status: serverStatus })}
               onMarkSlideDone={markSlideDone}
               onMarkTakeAwayDone={markTakeAwayDone}
               onLessonComplete={markLessonComplete}
@@ -641,6 +647,7 @@ function StepContent({
   done,
   progress,
   courseId,
+  retakeLocked,
   onMarkSlideDone,
   onMarkTakeAwayDone,
   onLessonComplete,
@@ -652,6 +659,8 @@ function StepContent({
   done: boolean
   progress: Progress
   courseId: string
+  /** Finished with retake off: content stays readable, quizzes and questionnaires do not reopen. */
+  retakeLocked: boolean
   onMarkSlideDone: () => void
   onMarkTakeAwayDone: (text: string) => void
   onLessonComplete: (lessonId: string) => void
@@ -675,6 +684,7 @@ function StepContent({
       course={course} done={done} onDone={onMarkSlideDone} onNext={onNext} hasNext={hasNext}
       completedLessonIds={progress.completedLessonIds ?? []}
       onLessonComplete={onLessonComplete}
+      retakeLocked={retakeLocked}
     />
   )
 }
@@ -688,16 +698,16 @@ const MEDIA_LABELS: Record<MediaType, string> = {
 }
 
 function SlideStep({
-  course, done, onDone, onNext, hasNext, completedLessonIds, onLessonComplete,
+  course, done, onDone, onNext, hasNext, completedLessonIds, onLessonComplete, retakeLocked,
 }: {
   course: Course; done: boolean; onDone: () => void; onNext: () => void; hasNext: boolean
-  completedLessonIds: string[]; onLessonComplete: (lessonId: string) => void
+  completedLessonIds: string[]; onLessonComplete: (lessonId: string) => void; retakeLocked: boolean
 }) {
   if (course.topics && course.topics.length > 0) {
     return (
       <LessonBrowserStep
         course={course} done={done} onDone={onDone} onNext={onNext} hasNext={hasNext}
-        completedLessonIds={completedLessonIds} onLessonComplete={onLessonComplete}
+        completedLessonIds={completedLessonIds} onLessonComplete={onLessonComplete} retakeLocked={retakeLocked}
       />
     )
   }
@@ -872,10 +882,10 @@ function firstLessonKey(topics: CourseTopic[]): string | null {
 const FINISH_KEY = '__finish__'
 
 function LessonBrowserStep({
-  course, done, onDone, onNext, hasNext, completedLessonIds, onLessonComplete,
+  course, done, onDone, onNext, hasNext, completedLessonIds, onLessonComplete, retakeLocked,
 }: {
   course: Course; done: boolean; onDone: () => void; onNext: () => void; hasNext: boolean
-  completedLessonIds: string[]; onLessonComplete: (lessonId: string) => void
+  completedLessonIds: string[]; onLessonComplete: (lessonId: string) => void; retakeLocked: boolean
 }) {
   const router = useRouter()
   const { user: viewer } = useAuth()
@@ -1008,6 +1018,7 @@ function LessonBrowserStep({
   }
 
   function startQuiz(lesson: CourseLesson) {
+    if (retakeLocked) { void alertError('ทำแบบทดสอบซ้ำไม่ได้', RETAKE_REFUSAL); return }
     const step = quizStepFor(lesson)
     sessionStorage.setItem('assessment_return', JSON.stringify({
       courseId: course.id,
@@ -1265,11 +1276,15 @@ function LessonBrowserStep({
                       เลือกข้อที่ตรงกับตัวคุณมากกว่า ผลจะถูกบันทึกไว้ในโปรไฟล์ของคุณ
                     </p>
                     <div>
+                      {retakeLocked ? (
+                        <p className="text-xs font-bold text-gray-400">เรียนจบแล้ว ทำแบบประเมินซ้ำไม่ได้ — ดูผลของคุณได้ที่โปรไฟล์</p>
+                      ) : (
                       <Link
                         href={`/personality?assessment=${def.id}&courseId=${course.id}&lessonId=${selectedLesson.id}`}
                         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
                         {completedLessonIds.includes(selectedLesson.id) ? 'ทำแบบประเมินอีกครั้ง' : 'เริ่มทำแบบประเมิน'}
                       </Link>
+                      )}
                     </div>
                   </div>
                 )

@@ -9,6 +9,7 @@ import { postCompletionToSlack, isSalesDepartment } from '@/lib/notifications/sl
 import { dmPeople } from '@/lib/notifications/slackDm'
 import { quizNotice, type QuizNotice } from '@/lib/notifications/quizNotice'
 import { teamLeadsOf } from '@/lib/server/teamLeads'
+import { retakeRefusal } from '@/lib/server/retakeGuard'
 import type { Assessment, Question } from '@/types/assessment'
 import type { Course } from '@/types/course'
 import type { UserProfile } from '@/types/user'
@@ -194,6 +195,12 @@ export async function POST(req: NextRequest) {
 
   try {
     const store = getStore()
+
+    // A finished course whose retake is off cannot be graded again: nothing is recorded.
+    if (typeof courseId === 'string') {
+      const refused = await retakeRefusal(store, uid, courseId)
+      if (refused) return refused
+    }
 
     // ── Timed-attempt enforcement ────────────────────────────────────────────
     // The session holds the server's own start time, so a reloaded page or an

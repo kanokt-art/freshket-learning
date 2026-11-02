@@ -91,7 +91,7 @@ export default function LibraryPage() {
               ))}
             </Section>
 
-            <Section title="เรียนจบแล้ว" hint="เปิดเรียนซ้ำได้ หรือนำกลับมาที่ My Course" count={finished.length} empty="ยังไม่มีหลักสูตรที่เรียนจบ">
+            <Section title="เรียนจบแล้ว" hint="เปิดอ่านเนื้อหาได้ (ทำแบบทดสอบซ้ำได้เฉพาะหลักสูตรที่ Admin เปิดให้) หรือนำกลับมาที่ My Course" count={finished.length} empty="ยังไม่มีหลักสูตรที่เรียนจบ">
               {finished.map((e) => (
                 <LibraryCard
                   key={e.course.id}
@@ -164,7 +164,7 @@ function LibraryCard({ entry, busy, onOpen, action }: {
           onClick={onOpen}
           className="text-xs font-bold px-3 py-1.5 rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 transition-all duration-150"
         >
-          {entry.finished ? 'เรียนอีกครั้ง' : 'เปิดดู'}
+          {entry.finished ? (course.allowRetake ? 'เรียนอีกครั้ง' : 'เปิดอ่าน') : 'เปิดดู'}
         </button>
       </div>
     </div>
