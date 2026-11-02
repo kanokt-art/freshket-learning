@@ -4,8 +4,7 @@ import { requireStaff } from '@/lib/server/auth'
 import { canDismissCourse, DISMISS_REFUSALS } from '@/lib/courses/dismiss'
 
 // A learner takes a finished course off their own lists. The browser cannot write `dismissedAt`
-// itself (policies.ts): the rule — passed, and not failed on the first attempt — needs the quiz
-// attempts, which only the server can read.
+// itself (policies.ts): whether the course is finished is the server's record, not the browser's claim.
 
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/
 
@@ -30,12 +29,7 @@ export async function POST(req: NextRequest) {
     const store = getStore()
     const recordId = `${uid}_${courseId}`
     const record = await store.get('trainingRecords', recordId)
-    const attempts = record
-      ? await store.query('assessmentAttempts', {
-          where: [{ field: 'uid', op: '==', value: uid }, { field: 'courseId', op: '==', value: courseId }],
-        })
-      : []
-    const verdict = canDismissCourse(record, attempts)
+    const verdict = canDismissCourse(record)
     if (!verdict.ok) {
       return NextResponse.json({ error: DISMISS_REFUSALS[verdict.reason], reason: verdict.reason }, { status: 403 })
     }
