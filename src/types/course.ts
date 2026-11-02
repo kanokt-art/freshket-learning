@@ -126,6 +126,9 @@ export interface Course {
   introVideoUrl?: string
   hasCertificate?: boolean
   allowRetake?: boolean
+  // Open to anyone to choose (not mandatory): the course is listed in every learner's Library, where they
+  // Enroll themselves (POST /api/courses/enroll adds them to the roster). Off = only the target sees it.
+  openEnrollment?: boolean
   topics?: CourseTopic[]
   hasKeyTakeAway?: boolean
   keyTakeAwayPrompt?: string

@@ -2527,6 +2527,7 @@ type FormState = {
   startDate: string; endDate: string
   instructorId: string; courseAdminIds: string[]; introVideoUrl: string
   hasCertificate: boolean; allowRetake: boolean
+  openEnrollment: boolean
   topics: CourseTopic[]
   assignedUserIds: string[]
   /** See the assignedDepartments / assignedTeamIds comments on the Course type. */
@@ -2560,6 +2561,7 @@ function formFromCourse(c: Course): FormState {
     instructorId: c.instructorId ?? '', courseAdminIds: c.courseAdminIds ?? [],
     introVideoUrl: c.introVideoUrl ?? '',
     hasCertificate: !!c.hasCertificate, allowRetake: !!c.allowRetake,
+    openEnrollment: !!c.openEnrollment,
     topics: c.topics ?? [],
     assignedUserIds: c.assignedUserIds ?? [],
     assignedDepartments: c.assignedDepartments ?? [],
@@ -4473,7 +4475,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     isRequired: false, targetRoles: ['sale', 'team_lead'],
     thumbnailUrl: '', slideUrl: '', formUrl: '', startDate: '', endDate: '',
     instructorId: '', courseAdminIds: [], introVideoUrl: '',
-    hasCertificate: false, allowRetake: false, topics: [],
+    hasCertificate: false, allowRetake: false, openEnrollment: false, topics: [],
     assignedUserIds: [],
     assignedDepartments: [],
     assignedTeamIds: [],
@@ -4684,6 +4686,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
         introVideoUrl: form.introVideoUrl.trim() || undefined,
         hasCertificate: form.hasCertificate,
         allowRetake: form.allowRetake,
+        openEnrollment: form.openEnrollment,
         topics: form.topics,
         isPublished: publishOverride ?? form.isPublished,
         quizEnabled: form.quizEnabled,
@@ -5032,6 +5035,13 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                         <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.allowRetake ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                       </button>
                       <span className="text-xs text-gray-600 font-normal">เรียนอีกครั้งเมื่อถึงกำหนด</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => set('openEnrollment', !form.openEnrollment)}
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.openEnrollment ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                        <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.openEnrollment ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                      </button>
+                      <span className="text-xs text-gray-600 font-normal">เปิดให้ทุกคนเลือกเรียนเอง (Library)</span>
                     </div>
                   </div>
                 </div>
