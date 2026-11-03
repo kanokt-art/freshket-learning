@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/server/store'
 import { requireStaff } from '@/lib/server/auth'
 import { postTakeAwayToSlack, isSalesDepartment } from '@/lib/notifications/slack'
+import { teamLeadsOf } from '@/lib/server/teamLeads'
+import { saleTrainers } from '@/lib/server/saleTrainers'
 import type { UserProfile } from '@/types/user'
 
 // Slack mirror for Key Take Away (สรุปหลังเรียน).
@@ -65,6 +67,9 @@ export async function POST(req: NextRequest) {
       department: user.department,
       courseTitle: takeaway.courseTitle || '',
       text,
+      // Their Team Lead(s) and the Sale Trainer are tagged under the card, as on the completion cards.
+      teamLeads: await teamLeadsOf(store as never, { teamId: user.teamId, uid }),
+      trainers: await saleTrainers(),
       // Deep-links to this learner's card on the team page, where the full
       // reflection sits next to their scores and the lead's comment box —
       // the course page would show the reader the course, not the person.

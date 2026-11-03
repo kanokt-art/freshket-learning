@@ -420,6 +420,10 @@ export async function postShadowAckedToSlack(ev: SlackShadowAckedEvent): Promise
 }
 
 export interface SlackTakeAwayEvent {
+  /** The learner's Team Lead(s), tagged under the card. */
+  teamLeads?: SlackTeamLead[]
+  /** The Sale Trainer(s), tagged under the card. */
+  trainers?: SlackTeamLead[]
   learnerName: string
   position?: string
   department?: string
@@ -440,9 +444,10 @@ export async function postTakeAwayToSlack(ev: SlackTakeAwayEvent): Promise<boole
   if (!webhook) return false
 
   const meta = slackText([ev.position, ev.department].filter(Boolean).join(' · '))
+  const leadLine = [teamLeadLine(ev.teamLeads), trainerLine(ev.trainers)].filter(Boolean).join('\n')
 
   return post(webhook, {
-    text: `${slackText(ev.learnerName)} เขียนสรุปหลังเรียน "${slackText(ev.courseTitle)}"`,
+    text: `${slackText(ev.learnerName)} เขียนสรุปหลังเรียน "${slackText(ev.courseTitle)}"${leadLine ? ` · ${leadLine.replace('\n', ' · ')}` : ''}`,
     blocks: [
       {
         type: 'section',
@@ -458,6 +463,7 @@ export async function postTakeAwayToSlack(ev: SlackTakeAwayEvent): Promise<boole
       ...(meta
         ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: meta }] }]
         : []),
+      ...(leadLine ? [{ type: 'section', text: { type: 'mrkdwn', text: leadLine } }] : []),
       ...(ev.memberUrl
         ? [{
             type: 'actions',

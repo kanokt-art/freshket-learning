@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { slackText } from '@/lib/notifications/slackText'
-import { postCoursePublishedToSlack, postShadowSubmittedToSlack, postCourseCompletedToSlack, postCompletionToSlack, teamLeadLine } from '@/lib/notifications/slack'
+import { postCoursePublishedToSlack, postShadowSubmittedToSlack, postCourseCompletedToSlack, postCompletionToSlack, postTakeAwayToSlack, teamLeadLine } from '@/lib/notifications/slack'
 
 describe('slackText', () => {
   it('turns Slack\'s special markup into plain text', () => {
@@ -82,6 +82,14 @@ describe('tagging the Team Lead', () => {
       vi.stubGlobal('fetch', vi.fn(async (_u: string, init: RequestInit) => { sent.push(String(init.body)); return new Response(JSON.stringify({ ok: true })) }))
     })
     afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals() })
+
+    it('the take-away summary tags the lead and the Sale Trainer', async () => {
+      vi.stubEnv('SLACK_WEBHOOK_URL', 'https://hooks.slack.test/x')
+      await postTakeAwayToSlack({ learnerName: 'Somchai', courseTitle: 'PK', text: 'learned a lot', teamLeads: [{ name: 'Malee', slackUserId: 'U01ABCDEF2' }], trainers: [{ name: 'Kanok', slackUserId: 'U07ABCDEF12' }] })
+      expect(sent[0]).toContain('<@U01ABCDEF2>')
+      expect(sent[0]).toContain('<@U07ABCDEF12>')
+      expect(sent[0]).toContain('Sale Trainer')
+    })
 
     it('the lessons-completed card tags the lead', async () => {
       await postCourseCompletedToSlack({ learnerName: 'Somchai', courseTitle: 'MBTI', teamLeads: [{ name: 'Malee', slackUserId: 'U01ABCDEF2' }] })
