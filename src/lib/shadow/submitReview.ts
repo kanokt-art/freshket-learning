@@ -10,10 +10,10 @@ import type { ShadowRecord } from '@/types/shadow'
  * tell the person who made the visit. Used by every screen that can review, so they all
  * behave the same.
  *
- * Told ONCE per review, and through one channel:
+ * Told ONCE per review:
  *  · editing a review you already gave saves it and tells nobody again;
- *  · the group post and the Slack DM go out together (see the announce route); the in-app
- *    bell is only rung when no Slack DM reached them, so one review is one notice.
+ *  · the group post and the Slack DM go out together (see the announce route), and the in-app
+ *    bell is rung as well, so the learner's home shows the signal on its sidebar.
  */
 export async function submitShadowReview(args: {
   record: Pick<ShadowRecord, 'id' | 'observerUid' | 'observerName' | 'storeName'>
@@ -39,18 +39,16 @@ export async function submitShadowReview(args: {
   // The review is saved; telling the observer is best effort and never undoes it.
   if (alreadyGiven || record.observerUid === reviewer.uid) return
 
-  const { dmSent } = await announce({
+  void announce({
     kind: 'shadow_acked',
     recordId: record.id,
   })
 
-  if (dmSent === 0) {
-    pushNotification(record.observerUid, {
-      type: 'shadow_ack_received',
-      title: `${reviewer.name || 'Mentor'} ประเมิน Shadow Visit ของคุณ`,
-      body: `ร้าน ${record.storeName} · ได้รับ ${rating}/5 ดาว`,
-      refId: record.id,
-      refPath: '/shadow',
-    })
-  }
+  pushNotification(record.observerUid, {
+    type: 'shadow_ack_received',
+    title: `${reviewer.name || 'Mentor'} ประเมิน Shadow Visit ของคุณ`,
+    body: `ร้าน ${record.storeName} · ได้รับ ${rating}/5 ดาว`,
+    refId: record.id,
+    refPath: '/shadow',
+  })
 }

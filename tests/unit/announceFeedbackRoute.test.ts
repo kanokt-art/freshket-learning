@@ -86,11 +86,10 @@ describe('course feedback', () => {
     expect(dmText()).toContain('4/5 ดาว')
     expect(dmText()).toContain('ตั้งใจเรียนดีมาก')
     expect(dmText()).toContain('Product Knowledge')
-    expect(bells).toHaveLength(0)
   })
 
-  it('rings the in-app bell instead when no Slack DM reached them', async () => {
-    asLead(); dm.mockResolvedValue(0)
+  it('rings the in-app bell as well, whether or not a Slack DM reached them', async () => {
+    asLead(); dm.mockResolvedValue(1)
     await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })
     expect(bells).toHaveLength(1)
     expect(bells[0].path).toBe('notifications/sale1/items')
@@ -166,8 +165,8 @@ describe('role play assessment', () => {
     expect(dmText()).toContain('พัฒนาขึ้นมาก')
   })
 
-  it('rings the bell when no DM reached them, and tells once per assessment', async () => {
-    asLead(); dm.mockResolvedValue(0)
+  it('rings the bell as well as the DM, and tells once per assessment', async () => {
+    asLead()
     await call({ kind: 'roleplay_assessed', assessmentId: 'rp1' })
     await call({ kind: 'roleplay_assessed', assessmentId: 'rp1' })
     expect(bells).toHaveLength(1)

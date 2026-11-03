@@ -269,8 +269,8 @@ export async function POST(req: NextRequest) {
             ...(link ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูหลักสูตร' }, url: link }] }] : []),
           ],
         })
-        // No Slack DM reached them: the in-app bell, so one piece of feedback is one notice.
-        if (dmSent === 0) {
+        // The in-app signal too (the learner's home shows it on its sidebar), whether or not the DM went out.
+        {
           await store.set(`notifications/${memberUid}/items`, `course_feedback_received_${memberUid}_${courseId}_${gate.uid}`, {
             type: 'course_feedback_received',
             title: `${reviewer} ให้ความเห็นในหลักสูตร ${title}`,
@@ -341,7 +341,7 @@ export async function POST(req: NextRequest) {
             ...(link ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูผลประเมิน' }, url: link }] }] : []),
           ],
         })
-        if (dmSent === 0) {
+        {
           await store.set(`notifications/${a.subjectUid}/items`, `roleplay_assessed_${assessmentId}`, {
             type: 'roleplay_assessed',
             title: `${assessor} ประเมิน Role Play ของคุณ`,

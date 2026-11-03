@@ -9,6 +9,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
+import { useNotifications } from '@/hooks/useNotifications'
+import { feedbackNotices } from '@/lib/notifications/feedbackNotices'
 import { computeStreakDays, type UserStats } from '@/types/stats'
 import { CATEGORY_LABELS, type Course, type CourseCategory } from '@/types/course'
 import { STATUS_LABELS, type TrainingRecord, type TrainingStatus } from '@/types/tracking'
@@ -184,6 +186,10 @@ export default function SaleDashboardPage() {
   // Right sidebar (streak + training status) is secondary detail — collapsed by
   // default so it doesn't compete with the course list, opened on demand.
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // What team leads and managers said about the learner (stars, comments, assessments): shown at the top
+  // of the sidebar, with a signal on the handle while any is unread.
+  const { items: notifItems, markRead, markAllRead } = useNotifications(user?.uid)
+  const feedback = useMemo(() => feedbackNotices(notifItems), [notifItems])
   const firstName = user?.nickname ?? user?.displayName?.split(' ')[0] ?? 'คุณ'
   const daysSince = getDaysSince(user?.startDate)
   const isNewJoiner = !isAdmin && daysSince < NEW_JOINER_DAYS
@@ -580,10 +586,51 @@ export default function SaleDashboardPage() {
             <span className="text-xs font-bold whitespace-nowrap" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
               {sidebarOpen ? 'Hide' : 'Open'}
             </span>
+            {feedback.unread > 0 && (
+              <span
+                role="status"
+                aria-label={`มี ${feedback.unread} ความเห็นใหม่จากหัวหน้า`}
+                className="absolute -top-1.5 -left-1.5 min-w-5 h-5 px-1 flex items-center justify-center rounded-full bg-rose-500 text-white text-xs font-bold tabular-nums shadow"
+              >
+                {feedback.unread > 9 ? '9+' : feedback.unread}
+              </span>
+            )}
           </button>
 
           {sidebarOpen && (
             <div className="flex-1 min-w-0 overflow-y-auto p-5 pt-0 space-y-4">
+              {/* From your team lead / manager */}
+              {feedback.items.length > 0 && (
+                <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-bold text-gray-900">
+                      จากหัวหน้า
+                      {feedback.unread > 0 && <span className="ml-2 text-xs font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-600">{feedback.unread} ใหม่</span>}
+                    </p>
+                    {feedback.unread > 0 && (
+                      <button type="button" onClick={markAllRead} className="text-xs font-bold text-freshket-600 hover:underline">อ่านแล้วทั้งหมด</button>
+                    )}
+                  </div>
+                  <ul className="divide-y divide-gray-50">
+                    {feedback.items.map((n) => (
+                      <li key={n.id}>
+                        <button
+                          type="button"
+                          onClick={() => { if (!n.read) markRead(n.id); router.push(n.refPath) }}
+                          className="w-full flex items-start gap-2.5 py-2.5 text-left hover:bg-gray-50 rounded-lg transition-colors"
+                        >
+                          <span className={`mt-1.5 size-2 rounded-full shrink-0 ${n.read ? 'bg-gray-200' : 'bg-rose-500'}`} />
+                          <span className="min-w-0">
+                            <span className={`block text-xs leading-snug ${n.read ? 'text-gray-600' : 'font-bold text-gray-900'}`}>{n.title}</span>
+                            {n.body && <span className="block text-xs text-gray-400 mt-0.5 line-clamp-2">{n.body}</span>}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {/* Streak card — the copy has to work at 0, which is where every
                   learner starts and where anyone who misses a day lands. */}
               <div className="rounded-2xl p-4" style={{ background: 'linear-gradient(135deg,#eef2ff 0%,#e0e7ff 100%)' }}>
