@@ -121,7 +121,12 @@ function sampleNotifications(): AppNotification[] {
     {
       id: 'demo-feedback', type: 'course_feedback_received', read: false, createdAt: ago(5),
       title: 'Pataranuch (Tao) Suyavech ให้ความเห็นในหลักสูตร Product Knowledge',
-      body: '4/5 ดาว · ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ', refId: 'demo', refPath: '/courses',
+      body: '4/5 ดาว · ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ', refId: 'demo', refPath: '/courses/course-01?feedback=1',
+    },
+    {
+      id: 'demo-shadow', type: 'shadow_ack_received', read: false, createdAt: ago(20),
+      title: 'Max ประเมิน Shadow Visit ของคุณ',
+      body: 'ร้าน Pastel · ได้รับ 4/5 ดาว', refId: 'sh-02', refPath: '/shadow?visit=sh-02',
     },
     {
       id: 'demo-roleplay', type: 'roleplay_assessed', read: false, createdAt: ago(40),

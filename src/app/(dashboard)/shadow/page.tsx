@@ -1221,6 +1221,7 @@ function ShadowFormPanel({
 
 // Pre-seeded demo acknowledgments
 const DEMO_ACKS = new Map<string, ShadowAcknowledgment>([
+  ['sh-02', { reviewerUid: 'mock-tl-01', reviewerName: 'Max', rating: 4, comment: 'ถามลึกเรื่องคุณภาพได้ดี และไม่รีบ Defend ตอนลูกค้าบ่น ครั้งหน้าลองสรุป Pain ให้ลูกค้ายืนยันก่อนเสนอสินค้า', reviewedAt: new Date('2026-03-18T08:30:00') }],
   ['sh-06', { reviewerUid: 'mock-tl-02', reviewerName: 'ทีมลีด Sale B', rating: 4, comment: 'การรับฟังและ Diagnose ดี ควรฝึกเรื่องการ Summarize Pain ของลูกค้าให้กระชับก่อน Close', reviewedAt: new Date('2026-03-18T09:00:00') }],
   ['sh-07', { reviewerUid: 'mock-tl-02', reviewerName: 'ทีมลีด Sale B', rating: 5, comment: 'ดีมาก ทักษะการฟังและ Diagnose ชัดเจน การ Acknowledge ก่อน Solve เป็น Professional มาก', reviewedAt: new Date('2026-03-18T09:30:00') }],
 ])

@@ -11,6 +11,7 @@ import { useCourse, useCourseTrainingRecords, useAllUsers, useTeams, useDepartme
 import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
 import { formatPersonName } from '@/lib/users/displayName'
 import { StarsDisplay } from '@/components/common/Stars'
+import { getDemoMode } from '@/lib/demo/demoMode'
 import { toStars } from '@/lib/feedback/stars'
 import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import { useAuth } from '@/hooks/useAuth'
@@ -175,6 +176,8 @@ interface StepDef {
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+const DEMO_MODE = getDemoMode()
+
 export default function CourseDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
@@ -223,6 +226,13 @@ export default function CourseDetailPage() {
   }, [seenKey])
   useEffect(() => {
     if (!feedbackUid) return
+    if (DEMO_MODE) {
+      setLeadFeedback({
+        leadName: 'Pataranuch (Tao) Suyavech', score: 4, updatedAt: new Date('2026-11-03T09:00:00'),
+        comment: 'ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ\nครั้งหน้าลองสรุป Pain ของลูกค้าให้ลูกค้ายืนยันก่อนเสนอสินค้า',
+      })
+      return
+    }
     let cancelled = false
     get<{ comment?: string; score?: number | null; leadName?: string; updatedAt?: Date }>('courseFeedback', `${feedbackUid}_${id}`)
       .then((fb) => { if (!cancelled) setLeadFeedback(fb ?? null) })
