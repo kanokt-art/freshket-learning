@@ -110,6 +110,31 @@ let _hydrated = false
 // Notifications are session-only (not persisted to localStorage)
 const _notifications = new Map<string, AppNotification[]>()
 
+// Demo mode shows each person a few sample notifications the first time they look (unread, so the
+// sidebar's "you have notifications" signal can be seen without a real team lead rating anyone). They are
+// read and cleared like real ones, and come back after a reset.
+const _seeded = new Set<string>()
+
+function sampleNotifications(): AppNotification[] {
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000)
+  return [
+    {
+      id: 'demo-feedback', type: 'course_feedback_received', read: false, createdAt: ago(5),
+      title: 'Pataranuch (Tao) Suyavech ให้ความเห็นในหลักสูตร Product Knowledge',
+      body: '4/5 ดาว · ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ', refId: 'demo', refPath: '/courses',
+    },
+    {
+      id: 'demo-roleplay', type: 'roleplay_assessed', read: false, createdAt: ago(40),
+      title: 'Pataranuch (Tao) Suyavech ประเมิน Role Play ของคุณ',
+      body: 'Post รอบที่ 2 · เฉลี่ย 7.4/10', refId: 'demo', refPath: '/sale',
+    },
+    {
+      id: 'demo-course', type: 'new_course', read: false, createdAt: ago(180),
+      title: 'มีหลักสูตรใหม่สำหรับคุณ', body: 'PVP (Private Price Process)', refId: 'demo', refPath: '/courses',
+    },
+  ]
+}
+
 function ensureHydrated() {
   if (!_hydrated && typeof window !== 'undefined') {
     _state = loadState()
@@ -236,6 +261,10 @@ export const demoStore = {
 
   // ── Notifications ─────────────────────────────────────────────────────────
   getNotifications(uid: string): AppNotification[] {
+    if (!_seeded.has(uid)) {
+      _seeded.add(uid)
+      if (!_notifications.has(uid)) _notifications.set(uid, sampleNotifications())
+    }
     return (_notifications.get(uid) ?? []).slice().sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
   },
   pushNotification(targetUid: string, notif: AppNotification) {
@@ -259,6 +288,7 @@ export const demoStore = {
     _state = defaultState()
     _hydrated = true
     _notifications.clear()
+    _seeded.clear()
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORE_KEY)
       window.dispatchEvent(new Event(EVT))
