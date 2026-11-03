@@ -1,6 +1,7 @@
 import { isSalesDepartment, postCourseCompletedToSlack } from '@/lib/notifications/slack'
 import { formatPersonName } from '@/lib/users/displayName'
 import { teamLeadsOf } from './teamLeads'
+import { saleTrainers } from './saleTrainers'
 import { isActiveEmployee } from '@/lib/users/active'
 import type { UserProfile } from '@/types/user'
 
@@ -42,6 +43,7 @@ export async function announceCourseCompleted(store: CompletionStore, userId: st
       department: learner.department,
       courseTitle: course.title,
       teamLeads: await teamLeadsOf(store, { teamId: learner.teamId, uid: userId }),
+      trainers: await saleTrainers(),
       memberUrl: appUrl(`/manager?user=${encodeURIComponent(userId)}`),
     })
   } catch (e) {
