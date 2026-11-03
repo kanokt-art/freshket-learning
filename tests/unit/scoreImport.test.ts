@@ -138,3 +138,31 @@ describe('diffOf: what the preview shows', () => {
     })
   })
 })
+
+import { lessonTicks } from '@/lib/courses/scoreImport'
+
+describe('lessonTicks', () => {
+  const course = { topics: [{ lessons: [
+    { id: 'l1', type: 'video' }, { id: 'pre', type: 'quiz', quizRole: 'pre_test' }, { id: 'post', type: 'quiz', quizRole: 'post_test' },
+  ] }] }
+  const row = (type: 'pre' | 'post', score?: number) => ({ email: 'a@x', type, score, status: 'completed' })
+
+  it('a post score ticks the post-test lesson; a pre score ticks the pre-test lesson', () => {
+    expect(lessonTicks(course, { email: 'a@x', post: row('post', 80) })).toEqual(['post'])
+    expect(lessonTicks(course, { email: 'a@x', pre: row('pre', 40), post: row('post', 80) })).toEqual(['pre', 'post'])
+  })
+
+  it('a blank score ticks nothing', () => {
+    expect(lessonTicks(course, { email: 'a@x', post: row('post') })).toEqual([])
+  })
+
+  it('a pre-test lesson sat twice gets its second sitting ticked by the post score', () => {
+    const c = { topics: [{ lessons: [{ id: 'q', type: 'quiz', quizRole: 'pre_test' }] }] }
+    expect(lessonTicks(c, { email: 'a@x', post: row('post', 70) })).toEqual(['q:post'])
+  })
+
+  it('a course with no graded quiz, or no course, ticks nothing', () => {
+    expect(lessonTicks({ topics: [{ lessons: [{ id: 'v', type: 'video' }] }] }, { email: 'a@x', post: row('post', 90) })).toEqual([])
+    expect(lessonTicks(null, { email: 'a@x', post: row('post', 90) })).toEqual([])
+  })
+})

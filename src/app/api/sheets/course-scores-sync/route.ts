@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { getStore } from '@/lib/server/store'
 import { refreshManyUserStats } from '@/lib/server/userStats'
 import { parseScoreCell, parseScoreType } from '@/lib/utils/csvParser'
-import { groupByPerson, recordPatch, type ExistingRecord, type ScoreRow } from '@/lib/courses/scoreImport'
+import { groupByPerson, lessonTicks, recordPatch, type ExistingRecord, type ScoreRow } from '@/lib/courses/scoreImport'
 
 // POST /api/sheets/course-scores-sync
 //
@@ -14,6 +14,11 @@ import { groupByPerson, recordPatch, type ExistingRecord, type ScoreRow } from '
 // the file's values replace what is stored, and a blank or missing sitting leaves the
 // stored value alone (see lib/courses/scoreImport.ts). Sending the same rows again
 // changes nothing, which is what lets the script re-send a whole tab every night.
+//
+// A score that arrives also counts as the learner having sat that quiz: the course's pre-test / post-test
+// lesson is ticked on their record, so the course page stops showing it as "not passed" and the rest of
+// the course (finish, Key Take Away) opens as soon as the score is in, not when the learner next presses
+// something.
 //
 // Auth: Apps Script cannot present a Firebase ID token, so this is gated by the shared
 // secret SHEETS_SYNC_SECRET in the `x-sync-secret` header. The database key never
@@ -92,13 +97,20 @@ export async function POST(req: NextRequest) {
       (await store.getMany('trainingRecords', matched.map((m) => `${m.id}_${courseId}`))).map((d) => [d.id, d as unknown as ExistingRecord]),
     )
     const now = new Date()
-    await store.setMany('trainingRecords', matched.map(({ p, id }) => ({
-      id: `${id}_${courseId}`,
-      data: {
-        userId: id, courseId, courseTitle, source: 'google_form', updatedAt: now,
-        ...recordPatch(p, existing.get(`${id}_${courseId}`) ?? null, now),
-      },
-    })), { merge: true })
+    await store.setMany('trainingRecords', matched.map(({ p, id }) => {
+      const before = existing.get(`${id}_${courseId}`) ?? null
+      const have = Array.isArray((before as { completedLessonIds?: unknown } | null)?.completedLessonIds)
+        ? ((before as { completedLessonIds: string[] }).completedLessonIds) : []
+      const ticks = lessonTicks(course as never, p).filter((t) => !have.includes(t))
+      return {
+        id: `${id}_${courseId}`,
+        data: {
+          userId: id, courseId, courseTitle, source: 'google_form', updatedAt: now,
+          ...recordPatch(p, before, now),
+          ...(ticks.length > 0 ? { completedLessonIds: [...have, ...ticks] } : {}),
+        },
+      }
+    }), { merge: true })
     await refreshManyUserStats(store, matched.map((m) => m.id))
 
     return NextResponse.json({

@@ -213,29 +213,47 @@ export default function CourseDetailPage() {
     setProgress(loadProgress(user.uid, id))
   }, [id, user?.uid])
 
-  // Lessons the server already recorded (a questionnaire ticks its own lesson when it is submitted) join
-  // the local progress, so this page neither misses them nor writes a shorter list back over them.
+  // What the server holds for this learner joins the local progress, so this page neither misses it nor
+  // writes a shorter list back over it: a questionnaire ticks its own lesson on submit, and a quiz sat in
+  // Google Forms is ticked (and the course marked finished) when its score arrives from the sheet. Read on
+  // open and again whenever the learner comes back to the tab, so a score that lands while they wait shows
+  // up without a reload.
+  const uid = user?.uid
   useEffect(() => {
-    if (!user?.uid) return
+    if (!uid) return
+    const me: string = uid
     let cancelled = false
-    void (async () => {
+    async function pull() {
       try {
-        const rec = await get<{ status?: string; completedLessonIds?: string[] }>('trainingRecords', `${user.uid}_${id}`)
-        if (!cancelled) setServerStatus(rec?.status)
-        const server = (rec?.completedLessonIds ?? []).filter((l) => !l.endsWith(':post'))
-        if (cancelled || server.length === 0) return
+        const rec = await get<{ status?: string; completedLessonIds?: string[] }>('trainingRecords', `${me}_${id}`)
+        if (cancelled) return
+        setServerStatus(rec?.status)
+        const server = rec?.completedLessonIds ?? []
+        // A course the server has finished (the sheet's post score, or grading) is finished here too, which
+        // is what opens the Key Take Away step.
+        const finished = rec?.status === 'completed'
+        if (server.length === 0 && !finished) return
         setProgress((prev) => {
           const done = prev.completedLessonIds ?? []
           const missing = server.filter((l) => !done.includes(l))
-          if (missing.length === 0) return prev
-          const next = { ...prev, completedLessonIds: [...done, ...missing] }
-          saveProgress(user.uid, id, next)
+          const slideDone = prev.slideDone || finished
+          if (missing.length === 0 && slideDone === prev.slideDone) return prev
+          const next = { ...prev, completedLessonIds: [...done, ...missing], slideDone }
+          saveProgress(me, id, next)
           return next
         })
       } catch { /* offline: the local progress stands */ }
-    })()
-    return () => { cancelled = true }
-  }, [id, user?.uid])
+    }
+    void pull()
+    const onVisible = () => { if (!document.hidden) void pull() }
+    window.addEventListener('focus', pull)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', pull)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [id, uid])
 
   // Re-read progress when user navigates back (window focus / visibility)
   const refreshProgress = useCallback(() => {

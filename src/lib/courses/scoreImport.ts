@@ -107,3 +107,26 @@ export function diffOf(p: PersonScores, existing: ExistingRecord | null): ScoreD
     },
   }
 }
+
+interface TickLesson { id?: string; type?: string; quizRole?: string }
+interface TickCourse { topics?: Array<{ lessons?: TickLesson[] }> }
+
+/**
+ * The lessons a score arriving from the sheet counts as done, so the learner is not left "not passed" on a
+ * quiz they have already sat in Google Forms. A before-score ticks the pre-test lesson; an after-score ticks
+ * the post-test lesson (or, for a pre-test lesson that is sat twice, its second sitting `<id>:post`).
+ * Only a score that is actually present counts — a blank cell ticks nothing.
+ */
+export function lessonTicks(course: TickCourse | null | undefined, p: PersonScores): string[] {
+  const lessons = (course?.topics ?? []).flatMap((t) => t.lessons ?? []).filter((l) => l.type === 'quiz' && l.id)
+  const ids: string[] = []
+  if (p.pre?.score != null) for (const l of lessons) if (l.quizRole === 'pre_test') ids.push(l.id!)
+  if (p.post?.score != null) {
+    const hasPostLesson = lessons.some((l) => l.quizRole === 'post_test')
+    for (const l of lessons) {
+      if (l.quizRole === 'post_test') ids.push(l.id!)
+      else if (l.quizRole === 'pre_test' && !hasPostLesson) ids.push(`${l.id}:post`)
+    }
+  }
+  return ids
+}
