@@ -10,7 +10,7 @@ import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { useNotifications } from '@/hooks/useNotifications'
-import { feedbackNotices } from '@/lib/notifications/feedbackNotices'
+import { sidebarNotices } from '@/lib/notifications/sidebarNotices'
 import { computeStreakDays, type UserStats } from '@/types/stats'
 import { CATEGORY_LABELS, type Course, type CourseCategory } from '@/types/course'
 import { STATUS_LABELS, type TrainingRecord, type TrainingStatus } from '@/types/tracking'
@@ -41,107 +41,6 @@ const STATUS_BADGE: Record<TrainingStatus, string> = {
   in_progress:  'bg-blue-100 text-blue-700',
   completed:    'bg-freshket-100 text-freshket-700',
   failed:       'bg-rose-100 text-rose-600',
-}
-
-// ── Training Status Half Donut ────────────────────────────────────────────────
-// Counts are computed from the user's assigned courses merged with their live
-// training records (see `trainingStatus` in the page), so the donut reflects the
-// real backend state — including assigned-but-not-started and past-deadline
-// (overdue) courses — instead of only rows that already exist in trainingRecords.
-export interface TrainingCounts {
-  completed: number
-  in_progress: number
-  failed: number
-  overdue: number
-  not_started: number
-  total: number
-}
-
-function HalfDonutChart({ counts }: { counts: TrainingCounts }) {
-  // Collapsed by default — this is secondary detail vs. the "For You" course
-  // list, so it shouldn't compete for attention on first load; the learner
-  // opens it on demand.
-  const [open, setOpen] = useState(false)
-  const total = counts.total
-
-  const segments = [
-    { key: 'completed',   label: 'Pass',        count: counts.completed,   color: '#00ce7c' },
-    { key: 'in_progress', label: 'In Progress', count: counts.in_progress, color: '#60a5fa' },
-    { key: 'failed',      label: 'Failed',      count: counts.failed,      color: '#f87171' },
-    { key: 'overdue',     label: 'Overdue',     count: counts.overdue,     color: '#fb923c' },
-    { key: 'not_started', label: 'Not Started', count: counts.not_started, color: '#d1d5db' },
-  ]
-
-  const R = 68
-  const cx = 100, cy = 90
-  const sw = 20
-  const half = Math.PI * R
-
-  let cumulative = 0
-  const arcs = segments.map(seg => {
-    const len = total > 0 ? (seg.count / total) * half : 0
-    const off = cumulative
-    cumulative += len
-    return { ...seg, len, off }
-  })
-
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full px-4 py-3.5 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
-      >
-        <h3 className="text-sm font-bold text-gray-900">Training Status</h3>
-        <span className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-gray-400">{total} หลักสูตร</span>
-          <svg className={`size-4 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
-            viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-          </svg>
-        </span>
-      </button>
-
-      {open && (
-        <div className="px-4 pt-4 pb-3 border-t border-gray-100">
-          <div className="relative flex justify-center mb-1">
-            <svg width="200" height="105" viewBox="0 0 200 105">
-              <path
-                d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
-                fill="none" stroke="#f3f4f6" strokeWidth={sw} strokeLinecap="round"
-              />
-              {total === 0 ? null : arcs.map(arc => arc.len > 0 && (
-                <path
-                  key={arc.key}
-                  d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
-                  fill="none"
-                  stroke={arc.color}
-                  strokeWidth={sw}
-                  strokeLinecap="butt"
-                  strokeDasharray={`${arc.len} ${half}`}
-                  strokeDashoffset={-arc.off}
-                />
-              ))}
-            </svg>
-            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-center leading-tight">
-              <p className="text-xl font-bold text-gray-900">{counts.completed}</p>
-              <p className="text-xs text-gray-400">Pass</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-2">
-            {segments.map(seg => (
-              <div key={seg.key} className="flex items-center gap-2">
-                <span className="size-2.5 rounded-full shrink-0" style={{ background: seg.color }} />
-                <span className="text-xs text-gray-500 flex-1 truncate">{seg.label}</span>
-                <span className="text-xs font-bold text-gray-800 tabular-nums">{seg.count}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -186,10 +85,20 @@ export default function SaleDashboardPage() {
   // Right sidebar (streak + training status) is secondary detail — collapsed by
   // default so it doesn't compete with the course list, opened on demand.
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  // What team leads and managers said about the learner (stars, comments, assessments): shown at the top
-  // of the sidebar, with a signal on the handle while any is unread.
-  const { items: notifItems, markRead, markAllRead } = useNotifications(user?.uid)
-  const feedback = useMemo(() => feedbackNotices(notifItems), [notifItems])
+  // The learner's notifications (what a team lead or manager said, new courses…): listed in the sidebar,
+  // with a signal on its handle while any is unread. Opening the sidebar is what reads them.
+  const { items: notifItems, markRead } = useNotifications(user?.uid)
+  const notices = useMemo(() => sidebarNotices(notifItems), [notifItems])
+  // The ones that were unread when the sidebar was opened: still highlighted for that visit, so the
+  // learner can see what is new even though the signal is gone.
+  const [freshIds, setFreshIds] = useState<Set<string>>(new Set())
+  function toggleSidebar() {
+    if (!sidebarOpen && notices.unread > 0) {
+      setFreshIds(new Set(notices.unreadIds))
+      notices.unreadIds.forEach(markRead)
+    }
+    setSidebarOpen((v) => !v)
+  }
   const firstName = user?.nickname ?? user?.displayName?.split(' ')[0] ?? 'คุณ'
   const daysSince = getDaysSince(user?.startDate)
   const isNewJoiner = !isAdmin && daysSince < NEW_JOINER_DAYS
@@ -311,25 +220,6 @@ export default function SaleDashboardPage() {
       window.alert('ซ่อนหลักสูตรไม่สำเร็จ')
     }
   }
-
-  // Training Status donut — real backend state. Each assigned+published course
-  // falls into exactly one bucket (priority: completed → failed → overdue →
-  // in_progress → not started), so the segments always sum to the course total.
-  const trainingStatus = useMemo<TrainingCounts>(() => {
-    const now = new Date()
-    let completed = 0, in_progress = 0, failed = 0, overdue = 0, not_started = 0
-    for (const c of forYouCourses) {
-      const status = recordMap[c.id]?.status
-      const end = c.endDate ? (c.endDate instanceof Date ? c.endDate : new Date(c.endDate as unknown as string)) : null
-      const isOverdue = !!end && !isNaN(end.getTime()) && end < now
-      if (status === 'completed') completed++
-      else if (status === 'failed') failed++
-      else if (isOverdue) overdue++
-      else if (status === 'in_progress') in_progress++
-      else not_started++
-    }
-    return { completed, in_progress, failed, overdue, not_started, total: forYouCourses.length }
-  }, [forYouCourses, recordMap])
 
   // Team lead / manager get the dedicated 3-column team dashboard.
   if (user?.role === 'team_lead' || user?.role === 'manager') {
@@ -575,8 +465,8 @@ export default function SaleDashboardPage() {
               edge so it reads as its own control, not part of the scrollbar. */}
           <button
             type="button"
-            onClick={() => setSidebarOpen((v) => !v)}
-            title={sidebarOpen ? 'ซ่อนแถบด้านข้าง' : 'แสดงแถบด้านข้าง'}
+            onClick={toggleSidebar}
+            title={sidebarOpen ? 'ซ่อนแถบด้านข้าง' : notices.unread > 0 ? 'มีแจ้งเตือนใหม่ กดเพื่อเปิดอ่าน' : 'แสดงแถบด้านข้าง'}
             className="absolute top-1/2 -translate-y-1/2 -left-4 z-10 flex flex-col items-center gap-1.5 py-3 px-1.5 rounded-l-xl bg-white border border-gray-200 border-r-0 shadow-md text-gray-500 hover:text-freshket-600 hover:border-freshket-300 transition-colors"
           >
             <svg className={`size-4 shrink-0 transition-transform duration-200 ${sidebarOpen ? 'rotate-180' : ''}`}
@@ -584,54 +474,55 @@ export default function SaleDashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
             </svg>
             <span className="text-xs font-bold whitespace-nowrap" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
-              {sidebarOpen ? 'Hide' : 'Open'}
+              {sidebarOpen ? 'Hide' : notices.unread > 0 ? 'มีแจ้งเตือนใหม่' : 'Open'}
             </span>
-            {feedback.unread > 0 && (
+            {!sidebarOpen && notices.unread > 0 && (
               <span
                 role="status"
-                aria-label={`มี ${feedback.unread} ความเห็นใหม่จากหัวหน้า`}
+                aria-label={`มี ${notices.unread} แจ้งเตือนใหม่`}
                 className="absolute -top-1.5 -left-1.5 min-w-5 h-5 px-1 flex items-center justify-center rounded-full bg-rose-500 text-white text-xs font-bold tabular-nums shadow"
               >
-                {feedback.unread > 9 ? '9+' : feedback.unread}
+                <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping" />
+                <span className="relative">{notices.unread > 9 ? '9+' : notices.unread}</span>
               </span>
             )}
           </button>
 
           {sidebarOpen && (
             <div className="flex-1 min-w-0 overflow-y-auto p-5 pt-0 space-y-4">
-              {/* From your team lead / manager */}
-              {feedback.items.length > 0 && (
-                <div className="rounded-2xl border border-gray-100 bg-white p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-bold text-gray-900">
-                      จากหัวหน้า
-                      {feedback.unread > 0 && <span className="ml-2 text-xs font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-600">{feedback.unread} ใหม่</span>}
-                    </p>
-                    {feedback.unread > 0 && (
-                      <button type="button" onClick={markAllRead} className="text-xs font-bold text-freshket-600 hover:underline">อ่านแล้วทั้งหมด</button>
-                    )}
-                  </div>
+              {/* Notifications */}
+              <div className="rounded-2xl border border-gray-100 bg-white p-4">
+                <p className="text-sm font-bold text-gray-900 mb-1">
+                  แจ้งเตือน
+                  {freshIds.size > 0 && <span className="ml-2 text-xs font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-600">{freshIds.size} ใหม่</span>}
+                </p>
+                {notices.items.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-3">ยังไม่มีแจ้งเตือน</p>
+                ) : (
                   <ul className="divide-y divide-gray-50">
-                    {feedback.items.map((n) => (
-                      <li key={n.id}>
-                        <button
-                          type="button"
-                          onClick={() => { if (!n.read) markRead(n.id); router.push(n.refPath) }}
-                          className="w-full flex items-start gap-2.5 py-2.5 text-left hover:bg-gray-50 rounded-lg transition-colors"
-                        >
-                          <span className={`mt-1.5 size-2 rounded-full shrink-0 ${n.read ? 'bg-gray-200' : 'bg-rose-500'}`} />
-                          <span className="min-w-0">
-                            <span className={`block text-xs leading-snug ${n.read ? 'text-gray-600' : 'font-bold text-gray-900'}`}>{n.title}</span>
-                            {n.body && <span className="block text-xs text-gray-400 mt-0.5 line-clamp-2">{n.body}</span>}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
+                    {notices.items.map((n) => {
+                      const isNew = freshIds.has(n.id)
+                      return (
+                        <li key={n.id}>
+                          <button
+                            type="button"
+                            onClick={() => router.push(n.refPath)}
+                            className="w-full flex items-start gap-2.5 py-2.5 text-left hover:bg-gray-50 rounded-lg transition-colors"
+                          >
+                            <span className={`mt-1.5 size-2 rounded-full shrink-0 ${isNew ? 'bg-rose-500' : 'bg-gray-200'}`} />
+                            <span className="min-w-0">
+                              <span className={`block text-xs leading-snug ${isNew ? 'font-bold text-gray-900' : 'text-gray-600'}`}>{n.title}</span>
+                              {n.body && <span className="block text-xs text-gray-400 mt-0.5 line-clamp-2">{n.body}</span>}
+                            </span>
+                          </button>
+                        </li>
+                      )
+                    })}
                   </ul>
-                </div>
-              )}
+                )}
+              </div>
 
-              {/* Streak card — the copy has to work at 0, which is where every
+                            {/* Streak card — the copy has to work at 0, which is where every
                   learner starts and where anyone who misses a day lands. */}
               <div className="rounded-2xl p-4" style={{ background: 'linear-gradient(135deg,#eef2ff 0%,#e0e7ff 100%)' }}>
                 <p className="text-sm font-bold text-indigo-900">
@@ -648,8 +539,6 @@ export default function SaleDashboardPage() {
                 </button>
               </div>
 
-              {/* Training Status Donut */}
-              <HalfDonutChart counts={trainingStatus} />
             </div>
           )}
         </div>
