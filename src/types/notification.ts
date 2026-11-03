@@ -5,6 +5,8 @@ export type NotifType =
   | 'heart_received'          // any role: a colleague sent you a heart (ส่งใจ)
   | 'assessment_completed'    // team_lead / manager: someone on your team finished an assessment
   | 'new_mandatory'           // any role: a new Mandatory Reading slide is published for your department
+  | 'course_feedback_received' // sale: a team lead / manager commented on, or rated, your course
+  | 'roleplay_assessed'       // sale: a team lead / manager assessed your Role Play
 
 export interface AppNotification {
   id: string

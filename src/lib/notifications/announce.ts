@@ -59,6 +59,17 @@ export type AnnounceEvent =
       recordId: string
     }
   | {
+      kind: 'course_feedback'
+      /** The member whose course was commented on or rated; the caller must be the lead who gave it. */
+      memberUid: string
+      courseId: string
+    }
+  | {
+      kind: 'roleplay_assessed'
+      /** The Role Play assessment the caller saved; the server tells the person it is about. */
+      assessmentId: string
+    }
+  | {
       kind: 'shadow_acked'
       /** The visit reviewed: the caller must have given a review of it. The server looks up who to tell and what was given. */
       recordId: string

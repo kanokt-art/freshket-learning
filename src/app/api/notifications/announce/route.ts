@@ -7,6 +7,8 @@ import { requireStaff } from '@/lib/server/auth'
 import { formatPersonName } from '@/lib/users/displayName'
 import { slackText } from '@/lib/notifications/slackText'
 import { resolveAnnouncementText } from '@/lib/notifications/courseAnnouncement'
+import { toStars } from '@/lib/feedback/stars'
+import { ROLEPLAY_TOPICS } from '@/types/roleplay'
 import type { UserProfile } from '@/types/user'
 import {
   postCoursePublishedToSlack,
@@ -52,6 +54,8 @@ function uidList(v: unknown): string[] {
   if (!Array.isArray(v)) return []
   return v.filter((x): x is string => typeof x === 'string' && ID_RE.test(x)).slice(0, MAX_LIST)
 }
+
+const isLead = (role: string) => role === 'team_lead' || role === 'manager' || role === 'super_admin'
 
 const isActivePerson = (u: Partial<UserProfile>) => !u.employmentStatus || u.employmentStatus === 'Active'
 
@@ -223,6 +227,116 @@ export async function POST(req: NextRequest) {
           rating,
           shadowUrl: link,
         })
+        break
+      }
+
+      // A team lead or manager commented on, or rated, a member's course: tell that member (once per
+      // lead and course; editing it later tells nobody again). The saved feedback is the source of the
+      // words — the caller only names whose it is.
+      case 'course_feedback': {
+        if (!isLead(gate.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const memberUid = idOf(body.memberUid)
+        const courseId = idOf(body.courseId)
+        if (!memberUid || !courseId) return bad('Invalid memberUid or courseId')
+        if (memberUid === gate.uid) return NextResponse.json({ ok: true, posted: false })
+
+        const fb = (await store.get('courseFeedback', `${memberUid}_${courseId}`)) as (Doc & { leadUid?: string; comment?: string; score?: number }) | null
+        // Only for feedback the caller really gave.
+        if (!fb || fb.leadUid !== gate.uid) return NextResponse.json({ ok: true, posted: false })
+        const stars = toStars(fb.score)
+        const comment = typeof fb.comment === 'string' ? fb.comment.trim() : ''
+        if (stars === null && !comment) return NextResponse.json({ ok: true, posted: false })
+
+        const first = await store.claim('slackPosts', `course_feedback:${memberUid}_${courseId}:${gate.uid}`, {
+          kind: 'course_feedback', refId: `${memberUid}_${courseId}`, postedAt: new Date(),
+        })
+        if (!first) return NextResponse.json({ ok: true, posted: false })
+
+        const course = (await store.get('courses', courseId)) as (Doc & { title?: string }) | null
+        const title = typeof course?.title === 'string' ? course.title : 'หลักสูตร'
+        const reviewer = formatPersonName(gate.person as Partial<UserProfile>) || 'Mentor'
+        const link = appUrl(`/courses/${courseId}`)
+        const starLine = stars !== null ? `${stars}/5 ดาว` : ''
+
+        dmSent = await dmPeople(store, [memberUid], {
+          text: `${slackText(reviewer)} ให้ความเห็นในหลักสูตร ${slackText(title)}${starLine ? ` — ${starLine}` : ''}`,
+          blocks: [
+            { type: 'section', text: { type: 'mrkdwn', text: `${stars !== null ? '⭐' : '💬'} *${slackText(reviewer)}* ให้ความเห็นในหลักสูตรของคุณ\n*${slackText(title)}*${starLine ? `\nได้รับ *${starLine}*` : ''}` } },
+            ...(comment ? [{ type: 'section', text: { type: 'mrkdwn', text: `>${slackText(excerpt(comment, 300))}` } }] : []),
+            ...(link ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูหลักสูตร' }, url: link }] }] : []),
+          ],
+        })
+        // No Slack DM reached them: the in-app bell, so one piece of feedback is one notice.
+        if (dmSent === 0) {
+          await store.set(`notifications/${memberUid}/items`, `course_feedback_received_${memberUid}_${courseId}_${gate.uid}`, {
+            type: 'course_feedback_received',
+            title: `${reviewer} ให้ความเห็นในหลักสูตร ${title}`,
+            body: [starLine, comment ? excerpt(comment, 120) : ''].filter(Boolean).join(' · '),
+            refId: courseId,
+            refPath: `/courses/${courseId}`,
+            read: false,
+            createdAt: new Date(),
+            createdByUid: gate.uid,
+          }, { merge: false })
+        }
+        break
+      }
+
+      // A team lead or manager assessed a member's Role Play: tell that member, once per assessment.
+      // The scores come from the saved assessment, not from the caller.
+      case 'roleplay_assessed': {
+        if (!isLead(gate.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        const assessmentId = idOf(body.assessmentId)
+        if (!assessmentId) return bad('Invalid assessmentId')
+        const a = (await store.get('roleplayAssessments', assessmentId)) as
+          | (Doc & { assessorUid?: string; subjectUid?: string; type?: string; round?: number; overallNote?: string; topics?: Array<{ key?: string; rating?: number }> })
+          | null
+        if (!a?.subjectUid || a.assessorUid !== gate.uid || a.subjectUid === gate.uid) {
+          return NextResponse.json({ ok: true, posted: false })
+        }
+
+        const first = await store.claim('slackPosts', `roleplay_assessed:${assessmentId}`, {
+          kind: 'roleplay_assessed', refId: assessmentId, postedAt: new Date(),
+        })
+        if (!first) return NextResponse.json({ ok: true, posted: false })
+
+        const ratings = new Map((Array.isArray(a.topics) ? a.topics : []).map((t) => [t.key, t.rating] as const))
+        const groups = new Map<string, number[]>()
+        for (const t of ROLEPLAY_TOPICS) {
+          const r = ratings.get(t.key)
+          if (typeof r === 'number' && Number.isFinite(r)) groups.set(t.group, [...(groups.get(t.group) ?? []), r])
+        }
+        const avg = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length
+        const all = Array.from(groups.values()).flat()
+        const overall = all.length > 0 ? avg(all).toFixed(1) : undefined
+        const perGroup = Array.from(groups.entries()).map(([g, xs]) => `${g} ${avg(xs).toFixed(1)}`).join(' · ')
+
+        const assessor = formatPersonName(gate.person as Partial<UserProfile>) || 'Mentor'
+        const kindLabel = `${a.type === 'post' ? 'Post' : 'Pre'}${typeof a.round === 'number' ? ` รอบที่ ${a.round}` : ''}`
+        const link = appUrl('/sale')
+        const note = typeof a.overallNote === 'string' ? a.overallNote.trim() : ''
+
+        dmSent = await dmPeople(store, [a.subjectUid], {
+          text: `${slackText(assessor)} ประเมิน Role Play ของคุณ${overall ? ` — เฉลี่ย ${overall}/10` : ''}`,
+          blocks: [
+            { type: 'section', text: { type: 'mrkdwn', text: `🎯 *${slackText(assessor)}* ประเมิน Role Play ของคุณ\n${kindLabel}${overall ? ` · คะแนนเฉลี่ย *${overall}/10*` : ''}` } },
+            ...(perGroup ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: slackText(perGroup) }] }] : []),
+            ...(note ? [{ type: 'section', text: { type: 'mrkdwn', text: `>${slackText(excerpt(note, 300))}` } }] : []),
+            ...(link ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูผลประเมิน' }, url: link }] }] : []),
+          ],
+        })
+        if (dmSent === 0) {
+          await store.set(`notifications/${a.subjectUid}/items`, `roleplay_assessed_${assessmentId}`, {
+            type: 'roleplay_assessed',
+            title: `${assessor} ประเมิน Role Play ของคุณ`,
+            body: [kindLabel, overall ? `เฉลี่ย ${overall}/10` : ''].filter(Boolean).join(' · '),
+            refId: assessmentId,
+            refPath: '/sale',
+            read: false,
+            createdAt: new Date(),
+            createdByUid: gate.uid,
+          }, { merge: false })
+        }
         break
       }
 

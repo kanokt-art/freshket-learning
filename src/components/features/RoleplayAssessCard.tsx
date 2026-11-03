@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { saveRoleplayAssessment } from '@/hooks/useFirestore'
 import { alertError } from '@/lib/ui/alert'
+import { announce } from '@/lib/notifications/announce'
 import {
   RATING_MAX, buildRoleplayAssessment, firstIncomplete, missingInGroup, nextRound, roleplayGroups,
 } from '@/lib/roleplay/assessForm'
@@ -50,7 +51,9 @@ export function RoleplayAssessCard({ subject, assessor, existing, onClose, onSav
     }
     setSaving(true)
     try {
-      await saveRoleplayAssessment({ ...record, id: '' })
+      const id = await saveRoleplayAssessment({ ...record, id: '' })
+      // Tell the member it was assessed (the server words it from the saved scores).
+      if (id) void announce({ kind: 'roleplay_assessed', assessmentId: id })
       onSaved()
     } catch (e) {
       void alertError('บันทึกการประเมินไม่สำเร็จ', e instanceof Error ? e.message : 'ลองใหม่อีกครั้ง')

@@ -21,6 +21,7 @@ import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { RoleplayRadar } from '@/components/features/RoleplayRadar'
 import { RoleplayAssessCard } from '@/components/features/RoleplayAssessCard'
 import { canAssessRoleplay as canAssessRoleplayOf } from '@/lib/roleplay/assessForm'
+import { announce } from '@/lib/notifications/announce'
 import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
 import { canAccess, ROLE_LABELS, getTeamManagerIds, getTeamLeadIds, type UserProfile } from '@/types/user'
 import type { AssessmentScore } from '@/types/assessmentScore'
@@ -629,6 +630,8 @@ function EmployeeSidebar({
         leadUid: viewer?.uid ?? '', leadName: viewer?.displayName ?? '',
         updatedAt: new Date(),
       })
+      // Tell the member (once per lead and course; the server decides and words it).
+      void announce({ kind: 'course_feedback', memberUid: user.uid, courseId })
     } catch (e) {
       console.error('saveFeedback', e)
       void alertError('บันทึกความคิดเห็นไม่สำเร็จ', 'กรุณาลองอีกครั้ง')
