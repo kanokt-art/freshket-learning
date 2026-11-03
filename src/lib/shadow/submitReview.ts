@@ -49,6 +49,6 @@ export async function submitShadowReview(args: {
     title: `${reviewer.name || 'Mentor'} ประเมิน Shadow Visit ของคุณ`,
     body: `ร้าน ${record.storeName} · ได้รับ ${rating}/5 ดาว`,
     refId: record.id,
-    refPath: '/shadow',
+    refPath: `/shadow?visit=${record.id}`,
   })
 }

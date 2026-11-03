@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
       const stars = typeof review.rating === 'number' && review.rating >= 1 && review.rating <= 5 ? review.rating : null
       docTitle = `${formatPersonName(gate.person as Partial<UserProfile>) || 'Mentor'} ประเมิน Shadow Visit ของคุณ`
       docBody = `ร้าน ${visit.storeName ?? ''}${stars !== null ? ` · ได้รับ ${stars}/5 ดาว` : ''}`
-      docPath = '/shadow'
+      docPath = `/shadow?visit=${encodeURIComponent(refId)}`
       // Each reviewer's notice is its own: a manager's does not overwrite the team lead's.
       docId = `${type}_${refId}_${gate.uid}`
     }

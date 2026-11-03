@@ -106,6 +106,8 @@ describe('shadow_ack_received: a reviewer telling the person whose visit it was'
     expect(written[0].data.title).toContain('Malee')
     expect(String(written[0].data.body)).toContain('4/5')
     expect(written[0].data.title).not.toContain('URGENT')
+    // the notice opens that visit's panel on the Shadow Visit page
+    expect(written[0].data.refPath).toBe('/shadow?visit=v2')
   })
 
   it('refuses when the caller gave no review of that visit', async () => {

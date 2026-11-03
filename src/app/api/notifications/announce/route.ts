@@ -214,7 +214,7 @@ export async function POST(req: NextRequest) {
 
         // The person whose visit it was gets the score privately.
         const stars = rating !== undefined ? `${rating}/5 ดาว` : ''
-        const link = appUrl('/shadow')
+        const link = appUrl(`/shadow?visit=${encodeURIComponent(recordId)}`)
         dmSent = await dmPeople(store, [visit.observerUid], {
           text: `${slackText(reviewer)} ประเมิน Shadow Visit ของคุณ${stars ? ` — ${stars}` : ''}`,
           blocks: [
@@ -228,7 +228,7 @@ export async function POST(req: NextRequest) {
           reviewerName: reviewer,
           observerName: observer,
           rating,
-          shadowUrl: link,
+          shadowUrl: appUrl('/shadow'),
         })
         break
       }
@@ -258,7 +258,7 @@ export async function POST(req: NextRequest) {
         const course = (await store.get('courses', courseId)) as (Doc & { title?: string }) | null
         const title = typeof course?.title === 'string' ? course.title : 'หลักสูตร'
         const reviewer = formatPersonName(gate.person as Partial<UserProfile>) || 'Mentor'
-        const link = appUrl(`/courses/${courseId}`)
+        const link = appUrl(`/courses/${courseId}?feedback=1`)
         const starLine = stars !== null ? `${stars}/5 ดาว` : ''
 
         dmSent = await dmPeople(store, [memberUid], {
@@ -276,7 +276,7 @@ export async function POST(req: NextRequest) {
             title: `${reviewer} ให้ความเห็นในหลักสูตร ${title}`,
             body: [starLine, comment ? excerpt(comment, 120) : ''].filter(Boolean).join(' · '),
             refId: courseId,
-            refPath: `/courses/${courseId}`,
+            refPath: `/courses/${courseId}?feedback=1`,
             read: false,
             createdAt: new Date(),
             createdByUid: gate.uid,

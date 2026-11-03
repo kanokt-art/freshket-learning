@@ -213,6 +213,14 @@ export default function CourseDetailPage() {
   // the learner can open the notification they got and find it.
   const [leadFeedback, setLeadFeedback] = useState<{ comment?: string; score?: number | null; leadName?: string; updatedAt?: Date } | null>(null)
   const feedbackUid = user?.uid
+  // The panel opens by itself when the learner arrives from the notification (?feedback=1).
+  const [feedbackOpen, setFeedbackOpen] = useState(search.get('feedback') === '1')
+  // Whether they have already opened it for this feedback: the signal on its handle goes once they have.
+  const [feedbackSeen, setFeedbackSeen] = useState(0)
+  const seenKey = `fk_lead_feedback_seen_${feedbackUid ?? ''}_${id}`
+  useEffect(() => {
+    try { setFeedbackSeen(Number(localStorage.getItem(seenKey) ?? 0)) } catch { /* no storage: shown as new */ }
+  }, [seenKey])
   useEffect(() => {
     if (!feedbackUid) return
     let cancelled = false
@@ -503,21 +511,59 @@ export default function CourseDetailPage() {
         </div>
       )}
 
-      {/* What a team lead or manager said about this learner on this course */}
-      {!isAdmin && leadFeedback && (toStars(leadFeedback.score) !== null || !!leadFeedback.comment?.trim()) && (
-        <div className="px-6 pt-4 shrink-0">
-          <div className="rounded-2xl border border-amber-100 bg-amber-50/60 px-5 py-4">
-            <div className="flex items-center gap-3 flex-wrap">
-              <p className="text-sm font-bold text-gray-900">ความเห็นจากหัวหน้า</p>
-              {leadFeedback.leadName && <span className="text-xs text-gray-500">{leadFeedback.leadName}</span>}
-              {toStars(leadFeedback.score) !== null && <StarsDisplay value={toStars(leadFeedback.score) as number} />}
-            </div>
-            {leadFeedback.comment?.trim() && (
-              <p className="text-sm text-gray-700 leading-relaxed mt-2 whitespace-pre-wrap">{leadFeedback.comment.trim()}</p>
+      {/* What a team lead or manager said about this learner on this course: a panel on the right */}
+      {!isAdmin && leadFeedback && (toStars(leadFeedback.score) !== null || !!leadFeedback.comment?.trim()) && (() => {
+        const stamp = leadFeedback.updatedAt ? new Date(leadFeedback.updatedAt).getTime() || 1 : 1
+        const isNew = stamp > feedbackSeen
+        const open = () => {
+          setFeedbackOpen(true)
+          setFeedbackSeen(stamp)
+          try { localStorage.setItem(seenKey, String(stamp)) } catch { /* ignore */ }
+        }
+        return (
+          <>
+            {!feedbackOpen && (
+              <button
+                type="button"
+                onClick={open}
+                title={isNew ? 'มีความเห็นใหม่จากหัวหน้า กดเพื่ออ่าน' : 'ความเห็นจากหัวหน้า'}
+                className="fixed right-0 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1.5 py-3 px-1.5 rounded-l-xl bg-white border border-gray-200 border-r-0 shadow-md text-gray-500 hover:text-freshket-600 hover:border-freshket-300 transition-colors"
+              >
+                <svg className="size-4 shrink-0 rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                </svg>
+                <span className="text-xs font-bold whitespace-nowrap" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                  {isNew ? 'มีความเห็นใหม่จากหัวหน้า' : 'ความเห็นจากหัวหน้า'}
+                </span>
+                {isNew && (
+                  <span className="absolute -top-1.5 -left-1.5 size-3.5 rounded-full bg-rose-500">
+                    <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping" />
+                  </span>
+                )}
+              </button>
             )}
-          </div>
-        </div>
-      )}
+            {feedbackOpen && (
+              <aside className="fixed inset-y-0 right-0 z-40 w-80 max-w-[90vw] bg-white border-l border-gray-100 shadow-2xl flex flex-col animate-slide-in-right">
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100 shrink-0">
+                  <p className="flex-1 text-sm font-bold text-gray-900">ความเห็นจากหัวหน้า</p>
+                  <button type="button" onClick={() => setFeedbackOpen(false)} aria-label="ปิด"
+                    className="p-1.5 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-all">
+                    <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+                  <p className="text-xs text-gray-400">หลักสูตร {course.title}</p>
+                  {leadFeedback.leadName && <p className="text-sm font-bold text-gray-800">{leadFeedback.leadName}</p>}
+                  {toStars(leadFeedback.score) !== null && <StarsDisplay value={toStars(leadFeedback.score) as number} />}
+                  {leadFeedback.comment?.trim() && (
+                    <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{leadFeedback.comment.trim()}</p>
+                  )}
+                </div>
+              </aside>
+            )}
+          </>
+        )
+      })()}
 
       {/* ── Results dashboard tab ───────────────────────────────────────── */}
       {isAdmin && tab === 'results' && (

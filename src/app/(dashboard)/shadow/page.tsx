@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
 import { useAuth } from '@/hooks/useAuth'
@@ -302,13 +303,15 @@ function VisitDetailModal({
   onClose: () => void
   onSaveAck: (recordId: string, rating: number, comment: string) => Promise<void> | void
 }) {
+  // A panel on the right, not a window in the middle: the list stays in view behind it, and it is where a
+  // learner reads the feedback their team lead or manager gave on this visit.
   return (
     <div
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 bg-slate-900/40 z-50 flex justify-end"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-pop-in"
+        className="bg-white h-full w-full max-w-md flex flex-col shadow-2xl overflow-hidden animate-slide-in-right"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -1285,6 +1288,9 @@ export default function ShadowPage() {
   const [showForm, setShowForm]         = useState(false)
   const [overlayMember, setOverlayMember] = useState<UserProfile | null>(null)
   const [selectedVisit, setSelectedVisit] = useState<ShadowRecord | null>(null)
+  // A notice about a review opens that visit's panel (?visit=<id>), once.
+  const visitParam = useSearchParams().get('visit')
+  const openedFromLink = useRef<string | null>(null)
   const [memberSearch, setMemberSearch] = useState('')
   const [memberSortAsc, setMemberSortAsc] = useState(true)
 
@@ -1370,6 +1376,15 @@ export default function ShadowPage() {
     document.body.style.overflow = open ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
   }, [overlayMember, selectedVisit, showForm])
+
+  useEffect(() => {
+    if (!visitParam || openedFromLink.current === visitParam) return
+    const record = records.find((r) => r.id === visitParam)
+    if (record) {
+      openedFromLink.current = visitParam
+      setSelectedVisit(record)
+    }
+  }, [visitParam, records])
 
   async function handleSubmit(data: FormState) {
     const now = new Date()

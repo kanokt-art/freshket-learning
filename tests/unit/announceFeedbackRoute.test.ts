@@ -93,7 +93,7 @@ describe('course feedback', () => {
     await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })
     expect(bells).toHaveLength(1)
     expect(bells[0].path).toBe('notifications/sale1/items')
-    expect(bells[0].data).toMatchObject({ type: 'course_feedback_received', refPath: '/courses/c1', read: false })
+    expect(bells[0].data).toMatchObject({ type: 'course_feedback_received', refPath: '/courses/c1?feedback=1', read: false })
   })
 
   it('tells them once: editing the feedback later says nothing more', async () => {
