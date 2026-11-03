@@ -138,6 +138,13 @@ export default function TakeAssessmentPage() {
   // no course Progress field left to mark here — this now just clears the
   // return flag and lets the learner navigate back via handleBack().
   function handleGoogleFormDone() {
+    // Nothing grades a Google Form, so "done" is the learner's word: the lesson is ticked the same way a
+    // graded quiz ticks its own (a note the course page picks up when they go back).
+    if (returnCtx?.lessonId) {
+      try {
+        sessionStorage.setItem('assessment_graded_lesson', JSON.stringify({ courseId: returnCtx.courseId, lessonId: returnCtx.lessonId }))
+      } catch { /* storage blocked — the lesson stays unticked */ }
+    }
     if (returnCtx) sessionStorage.removeItem('assessment_return')
     setFormMarkedDone(true)
   }
@@ -289,7 +296,7 @@ export default function TakeAssessmentPage() {
   // Open the server-side session once the learner can actually start answering —
   // i.e. after the anti-cheat gate when there is one, so the clock doesn't run
   // while they read the warning screen.
-  const readyToStart = !!assessment && !submitted && (!antiCheatEnabled || started)
+  const readyToStart = !!assessment && !assessment.googleFormUrl && !submitted && (!antiCheatEnabled || started)
   useEffect(() => {
     if (DEMO_MODE || isPreview || !readyToStart || sessionId || !user) return
     let cancelled = false
@@ -473,6 +480,69 @@ export default function TakeAssessmentPage() {
       <div className="flex flex-col items-center justify-center h-full bg-white text-gray-400 gap-3">
         <p className="text-sm">{loadError ?? 'ไม่พบแบบทดสอบนี้'}</p>
         <button onClick={() => router.back()} className="text-sm text-freshket-600 hover:underline">← กลับ</button>
+      </div>
+    )
+  }
+
+  // A Google Form assessment has no questions here: Google owns the form and its responses, so the page
+  // shows the form itself (embedded when Google allows it, else a link) and the learner says when done.
+  if (assessment.googleFormUrl) {
+    const formUrl = assessment.googleFormUrl
+    const embedUrl = toFormEmbedUrl(formUrl.includes('forms.gle') ? (resolvedFormUrl ?? '') : formUrl)
+    return (
+      <div className="flex flex-col h-full bg-white">
+        <div className="bg-white border-b border-gray-100 px-6 py-4 flex items-center gap-4 shrink-0">
+          <button onClick={handleBack} aria-label="กลับ" className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors shrink-0">
+            <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+          </button>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-gray-800 truncate">{assessment.title}</p>
+            {assessment.description && <p className="text-xs text-gray-400 mt-0.5 truncate">{assessment.description}</p>}
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 flex flex-col">
+          {formMarkedDone ? (
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center">
+              <div className="size-12 rounded-full bg-freshket-100 flex items-center justify-center">
+                <svg className="size-6 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+              </div>
+              <p className="text-sm font-bold text-gray-900">ส่งแบบทดสอบเรียบร้อย</p>
+              <button onClick={handleBack} className="px-4 py-2 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all duration-150">
+                {returnCtx ? 'กลับไปที่หลักสูตร' : 'กลับ'}
+              </button>
+            </div>
+          ) : resolvingForm ? (
+            <div className="flex-1 flex items-center justify-center">
+              <span className="size-8 border-4 border-freshket-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : embedUrl ? (
+            <iframe src={embedUrl} title={assessment.title} className="flex-1 w-full" style={{ border: 'none' }} />
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center">
+              <p className="text-sm text-gray-500">แบบทดสอบนี้เปิดในหน้าต่างใหม่ของ Google Forms</p>
+              <a href={formUrl} target="_blank" rel="noopener noreferrer" onClick={() => setFormOpened(true)}
+                className="px-4 py-2 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all duration-150">
+                เปิดแบบทดสอบ
+              </a>
+            </div>
+          )}
+        </div>
+
+        {!formMarkedDone && !resolvingForm && (
+          <div className="shrink-0 border-t border-gray-100 px-6 py-3 flex items-center justify-between gap-3">
+            <p className="text-xs text-gray-400">ส่งแบบฟอร์มให้เรียบร้อยก่อน แล้วกดปุ่มนี้</p>
+            <button
+              onClick={handleGoogleFormDone}
+              disabled={!embedUrl && !formOpened}
+              className="px-4 py-2 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              ทำเสร็จแล้ว
+            </button>
+          </div>
+        )}
       </div>
     )
   }

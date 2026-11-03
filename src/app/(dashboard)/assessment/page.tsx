@@ -277,6 +277,9 @@ function AssessmentRow({
   onDelete: () => void
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
+  // The table card clips what overflows it, so the menu is placed against the viewport from the button's
+  // position (and opens upward near the bottom of the screen) instead of hanging off the row.
+  const [menuPos, setMenuPos] = useState<{ right: number; top?: number; bottom?: number }>({ right: 0 })
   const isForm = Boolean(assessment.googleFormUrl)
   const maxScore = assessment.questions.reduce((s, q) => s + (q.points ?? 0), 0)
 
@@ -359,7 +362,16 @@ function AssessmentRow({
       <td className="px-3 py-3 relative">
         <div className="relative">
           <button
-            onClick={() => setMenuOpen((v) => !v)}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              const MENU_HEIGHT = 190
+              const right = Math.max(8, window.innerWidth - r.right)
+              setMenuPos(window.innerHeight - r.bottom < MENU_HEIGHT
+                ? { right, bottom: window.innerHeight - r.top + 4 }
+                : { right, top: r.bottom + 4 })
+              setMenuOpen((v) => !v)
+            }}
+            aria-label="เมนูแบบทดสอบ"
             className="size-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-all"
           >
             <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
@@ -368,8 +380,8 @@ function AssessmentRow({
           </button>
           {menuOpen && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-              <div className="absolute right-0 top-9 z-20 w-44 bg-white rounded-xl shadow-xl border border-gray-100 py-1 overflow-hidden">
+              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+              <div style={menuPos} className="fixed z-50 w-44 bg-white rounded-xl shadow-xl border border-gray-100 py-1 overflow-hidden">
                 <button onClick={() => { setMenuOpen(false); onPreview() }}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-normal text-gray-700 hover:bg-gray-50 transition-colors">
                   <svg className="size-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
