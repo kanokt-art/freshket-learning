@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import type { ModuleId } from '@/lib/modules'
 
-// Regular-user sub-nav for the "My Course" area (Course / Library / Shadow Visit / Role Play),
+// Regular-user sub-nav for the "My Course" area (Course / Shadow Visit / Role Play / Mandatory),
 // replacing the old sidebar accordion. Self-gating: renders nothing for super_admin
 // (they get CourseManagementTabs instead) and hides tabs whose module the user's
 // department can't access — mirroring the old sidebar child-filtering.
@@ -20,8 +20,8 @@ export function MyCourseTabs() {
   // Mandatory always renders last, regardless of which other tabs are visible
   // for the user's department.
   const tabs: { href: string; label: string; module: ModuleId; active: boolean }[] = [
-    { href: '/courses', label: 'Course', module: 'lms', active: pathname === '/courses' },
-    { href: '/courses/library', label: 'Library', module: 'lms', active: pathname.startsWith('/courses/library') },
+    // Library lives under Course (CourseSubTabs), so Course stays lit on both of its pages.
+    { href: '/courses', label: 'Course', module: 'lms', active: pathname === '/courses' || pathname.startsWith('/courses/library') },
     { href: '/shadow', label: 'Shadow Visit', module: 'shadow', active: pathname.startsWith('/shadow') },
     { href: '/courses/roleplay', label: 'Role Play', module: 'roleplay', active: pathname.startsWith('/courses/roleplay') },
     { href: '/courses/mandatory', label: 'Mandatory', module: 'lms', active: pathname.startsWith('/courses/mandatory') },

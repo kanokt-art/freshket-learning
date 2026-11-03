@@ -269,17 +269,31 @@ function Thumb({ course, size = 'sm' }: { course: Course; size?: 'sm' | 'lg' }) 
 // ── My Course grid card — thumbnail + level badge, category, title,
 // lesson/duration meta, progress bar + status (replaces price on the
 // reference layout, since that's the number that matters to a learner). ────
-export function LearnerCourseGridCard({ course, record, onClick, onDismiss }: {
+export interface LibraryCardOptions {
+  /** A small label on the thumbnail, e.g. "ไม่บังคับ". */
+  tag?: string
+  /** A quiet line under the meta, e.g. "ซ่อนจาก Your Course". */
+  note?: string
+  /** The one button of the card's footer; without it the footer is just the status. */
+  action?: { label: string; onClick?: () => void; primary?: boolean; disabled?: boolean; busy?: boolean }
+}
+
+export function LearnerCourseGridCard({ course, record, onClick, onDismiss, library }: {
   course: Course; record?: TrainingRecord; onClick: () => void
   /** Take a finished course off the learner's list. Offered only on a finished course. */
   onDismiss?: () => void
+  /** Library variant: no progress bar, an optional tag, and an action button in the footer. */
+  library?: LibraryCardOptions
 }) {
   const status: TrainingStatus = record?.status ?? 'not_started'
   const total = countLessons(course)
   const pct = recordProgressPercent(record)
   const isImg = !!course.thumbnailUrl && (course.thumbnailUrl.startsWith('http') || course.thumbnailUrl.startsWith('/'))
   return (
-    <div className="relative flex flex-col">
+    <div
+      className={`relative flex flex-col ${library ? 'bg-white rounded-2xl overflow-hidden hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] transition-all duration-150' : ''}`}
+      style={library ? { border: 'var(--card-border)' } : undefined}
+    >
     {onDismiss && status === 'completed' && (
       <button
         type="button"
@@ -293,8 +307,8 @@ export function LearnerCourseGridCard({ course, record, onClick, onDismiss }: {
     )}
     <button
       onClick={onClick}
-      style={{ border: 'var(--card-border)' }}
-      className="flex flex-col flex-1 text-left bg-white rounded-2xl overflow-hidden hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 group"
+      style={library ? undefined : { border: 'var(--card-border)' }}
+      className={`flex flex-col flex-1 text-left bg-white overflow-hidden transition-all duration-150 group ${library ? '' : 'rounded-2xl hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5'}`}
     >
       <div className="h-32 w-full relative shrink-0" style={{ background: isImg ? undefined : `${DONUT_COLORS[course.category]}22` }}>
         {isImg && (
@@ -304,6 +318,11 @@ export function LearnerCourseGridCard({ course, record, onClick, onDismiss }: {
         {course.level && (
           <span className={`absolute top-2.5 left-2.5 text-xs font-bold px-2 py-0.5 rounded-full ${LEVEL_COLORS[course.level]}`}>
             {LEVEL_LABELS[course.level]}
+          </span>
+        )}
+        {library?.tag && (
+          <span className="absolute top-2.5 right-2.5 text-xs font-bold px-2 py-0.5 rounded-full bg-white/90 text-gray-600 border border-gray-200">
+            {library.tag}
           </span>
         )}
       </div>
@@ -330,6 +349,8 @@ export function LearnerCourseGridCard({ course, record, onClick, onDismiss }: {
             {fmtHours(course.durationMinutes ?? 0)}
           </span>
         </div>
+        {library?.note && <p className="text-xs text-gray-400">{library.note}</p>}
+        {!library && (
         <div className="flex items-center gap-2 mt-auto pt-2.5 border-t border-gray-100">
           <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
             <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: '#00ce7c' }} />
@@ -338,8 +359,31 @@ export function LearnerCourseGridCard({ course, record, onClick, onDismiss }: {
             {STATUS_LABELS[status]}
           </span>
         </div>
+        )}
       </div>
     </button>
+    {library && (
+      <div className="flex items-center gap-2 px-3.5 py-3 border-t border-gray-100">
+        {status === 'completed' && (
+          <span className={`text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_COLORS.completed}`}>{STATUS_LABELS.completed}</span>
+        )}
+        <span className="flex-1" />
+        {library.action && (
+          <button
+            type="button"
+            disabled={library.action.disabled || library.action.busy}
+            onClick={library.action.onClick}
+            className={`text-xs font-bold px-3.5 py-1.5 rounded-xl transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed ${
+              library.action.primary
+                ? 'bg-freshket-500 text-white hover:bg-freshket-600'
+                : 'border border-freshket-200 text-freshket-700 bg-white hover:bg-freshket-100'
+            }`}
+          >
+            {library.action.label}
+          </button>
+        )}
+      </div>
+    )}
     </div>
   )
 }

@@ -42,6 +42,7 @@ import { formatDateEN } from '@/lib/utils/dateFormatter'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
 import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
+import { CourseSubTabs } from '@/components/layout/CourseSubTabs'
 import { LearnerCourseDashboard } from '@/components/features/LearnerCourseDashboard'
 import { CourseResultsImport } from '@/components/features/CourseResultsImport'
 
@@ -437,6 +438,7 @@ export default function CoursesPage() {
 
       {isSuperAdmin && <CourseManagementTabs />}
       <MyCourseTabs />
+      <CourseSubTabs />
 
       <div className="flex-1 overflow-auto">
         {/* Create moved to the "Course ▾" tab dropdown (สร้างหลักสูตรใหม่). */}
