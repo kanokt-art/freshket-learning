@@ -274,6 +274,11 @@ export interface LibraryCardOptions {
   tag?: string
   /** A quiet line under the meta, e.g. "ซ่อนจาก Your Course". */
   note?: string
+  /** Social proof under the meta, e.g. "12 คนเรียนแล้ว · ทีมคุณ 3 คน". */
+  stats?: string
+  /** Bookmark (save for later): shown when onToggleSave is given. */
+  saved?: boolean
+  onToggleSave?: () => void
   /** The one button of the card's footer; without it the footer is just the status. */
   action?: { label: string; onClick?: () => void; primary?: boolean; disabled?: boolean; busy?: boolean }
 }
@@ -294,6 +299,18 @@ export function LearnerCourseGridCard({ course, record, onClick, onDismiss, libr
       className={`relative flex flex-col ${library ? 'bg-white rounded-2xl overflow-hidden hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] transition-all duration-150' : ''}`}
       style={library ? { border: 'var(--card-border)' } : undefined}
     >
+    {library?.onToggleSave && (
+      <button
+        type="button"
+        onClick={library.onToggleSave}
+        title={library.saved ? 'เอาออกจากรายการที่บันทึกไว้' : 'บันทึกไว้เรียนทีหลัง'}
+        aria-label={library.saved ? 'เอาออกจากรายการที่บันทึกไว้' : 'บันทึกไว้เรียนทีหลัง'}
+        aria-pressed={!!library.saved}
+        className={`absolute top-2 right-2 z-10 size-8 flex items-center justify-center rounded-full bg-white/90 border transition-all duration-150 ${library.saved ? 'border-freshket-200 text-freshket-600' : 'border-gray-200 text-gray-500 hover:text-freshket-600 hover:border-freshket-200'}`}
+      >
+        <svg className="size-4" viewBox="0 0 24 24" fill={library.saved ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" /></svg>
+      </button>
+    )}
     {onDismiss && status === 'completed' && (
       <button
         type="button"
@@ -321,7 +338,7 @@ export function LearnerCourseGridCard({ course, record, onClick, onDismiss, libr
           </span>
         )}
         {library?.tag && (
-          <span className="absolute top-2.5 right-2.5 text-xs font-bold px-2 py-0.5 rounded-full bg-white/90 text-gray-600 border border-gray-200">
+          <span className="absolute bottom-2.5 left-2.5 text-xs font-bold px-2 py-0.5 rounded-full bg-white/90 text-gray-600 border border-gray-200">
             {library.tag}
           </span>
         )}
@@ -349,6 +366,12 @@ export function LearnerCourseGridCard({ course, record, onClick, onDismiss, libr
             {fmtHours(course.durationMinutes ?? 0)}
           </span>
         </div>
+        {library?.stats && (
+          <p className="flex items-center gap-1 text-xs text-gray-500">
+            <svg className="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>
+            {library.stats}
+          </p>
+        )}
         {library?.note && <p className="text-xs text-gray-400">{library.note}</p>}
         {!library && (
         <div className="flex items-center gap-2 mt-auto pt-2.5 border-t border-gray-100">
