@@ -1130,16 +1130,9 @@ export default function UsersPage() {
                   try {
                     const res = await authedFetch('/api/users/auto-map-teams', { method: 'POST' })
                     const json = await res.json().catch(() => ({}))
-                    if (res.ok) {
-                      const left = (json.unmatchedManagers ?? []) as Array<{ name: string; people: number }>
-                      if (json.mapped > 0 || left.length > 0) {
-                        void alertSuccess(
-                          json.mapped > 0 ? `จัดทีมให้อัตโนมัติ ${json.mapped} คน ตาม Line Manager` : 'ยังจัดทีมให้ไม่ได้',
-                          left.length > 0
-                            ? `ยังไม่มีทีม เพราะ Line Manager ไม่ได้เป็น Team Lead ของทีมไหน: ${left.map(l => `${l.name} (${l.people})`).join(', ')}`
-                            : 'ทุกคนที่ Line Manager ตรงกับ Team Lead อยู่ในทีมแล้ว',
-                        )
-                      }
+                    // Someone whose line manager leads no team yet is simply left in the department pool.
+                    if (res.ok && json.mapped > 0) {
+                      void alertSuccess(`จัดทีมให้อัตโนมัติ ${json.mapped} คน`, 'ตาม Line Manager ในไฟล์ที่นำเข้า')
                     }
                   } catch (err) {
                     console.error('auto-map-teams after import failed', err)

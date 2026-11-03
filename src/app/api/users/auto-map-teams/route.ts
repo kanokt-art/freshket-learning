@@ -10,7 +10,8 @@ import type { Team, UserProfile } from '@/types/user'
 // Puts people who have no team into their line manager's team: the HR file's "Line Manager" column
 // ("Pataranuch (Tao)") is matched to a team's own lead (see lib/users/autoMapTeam.ts). The HR import
 // calls this after every upload, so a new joiner lands in the right team without anyone pressing
-// anything. Additive only, as the rule is: a person who already has a team is never moved.
+// anything. Additive only, as the rule is: a person who already has a team is never moved, and a person
+// whose line manager leads no team yet is left alone, in their department's pool.
 //
 // Reads from the database rather than trusting what the browser has, because it runs a few seconds
 // after an import, when the browser's copy of the employee list is already out of date.
@@ -44,23 +45,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Who is still without a team because their line manager is not a team lead anywhere: the names an
-    // admin can act on (make that person a team lead, or place the people by hand).
-    const placed = new Set(targets.map((t) => t.uid))
-    const unmatched = new Map<string, number>()
-    for (const u of users) {
-      if (u.teamId || placed.has(u.uid)) continue
-      if (u.employmentStatus && u.employmentStatus !== 'Active') continue
-      const lm = u.lineManager?.trim()
-      if (lm) unmatched.set(lm, (unmatched.get(lm) ?? 0) + 1)
-    }
-
-    return NextResponse.json({
-      mapped: targets.length,
-      courseSync,
-      unmatchedManagers: Array.from(unmatched.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10)
-        .map(([name, people]) => ({ name, people })),
-    })
+    return NextResponse.json({ mapped: targets.length, courseSync })
   } catch (e) {
     console.error('POST /api/users/auto-map-teams', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

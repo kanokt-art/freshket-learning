@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server'
 
 // POST /api/users/auto-map-teams: the HR import's Line Manager column puts people without a team into
 // that manager's team. The matching itself is covered in autoMapTeam.test.ts; this checks what the
-// route does with it: who is written, who is left alone, and what is reported back.
+// route does with it: who is written and who is left alone.
 
 let users: Record<string, Record<string, unknown>> = {}
 let teams: Record<string, Record<string, unknown>> = {}
@@ -53,9 +53,9 @@ describe('POST /api/users/auto-map-teams', () => {
     expect(writes.map((w) => w.id)).not.toContain('gone')
   })
 
-  it('reports the line managers that are not a team lead anywhere, with how many people wait on each', async () => {
-    const json = await (await call()).json()
-    expect(json.unmatchedManagers).toEqual([{ name: 'Nobody (Nick)', people: 1 }])
+  it('leaves a person whose line manager leads no team where they are, in the department pool', async () => {
+    await call()
+    expect(writes.map((w) => w.id)).not.toContain('orphan')
   })
 
   it('does nothing when everyone is placed', async () => {
