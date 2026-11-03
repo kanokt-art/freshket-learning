@@ -51,7 +51,7 @@ import { demoStore } from '@/lib/demo/demoStore'
 import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
-import { alertError, alertSuccess, confirmAction } from '@/lib/ui/alert'
+import { alertError, confirmAction } from '@/lib/ui/alert'
 import { formatTenure } from '@/lib/users/tenure'
 import { CopyableText, StartDateCell } from '@/components/common/EmployeeCells'
 import { formatPersonName } from '@/lib/users/displayName'
@@ -232,10 +232,8 @@ export default function CoursesPage() {
   const [localDeleted, setLocalDeleted] = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState<Course | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
   const [learnerResultsCourse, setLearnerResultsCourse] = useState<Course | null>(null)
   const [showImportResults, setShowImportResults] = useState(false)
-  const [syncingDeptAssignments, setSyncingDeptAssignments] = useState(false)
 
   const isSuperAdmin = user?.role === 'super_admin'
   const { allowedModules, loading: moduleLoading } = useModuleAccess(user?.role, user?.department)
@@ -358,31 +356,6 @@ export default function CoursesPage() {
     }
   }
 
-  // Manual trigger for the department auto-assignment sync — see
-  // src/app/api/courses/sync-department-assignments/route.ts. The CSV import
-  // flow on /users also calls this a few seconds after a successful import,
-  // but this button covers everything else (a single employee added by hand,
-  // a department reassignment, or just wanting to force a re-check).
-  async function handleSyncDeptAssignments() {
-    if (syncingDeptAssignments) return
-    setSyncingDeptAssignments(true)
-    try {
-      const res = await authedFetch('/api/courses/sync-department-assignments', { method: 'POST' })
-      const json = await res.json()
-      if (!res.ok) { void alertError('ซิงก์ไม่สำเร็จ', json.error ?? 'Unknown error'); return }
-      if (json.totalAdded === 0) {
-        void alertSuccess('ไม่มีอะไรต้องซิงก์', 'ทุกหลักสูตรที่ผูกกับแผนกมีผู้เรียนครบแล้ว')
-      } else {
-        void alertSuccess('ซิงก์สำเร็จ', `เพิ่มผู้เรียนใหม่ ${json.totalAdded} คน ใน ${json.coursesUpdated} หลักสูตร`)
-      }
-    } catch (e) {
-      void alertError('ซิงก์ไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
-      console.error(e)
-    } finally {
-      setSyncingDeptAssignments(false)
-    }
-  }
-
   if (!user) return null
 
   if (moduleLoading) {
@@ -422,16 +395,6 @@ export default function CoursesPage() {
           <h1 className="text-lg font-bold text-white lg:text-gray-900">{isSuperAdmin ? 'หลักสูตรทั้งหมด' : 'My Course'}</h1>
           <p className="text-xs text-freshket-200 lg:text-gray-400 mt-0.5">{visible.length} หลักสูตร</p>
         </div>
-        {isSuperAdmin && (
-          <button
-            type="button"
-            onClick={() => setShowCreate(true)}
-            className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-white text-freshket-700 lg:bg-freshket-500 lg:text-white hover:bg-freshket-100 lg:hover:bg-freshket-600 transition-all duration-150"
-          >
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-            สร้างหลักสูตร
-          </button>
-        )}
       </div>
 
       {isSuperAdmin && <CourseManagementTabs />}
@@ -455,7 +418,7 @@ export default function CoursesPage() {
             every course in the system. ────────────────────────────────────── */}
         {isSuperAdmin && (
           <>
-        {/* ── Search bar + view toggle ───────────────────────────────────────── */}
+        {/* ── Search bar + actions ───────────────────────────────────────── */}
         <div className="px-6 pt-4 pb-1">
           <div className="flex items-center gap-2">
             {/* Search input */}
@@ -495,42 +458,18 @@ export default function CoursesPage() {
                 นำเข้าผลคะแนน
               </button>
             )}
-            {/* Sync department-based auto-assignment (super_admin) — see
-                handleSyncDeptAssignments above */}
+            {/* Create a course (super_admin) */}
             {isSuperAdmin && (
               <button
-                onClick={() => { void handleSyncDeptAssignments() }}
-                disabled={syncingDeptAssignments}
-                title="เติมผู้เรียนใหม่ให้หลักสูตรที่กำหนดผู้เรียนแบบ 'ทั้งแผนก' ไว้ — ใช้เมื่อมีพนักงานเข้าใหม่นอกรอบ import CSV"
-                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white border border-gray-200 text-sm font-bold text-gray-700 hover:border-freshket-500 hover:text-freshket-600 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                onClick={() => setShowCreate(true)}
+                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-freshket-500 text-sm font-bold text-white hover:bg-freshket-600 transition-all duration-150 shadow-sm"
               >
-                <svg className={`size-4 ${syncingDeptAssignments ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                 </svg>
-                {syncingDeptAssignments ? 'กำลังซิงก์...' : 'ซิงก์ผู้เรียนอัตโนมัติ'}
+                สร้างหลักสูตร
               </button>
             )}
-            {/* View toggle — right after search */}
-            <div className="flex items-center gap-1 shrink-0 bg-white border border-gray-200 rounded-xl p-1">
-              <button
-                onClick={() => setViewMode('grid')}
-                title="Grid view"
-                className={`p-1.5 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-gray-900 text-white' : 'text-gray-400 hover:text-gray-600'}`}
-              >
-                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-                </svg>
-              </button>
-              <button
-                onClick={() => setViewMode('list')}
-                title="List view"
-                className={`p-1.5 rounded-lg transition-all ${viewMode === 'list' ? 'bg-gray-900 text-white' : 'text-gray-400 hover:text-gray-600'}`}
-              >
-                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-                </svg>
-              </button>
-            </div>
           </div>
           {search && (
             <p className="text-xs text-gray-400 mt-1.5 px-1">พบ {filtered.length} หลักสูตรจาก &ldquo;{search}&rdquo;</p>
@@ -562,21 +501,6 @@ export default function CoursesPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0118 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
               </svg>
               <p className="text-sm">ไม่พบหลักสูตร</p>
-            </div>
-          ) : viewMode === 'grid' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {filtered.map((course) => (
-                <CourseCard key={course.id} course={course} status={recordMap[course.id]}
-                  isSuperAdmin={isSuperAdmin}
-                  allAssessments={allAssessments}
-                  allUsers={allUsers}
-                  onEdit={() => setEditingCourse(course)}
-                  onDelete={() => setConfirmDelete(course)}
-                  onTogglePublish={() => void togglePublishWithConfirm(course)}
-                  onView={() => setLearnerResultsCourse(course)}
-                  onClick={() => router.push(`/courses/${course.id}`)}
-                />
-              ))}
             </div>
           ) : (
             <CourseTable
@@ -709,140 +633,6 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
       className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${active ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`}>
       {label}
     </button>
-  )
-}
-
-function CourseCard({ course, status, isSuperAdmin, allAssessments, allUsers, onEdit, onDelete, onTogglePublish, onView, onClick }: {
-  course: Course; status?: TrainingStatus; isSuperAdmin: boolean
-  allAssessments: Assessment[]; allUsers: UserProfile[]
-  onEdit: () => void; onDelete: () => void; onTogglePublish: () => void; onView: () => void; onClick: () => void
-}) {
-  const gradient = CAT_GRADIENT[course.category]
-  const resolvedStatus = status ?? 'not_started'
-  // Module count = number of topics if the course uses the topics/lessons
-  // curriculum, else 1 for the legacy single slideUrl course.
-  const moduleCount = course.topics?.length || (course.slideUrl ? 1 : 0) || 1
-
-  // Question/score summary now comes from every lesson-level quiz in the
-  // course (course-level pre/post-test no longer exists).
-  const lessonQuizAssessmentIds = new Set(
-    (course.topics ?? []).flatMap((t) => t.lessons.filter((l) => l.type === 'quiz' && l.assessmentId).map((l) => l.assessmentId as string)),
-  )
-  const linkedAssessments = allAssessments.filter((a) => lessonQuizAssessmentIds.has(a.id))
-  const questionCount = linkedAssessments.reduce((sum, a) => sum + a.questions.length, 0)
-  const maxScore = linkedAssessments.reduce((sum, a) => sum + a.questions.reduce((s, q) => s + (q.points ?? 0), 0), 0)
-  const creatorName = allUsers.find((u) => u.uid === course.createdBy)?.displayName ?? '—'
-
-  return (
-    <div className="relative flex flex-col rounded-2xl bg-white border border-gray-100 hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 overflow-hidden group">
-      {isSuperAdmin && (
-        <>
-          <button onClick={(e) => { e.stopPropagation(); onEdit() }}
-            className="absolute top-2.5 left-2.5 z-10 size-8 flex items-center justify-center rounded-full bg-white/90 backdrop-blur-sm shadow-sm text-gray-600 hover:bg-freshket-500 hover:text-white transition-all duration-150 opacity-0 group-hover:opacity-100"
-            title="แก้ไขหลักสูตร">
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-            </svg>
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); onView() }}
-            className="absolute top-2.5 left-12 z-10 size-8 flex items-center justify-center rounded-full bg-white/90 backdrop-blur-sm shadow-sm text-gray-600 hover:bg-freshket-500 hover:text-white transition-all duration-150 opacity-0 group-hover:opacity-100"
-            title="ดูภาพรวมคอร์ส">
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); onDelete() }}
-            className="absolute top-2.5 left-20 z-10 size-8 flex items-center justify-center rounded-full bg-white/90 backdrop-blur-sm shadow-sm text-gray-400 hover:bg-rose-500 hover:text-white transition-all duration-150 opacity-0 group-hover:opacity-100"
-            title="ลบหลักสูตร">
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-            </svg>
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); onTogglePublish() }}
-            className={`absolute top-2.5 left-28 z-10 size-8 flex items-center justify-center rounded-full bg-white/90 backdrop-blur-sm shadow-sm transition-all duration-150 opacity-0 group-hover:opacity-100 ${course.isPublished ? 'text-gray-600 hover:bg-amber-500 hover:text-white' : 'text-amber-600 hover:bg-freshket-500 hover:text-white'}`}
-            title={course.isPublished ? 'ปิดการเผยแพร่' : 'เผยแพร่อีกครั้ง'}>
-            {course.isPublished ? (
-              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-            </svg>
-            ) : (
-              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5v-9m0 0l-3.5 3.5M12 7.5l3.5 3.5M4.5 19.5h15" />
-            </svg>
-            )}
-          </button>
-        </>
-      )}
-      <button onClick={onClick} className="flex flex-col flex-1 text-left">
-        <div className={`relative h-44 w-full overflow-hidden bg-gradient-to-br ${gradient} flex items-center justify-center shrink-0`}>
-          {course.thumbnailUrl ? (
-            isImageUrl(course.thumbnailUrl)
-              ? <img src={course.thumbnailUrl} alt={course.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-              : <div className="absolute inset-0" style={{ background: course.thumbnailUrl }} />
-          ) : <CategoryIcon category={course.category} className="size-16 opacity-40" />}
-          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />
-          <div className="absolute bottom-2.5 left-2.5 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/90 backdrop-blur-sm shadow-sm">
-            <span className="text-xs font-bold text-gray-800">{CATEGORY_LABELS[course.category]}</span>
-          </div>
-          <div className="absolute top-2.5 right-2.5 flex flex-col items-end gap-1.5">
-            {course.isChallenge && (
-              <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-amber-400 text-white shadow-sm">
-                🏆 Challenge
-              </span>
-            )}
-            {course.isRequired && (
-              <span className="inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full bg-rose-500 text-white shadow-sm">บังคับ</span>
-            )}
-          </div>
-        </div>
-        <div className="flex flex-col flex-1 p-4 gap-2">
-          <h3 className="font-bold text-gray-900 text-sm leading-snug line-clamp-2 group-hover:text-freshket-600 transition-colors">{course.title}</h3>
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              <div className="size-5 rounded-full bg-freshket-100 overflow-hidden shrink-0 flex items-center justify-center">
-                <img src={FRESHKET_LOGO_URL} alt="Freshket" className="size-4 object-contain" />
-              </div>
-              <span className="text-xs text-gray-500">Freshket Academy</span>
-            </div>
-            <span className={`shrink-0 inline-flex items-center text-xs font-bold px-2.5 py-0.5 rounded-full ${STATUS_BADGE[resolvedStatus]}`}>{STATUS_LABELS[resolvedStatus]}</span>
-          </div>
-          <div className="flex items-center gap-3 mt-auto pt-3 border-t border-gray-100 text-xs text-gray-400">
-            <span className="flex items-center gap-1">
-              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6.878V6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 004.5 9v.878m13.5-3A2.25 2.25 0 0119.5 9v.878m0 0a2.246 2.246 0 00-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0121 12v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6c0-.98.626-1.813 1.5-2.122" />
-              </svg>
-              {moduleCount} โมดูล
-            </span>
-            <span className="text-gray-200">|</span>
-            <span className="flex items-center gap-1">
-              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              {fmtDuration(course.durationMinutes)}
-            </span>
-            {questionCount > 0 && (
-              <>
-                <span className="text-gray-200">|</span>
-                <span className="flex items-center gap-1">
-                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm0 5.25h.007v.008H3.75V12zm0 5.25h.007v.008H3.75v-.008z" />
-                  </svg>
-                  {questionCount} ข้อ · {maxScore} คะแนน
-                </span>
-              </>
-            )}
-          </div>
-          {/* Creator + date — authoring info, admin only */}
-          {isSuperAdmin && (
-            <div className="flex items-center justify-between pt-2 text-xs text-gray-400">
-              <span className="truncate">สร้างโดย {creatorName}</span>
-              <span className="shrink-0 ml-2">{fmtDate(course.createdAt)}</span>
-            </div>
-          )}
-        </div>
-      </button>
-    </div>
   )
 }
 
