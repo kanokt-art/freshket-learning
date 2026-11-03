@@ -380,6 +380,71 @@ export async function postMandatoryPublishedToSlack(
   })
 }
 
+export interface SlackFeedbackGivenEvent {
+  reviewerName: string
+  learnerName: string
+  courseTitle: string
+  /** Stars given (1–5), when there is a rating. The comment itself is not posted to the group. */
+  rating?: number
+  trainers?: SlackTeamLead[]
+  memberUrl?: string
+}
+
+/**
+ * A team lead or manager commented on, or rated, a learner's course. The learner is told privately;
+ * the trainer × team-lead group hears that it happened and tags the Sale Trainer, who follows what
+ * leads say about their learners. The comment stays in the app and in the learner's own message.
+ */
+export async function postCourseFeedbackToSlack(ev: SlackFeedbackGivenEvent): Promise<boolean> {
+  const score = typeof ev.rating === 'number' ? ` — ${ev.rating}/5 ดาว` : ''
+  const trainerText = trainerLine(ev.trainers)
+  return postToTeam({
+    text: `${slackText(ev.reviewerName)} ให้ความเห็นหลักสูตรของ ${slackText(ev.learnerName)}${trainerText ? ` · ${trainerText}` : ''}`,
+    blocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `⭐ *${slackText(ev.reviewerName)}* ให้ความเห็นหลักสูตรของ *${slackText(ev.learnerName)}*\n*${slackText(ev.courseTitle)}*${score}` },
+      },
+      ...(trainerText ? [{ type: 'section', text: { type: 'mrkdwn', text: trainerText } }] : []),
+      ...(ev.memberUrl
+        ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูประวัติการเรียน' }, url: ev.memberUrl }] }]
+        : []),
+    ],
+  })
+}
+
+export interface SlackRoleplayAssessedEvent {
+  assessorName: string
+  learnerName: string
+  /** e.g. "Post รอบที่ 2". */
+  kindLabel: string
+  /** Average of every topic, out of 10, already formatted (e.g. "7.4"). */
+  overall?: string
+  /** The average of each category, e.g. "Greeting 9.0 · Closing 6.5". */
+  perGroup?: string
+  trainers?: SlackTeamLead[]
+  memberUrl?: string
+}
+
+/** A team lead or manager assessed a learner's Role Play; the group hears it and the Sale Trainer is tagged. */
+export async function postRoleplayAssessedToSlack(ev: SlackRoleplayAssessedEvent): Promise<boolean> {
+  const trainerText = trainerLine(ev.trainers)
+  return postToTeam({
+    text: `${slackText(ev.assessorName)} ประเมิน Role Play ของ ${slackText(ev.learnerName)}${trainerText ? ` · ${trainerText}` : ''}`,
+    blocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `🎯 *${slackText(ev.assessorName)}* ประเมิน Role Play ของ *${slackText(ev.learnerName)}*\n${slackText(ev.kindLabel)}${ev.overall ? ` · เฉลี่ย *${slackText(ev.overall)}/10*` : ''}` },
+      },
+      ...(ev.perGroup ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: slackText(ev.perGroup) }] }] : []),
+      ...(trainerText ? [{ type: 'section', text: { type: 'mrkdwn', text: trainerText } }] : []),
+      ...(ev.memberUrl
+        ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูผลประเมิน' }, url: ev.memberUrl }] }]
+        : []),
+    ],
+  })
+}
+
 export interface SlackShadowAckedEvent {
   reviewerName: string
   observerName: string

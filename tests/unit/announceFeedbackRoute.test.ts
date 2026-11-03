@@ -25,6 +25,18 @@ vi.mock('@/lib/server/store', () => ({ getStore: () => fakeStore }))
 let caller: { uid: string; role: string; isSuperAdmin: boolean; person: Record<string, unknown> }
 vi.mock('@/lib/server/auth', () => ({ requireStaff: async () => ({ ok: true, ...caller }) }))
 
+const groupPost = {
+  feedback: vi.fn(async (_e: unknown) => true),
+  roleplay: vi.fn(async (_e: unknown) => true),
+}
+vi.mock('@/lib/notifications/slack', async (orig) => ({
+  ...(await orig<typeof import('@/lib/notifications/slack')>()),
+  postCourseFeedbackToSlack: (e: unknown) => groupPost.feedback(e),
+  postRoleplayAssessedToSlack: (e: unknown) => groupPost.roleplay(e),
+}))
+vi.mock('@/lib/server/saleTrainers', () => ({
+  saleTrainers: async () => [{ name: 'Kanok (Benz) Thongtaem', slackUserId: 'U07ABCDEF12' }],
+}))
 const dm = vi.fn(async (..._a: unknown[]) => 1)
 vi.mock('@/lib/notifications/slackDm', () => ({
   dmPeople: (...a: unknown[]) => dm(...a),
@@ -45,7 +57,12 @@ const dmText = () => JSON.stringify(dm.mock.calls[0]?.[2] ?? {})
 
 beforeEach(() => {
   claimed.clear(); bells = []; dm.mockClear(); dm.mockResolvedValue(1)
+  Object.values(groupPost).forEach((f) => f.mockClear())
   docs = {
+    users: [
+      { id: 'sale1', displayNameEN: 'Somchai Jaidee', nickname: 'Chai', department: 'Sales Management' },
+      { id: 'sale4', displayNameEN: 'Hr Person', department: 'People Experience' },
+    ],
     courses: [{ id: 'c1', title: 'Product Knowledge' }],
     courseFeedback: [
       { id: 'sale1_c1', memberUid: 'sale1', courseId: 'c1', leadUid: 'lead1', score: 4, comment: 'ตั้งใจเรียนดีมาก' },
@@ -96,6 +113,44 @@ describe('course feedback', () => {
     asSale()
     expect((await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })).status).toBe(403)
     expect(dm).not.toHaveBeenCalled()
+  })
+})
+
+describe('the Sale Trainer hears it too', () => {
+  it('a course comment: the group post names the learner and the stars, tags the trainer, and carries no comment', async () => {
+    asLead()
+    await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })
+    expect(groupPost.feedback).toHaveBeenCalledTimes(1)
+    const ev = groupPost.feedback.mock.calls[0][0] as { learnerName: string; rating: number; trainers: Array<{ slackUserId?: string }> }
+    expect(ev.learnerName).toContain('Somchai')
+    expect(ev.rating).toBe(4)
+    expect(ev.trainers[0].slackUserId).toBe('U07ABCDEF12')
+    expect(JSON.stringify(ev)).not.toContain('ตั้งใจเรียนดีมาก')
+  })
+
+  it('a role play assessment: the group post carries the averages and tags the trainer', async () => {
+    asLead()
+    docs.roleplayAssessments[0].subjectUid = 'sale1'
+    await call({ kind: 'roleplay_assessed', assessmentId: 'rp1' })
+    expect(groupPost.roleplay).toHaveBeenCalledTimes(1)
+    const ev = groupPost.roleplay.mock.calls[0][0] as { kindLabel: string; overall?: string; perGroup?: string; trainers: unknown[] }
+    expect(ev.kindLabel).toBe('Post รอบที่ 2')
+    expect(ev.perGroup).toContain('Greeting 9.0')
+    expect(ev.trainers).toHaveLength(1)
+  })
+
+  it('nothing goes to the group for someone outside the sales organisation', async () => {
+    asLead()
+    docs.roleplayAssessments.push({ id: 'rp9', assessorUid: 'lead1', subjectUid: 'sale4', type: 'pre', round: 1, topics: [] })
+    await call({ kind: 'roleplay_assessed', assessmentId: 'rp9' })
+    expect(groupPost.roleplay).not.toHaveBeenCalled()
+  })
+
+  it('the group is told once, like the learner', async () => {
+    asLead()
+    await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })
+    await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })
+    expect(groupPost.feedback).toHaveBeenCalledTimes(1)
   })
 })
 

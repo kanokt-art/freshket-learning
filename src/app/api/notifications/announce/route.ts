@@ -8,6 +8,7 @@ import { formatPersonName } from '@/lib/users/displayName'
 import { slackText } from '@/lib/notifications/slackText'
 import { resolveAnnouncementText } from '@/lib/notifications/courseAnnouncement'
 import { toStars } from '@/lib/feedback/stars'
+import { saleTrainers } from '@/lib/server/saleTrainers'
 import { ROLEPLAY_TOPICS } from '@/types/roleplay'
 import type { UserProfile } from '@/types/user'
 import {
@@ -15,6 +16,8 @@ import {
   postMandatoryPublishedToSlack,
   postShadowSubmittedToSlack,
   postShadowAckedToSlack,
+  postCourseFeedbackToSlack,
+  postRoleplayAssessedToSlack,
   isSalesDepartment,
   excerpt,
 } from '@/lib/notifications/slack'
@@ -279,6 +282,19 @@ export async function POST(req: NextRequest) {
             createdByUid: gate.uid,
           }, { merge: false })
         }
+
+        // The trainer x team-lead group hears it too, tagging the Sale Trainer (sales learners only).
+        const learner = (await store.get('users', memberUid)) as Partial<UserProfile> | null
+        if (learner && isSalesDepartment(learner.department)) {
+          posted = await postCourseFeedbackToSlack({
+            reviewerName: reviewer,
+            learnerName: formatPersonName(learner) || 'พนักงาน',
+            courseTitle: title,
+            rating: stars ?? undefined,
+            trainers: await saleTrainers(),
+            memberUrl: appUrl(`/manager?user=${encodeURIComponent(memberUid)}`),
+          })
+        }
         break
       }
 
@@ -336,6 +352,19 @@ export async function POST(req: NextRequest) {
             createdAt: new Date(),
             createdByUid: gate.uid,
           }, { merge: false })
+        }
+
+        const learner = (await store.get('users', a.subjectUid)) as Partial<UserProfile> | null
+        if (learner && isSalesDepartment(learner.department)) {
+          posted = await postRoleplayAssessedToSlack({
+            assessorName: assessor,
+            learnerName: formatPersonName(learner) || 'พนักงาน',
+            kindLabel,
+            overall,
+            perGroup: perGroup || undefined,
+            trainers: await saleTrainers(),
+            memberUrl: appUrl(`/manager?user=${encodeURIComponent(a.subjectUid)}`),
+          })
         }
         break
       }
