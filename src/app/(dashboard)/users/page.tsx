@@ -1121,9 +1121,32 @@ export default function UsersPage() {
               // in their course's roster is fine for a "the day HR onboards
               // someone" scenario, unlike a failed write, which the earlier
               // reportWriteFailure() alert already surfaces on its own.
+              //
+              // The same wait covers the team step: the file's Line Manager column puts each
+              // new person without a team into that manager's team (server side, additive only),
+              // and only then are the courses aimed at those teams synced.
               setTimeout(() => {
-                authedFetch('/api/courses/sync-department-assignments', { method: 'POST' })
-                  .catch(err => console.error('sync-department-assignments after import failed', err))
+                void (async () => {
+                  try {
+                    const res = await authedFetch('/api/users/auto-map-teams', { method: 'POST' })
+                    const json = await res.json().catch(() => ({}))
+                    if (res.ok) {
+                      const left = (json.unmatchedManagers ?? []) as Array<{ name: string; people: number }>
+                      if (json.mapped > 0 || left.length > 0) {
+                        void alertSuccess(
+                          json.mapped > 0 ? `จัดทีมให้อัตโนมัติ ${json.mapped} คน ตาม Line Manager` : 'ยังจัดทีมให้ไม่ได้',
+                          left.length > 0
+                            ? `ยังไม่มีทีม เพราะ Line Manager ไม่ได้เป็น Team Lead ของทีมไหน: ${left.map(l => `${l.name} (${l.people})`).join(', ')}`
+                            : 'ทุกคนที่ Line Manager ตรงกับ Team Lead อยู่ในทีมแล้ว',
+                        )
+                      }
+                    }
+                  } catch (err) {
+                    console.error('auto-map-teams after import failed', err)
+                  }
+                  authedFetch('/api/courses/sync-department-assignments', { method: 'POST' })
+                    .catch(err => console.error('sync-department-assignments after import failed', err))
+                })()
               }, 5_000)
             }
             setImportResult({ added: newUsers.length - updatedCount - missingCount, updated: updatedCount, skipped, hidden: hiddenCount, missing: missingCount })
