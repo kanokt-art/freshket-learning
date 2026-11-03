@@ -126,7 +126,7 @@ function sampleNotifications(): AppNotification[] {
     {
       id: 'demo-roleplay', type: 'roleplay_assessed', read: false, createdAt: ago(40),
       title: 'Pataranuch (Tao) Suyavech ประเมิน Role Play ของคุณ',
-      body: 'Post รอบที่ 2 · เฉลี่ย 7.4/10', refId: 'demo', refPath: '/sale',
+      body: 'Post รอบที่ 2 · เฉลี่ย 7.4/10', refId: 'demo', refPath: '/courses/roleplay',
     },
     {
       id: 'demo-course', type: 'new_course', read: false, createdAt: ago(180),

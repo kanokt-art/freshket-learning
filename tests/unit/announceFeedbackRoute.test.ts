@@ -170,7 +170,7 @@ describe('role play assessment', () => {
     await call({ kind: 'roleplay_assessed', assessmentId: 'rp1' })
     await call({ kind: 'roleplay_assessed', assessmentId: 'rp1' })
     expect(bells).toHaveLength(1)
-    expect(bells[0].data).toMatchObject({ type: 'roleplay_assessed', refPath: '/sale' })
+    expect(bells[0].data).toMatchObject({ type: 'roleplay_assessed', refPath: '/courses/roleplay' })
   })
 
   it('says nothing for an assessment someone else made, a missing one, or from a learner', async () => {

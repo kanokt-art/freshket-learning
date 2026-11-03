@@ -329,7 +329,7 @@ export async function POST(req: NextRequest) {
 
         const assessor = formatPersonName(gate.person as Partial<UserProfile>) || 'Mentor'
         const kindLabel = `${a.type === 'post' ? 'Post' : 'Pre'}${typeof a.round === 'number' ? ` รอบที่ ${a.round}` : ''}`
-        const link = appUrl('/sale')
+        const link = appUrl('/courses/roleplay')
         const note = typeof a.overallNote === 'string' ? a.overallNote.trim() : ''
 
         dmSent = await dmPeople(store, [a.subjectUid], {
@@ -347,7 +347,7 @@ export async function POST(req: NextRequest) {
             title: `${assessor} ประเมิน Role Play ของคุณ`,
             body: [kindLabel, overall ? `เฉลี่ย ${overall}/10` : ''].filter(Boolean).join(' · '),
             refId: assessmentId,
-            refPath: '/sale',
+            refPath: '/courses/roleplay',
             read: false,
             createdAt: new Date(),
             createdByUid: gate.uid,

@@ -10,6 +10,8 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useCourse, useCourseTrainingRecords, useAllUsers, useTeams, useDepartments, useBucketResultsFor } from '@/hooks/useFirestore'
 import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
 import { formatPersonName } from '@/lib/users/displayName'
+import { StarsDisplay } from '@/components/common/Stars'
+import { toStars } from '@/lib/feedback/stars'
 import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
@@ -207,6 +209,18 @@ export default function CourseDetailPage() {
   const [progress, setProgress] = useState<Progress>(EMPTY_PROG)
   // The status the server holds for this learner's record (the local copy can lag or be edited).
   const [serverStatus, setServerStatus] = useState<string | undefined>(undefined)
+  // What a team lead or manager wrote about this learner on this course (stars and comment), read here so
+  // the learner can open the notification they got and find it.
+  const [leadFeedback, setLeadFeedback] = useState<{ comment?: string; score?: number | null; leadName?: string; updatedAt?: Date } | null>(null)
+  const feedbackUid = user?.uid
+  useEffect(() => {
+    if (!feedbackUid) return
+    let cancelled = false
+    get<{ comment?: string; score?: number | null; leadName?: string; updatedAt?: Date }>('courseFeedback', `${feedbackUid}_${id}`)
+      .then((fb) => { if (!cancelled) setLeadFeedback(fb ?? null) })
+      .catch(() => { /* no feedback to show */ })
+    return () => { cancelled = true }
+  }, [feedbackUid, id])
   const [activeStep, setActiveStep] = useState<StepId>('slide')
 
   // Load progress from localStorage on mount. Keyed by uid, so it has to wait
@@ -486,6 +500,22 @@ export default function CourseDetailPage() {
           <Link href={`/courses/${id}`} className="shrink-0 text-xs font-bold text-freshket-700 hover:underline">
             เข้าเรียนหลักสูตรนี้
           </Link>
+        </div>
+      )}
+
+      {/* What a team lead or manager said about this learner on this course */}
+      {!isAdmin && leadFeedback && (toStars(leadFeedback.score) !== null || !!leadFeedback.comment?.trim()) && (
+        <div className="px-6 pt-4 shrink-0">
+          <div className="rounded-2xl border border-amber-100 bg-amber-50/60 px-5 py-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <p className="text-sm font-bold text-gray-900">ความเห็นจากหัวหน้า</p>
+              {leadFeedback.leadName && <span className="text-xs text-gray-500">{leadFeedback.leadName}</span>}
+              {toStars(leadFeedback.score) !== null && <StarsDisplay value={toStars(leadFeedback.score) as number} />}
+            </div>
+            {leadFeedback.comment?.trim() && (
+              <p className="text-sm text-gray-700 leading-relaxed mt-2 whitespace-pre-wrap">{leadFeedback.comment.trim()}</p>
+            )}
+          </div>
         </div>
       )}
 
