@@ -7,7 +7,10 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { useCourse, useCourseTrainingRecords, useAllUsers, useTeams, useDepartments } from '@/hooks/useFirestore'
+import { useCourse, useCourseTrainingRecords, useAllUsers, useTeams, useDepartments, useBucketResultsFor } from '@/hooks/useFirestore'
+import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
+import { formatPersonName } from '@/lib/users/displayName'
+import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { managedMembers } from '@/lib/users/managedMembers'
@@ -1505,6 +1508,11 @@ function CourseResultsDashboard({
     })
   }, [allUsers, allRecords, teams, course, courseId])
 
+  // A questionnaire course (MBTI…) has no score: the report shows the type each learner got instead.
+  const questionnaireId = useMemo(() => courseQuestionnaireId(course), [course])
+  const { data: questionnaireResults } = useBucketResultsFor(questionnaireId ?? 'mbti', !!questionnaireId)
+  const typeByUid = useMemo(() => new Map(questionnaireResults.map(r => [String(r.uid), r.code] as const)), [questionnaireResults])
+
   const resignedCount = useMemo(() => allRows.filter(r => !isActiveEmployee(r.user)).length, [allRows])
   const rows = useMemo(
     () => (includeResigned ? allRows : allRows.filter(r => isActiveEmployee(r.user))),
@@ -1617,10 +1625,19 @@ function CourseResultsDashboard({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
               </svg>
             </div>
-            <p className="text-xs text-gray-500 font-normal">คะแนนเฉลี่ย</p>
+            <p className="text-xs text-gray-500 font-normal">{questionnaireId ? 'ทำแบบประเมินแล้ว' : 'คะแนนเฉลี่ย'}</p>
           </div>
-          <p className={`text-3xl font-bold ${scoreColor(stats.avgScore)}`}>{stats.avgScore > 0 ? stats.avgScore : '-'}</p>
-          <p className="text-xs text-gray-400 mt-1">{stats.avgScore > 0 ? 'คะแนน / 100' : 'ยังไม่มีข้อมูล'}</p>
+          {questionnaireId ? (
+            <>
+              <p className="text-3xl font-bold text-gray-700">{rows.filter(r => typeByUid.has(r.user.uid)).length}</p>
+              <p className="text-xs text-gray-400 mt-1">คน</p>
+            </>
+          ) : (
+            <>
+              <p className={`text-3xl font-bold ${scoreColor(stats.avgScore)}`}>{stats.avgScore > 0 ? stats.avgScore : '-'}</p>
+              <p className="text-xs text-gray-400 mt-1">{stats.avgScore > 0 ? 'คะแนน / 100' : 'ยังไม่มีข้อมูล'}</p>
+            </>
+          )}
         </div>
       </div>
 
@@ -1717,7 +1734,7 @@ function CourseResultsDashboard({
                   <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden md:table-cell">Department</th>
                   <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden lg:table-cell">Team</th>
                   <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">Status</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">Score</th>
+                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">{questionnaireId ? 'Type' : 'Score'}</th>
                   <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden lg:table-cell">Completed</th>
                 </tr>
               </thead>
@@ -1786,7 +1803,9 @@ function CourseResultsDashboard({
 
                       {/* Score */}
                       <td className="px-3 py-3.5">
-                        {hasScore ? (
+                        {questionnaireId ? (
+                          <QuestionnaireResultCell definitionId={questionnaireId} code={typeByUid.get(row.user.uid)} ownerName={formatPersonName(row.user)} />
+                        ) : hasScore ? (
                           <div className="flex items-center gap-2 min-w-[100px]">
                             <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                               <div

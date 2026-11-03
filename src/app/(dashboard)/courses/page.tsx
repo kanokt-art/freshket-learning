@@ -21,7 +21,9 @@ const DeptCompletionChart = dynamic(
   },
 )
 import { useAuth } from '@/hooks/useAuth'
-import { useCourses, useAssessments, useMyTrainingRecords, useAllUsers, useAllTrainingRecords, useDepartments, useTeams } from '@/hooks/useFirestore'
+import { useCourses, useAssessments, useMyTrainingRecords, useAllUsers, useAllTrainingRecords, useDepartments, useTeams, useBucketResultsFor } from '@/hooks/useFirestore'
+import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
+import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import {
   CATEGORY_LABELS,
   LEVEL_LABELS,
@@ -4576,6 +4578,11 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
     return assignableUsers.filter((u) => form.targetRoles.includes(u.role))
   }, [editCourse, form.assignedUserIds, form.targetRoles, allUsers, assignableUsers])
 
+  // A questionnaire course (MBTI…) has no score: the summary shows the type each learner got instead.
+  const questionnaireId = useMemo(() => courseQuestionnaireId({ topics: form.topics }), [form.topics])
+  const { data: questionnaireResults } = useBucketResultsFor(questionnaireId ?? 'mbti', !!questionnaireId)
+  const typeByUid = useMemo(() => new Map(questionnaireResults.map((r) => [String(r.uid), r.code] as const)), [questionnaireResults])
+
   const summaryRows = useMemo(() => summaryTargetUsers.map((u) => {
     const record = editCourse ? allTrainingRecords.find((r) => r.courseId === editCourse.id && r.userId === u.uid) : undefined
     const status: TrainingStatus = record?.status ?? 'not_started'
@@ -5072,8 +5079,8 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                       <p className="text-xs text-blue-600 mt-0.5">กำลังเรียน</p>
                     </div>
                     <div className="rounded-xl bg-gray-50 border border-gray-100 p-3.5 text-center">
-                      <p className="text-xl font-black text-gray-600">{summaryStats.avgScore ?? '—'}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">คะแนนเฉลี่ย</p>
+                      <p className="text-xl font-black text-gray-600">{questionnaireId ? visibleSummaryRows.filter((r) => typeByUid.has(r.user.uid)).length : (summaryStats.avgScore ?? '—')}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{questionnaireId ? 'ทำแบบประเมินแล้ว' : 'คะแนนเฉลี่ย'}</p>
                     </div>
                   </div>
                 </div>
@@ -5117,7 +5124,9 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                           <SortableTh label="Progress" sortKey="progress" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
                           {hasPreTest && <SortableTh label="Pre-Test" sortKey="preTest" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
                           {hasPostTest && <SortableTh label="Post-Test" sortKey="postTest" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
-                          {!hasPreTest && !hasPostTest && <SortableTh label="Score" sortKey="score" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
+                          {!hasPreTest && !hasPostTest && (questionnaireId
+                            ? <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Type</th>
+                            : <SortableTh label="Score" sortKey="score" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />)}
                           <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Employee Status</th>
                         </tr>
                       </thead>
@@ -5159,7 +5168,9 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                               )}
                               {!hasPreTest && !hasPostTest && (
                                 <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
-                                  {record?.score != null ? `${record.score}${record.passScore != null ? `/${record.passScore}` : ''}` : '—'}
+                                  {questionnaireId
+                                    ? <QuestionnaireResultCell definitionId={questionnaireId} code={typeByUid.get(u.uid)} ownerName={formatPersonName(u)} />
+                                    : (record?.score != null ? `${record.score}${record.passScore != null ? `/${record.passScore}` : ''}` : '—')}
                                 </td>
                               )}
                               <td className="px-4 py-3 whitespace-nowrap">
