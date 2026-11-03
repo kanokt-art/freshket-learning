@@ -1,25 +1,15 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 
 // Super-admin-only nav for the Course Management area (Main / Course / Role Play).
 //
 // Two levels, no dropdowns (the same as the Administration nav): the top tabs are the areas; "Course"
-// shows its two pages as a second row of sub tabs underneath — create a course, create an assessment —
-// so both are visible and one click away. Creating a course is a window on the Main page, not a page of
-// its own, so that sub tab opens it there.
+// shows its pages as a second row of sub tabs underneath — manage courses (the course table) and
+// create an assessment. Creating a course is the button at the top right of the course table.
 export function CourseManagementTabs() {
   const pathname = usePathname()
-  const router = useRouter()
-
-  // Open the course-create modal. Fires an event for the already-on-/courses
-  // case and leaves a flag for the coming-from-another-tab case, then navigates.
-  function openCreate() {
-    sessionStorage.setItem('fk_open_create_course', '1')
-    window.dispatchEvent(new Event('fk:create-course'))
-    router.push('/courses')
-  }
 
   const isMainActive = pathname === '/courses' || (pathname.startsWith('/courses/') && !pathname.startsWith('/courses/roleplay'))
   const isRoleplayActive = pathname.startsWith('/courses/roleplay')
@@ -49,7 +39,7 @@ export function CourseManagementTabs() {
 
       {isCourseActive && (
         <div className="flex items-center gap-2 px-6 py-2.5 border-t border-gray-100 bg-slate-50/60 overflow-x-auto">
-          <button type="button" onClick={openCreate} className={subCls(false)}>สร้างหลักสูตร</button>
+          <Link href="/courses" className={subCls(false)}>จัดการหลักสูตร</Link>
           <Link href="/assessment" aria-current="page" className={subCls(true)}>สร้างแบบทดสอบ</Link>
         </div>
       )}

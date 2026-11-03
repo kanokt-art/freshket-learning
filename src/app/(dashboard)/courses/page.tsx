@@ -240,20 +240,6 @@ export default function CoursesPage() {
   const isSuperAdmin = user?.role === 'super_admin'
   const { allowedModules, loading: moduleLoading } = useModuleAccess(user?.role, user?.department)
 
-  // Open the create modal when triggered from the "Course ▾ → สร้างหลักสูตรใหม่"
-  // tab item. It works whether we're already on /courses (custom event) or
-  // navigating here from another tab (sessionStorage flag read on mount).
-  useEffect(() => {
-    if (!isSuperAdmin) return
-    if (sessionStorage.getItem('fk_open_create_course') === '1') {
-      sessionStorage.removeItem('fk_open_create_course')
-      setShowCreate(true)
-    }
-    const handler = () => { sessionStorage.removeItem('fk_open_create_course'); setShowCreate(true) }
-    window.addEventListener('fk:create-course', handler)
-    return () => window.removeEventListener('fk:create-course', handler)
-  }, [isSuperAdmin])
-
   const recordMap = useMemo(() => {
     const m: Record<string, TrainingStatus> = {}
     myRecords.forEach((r) => { m[r.courseId] = r.status })
@@ -431,9 +417,21 @@ export default function CoursesPage() {
 
   return (
     <div className="flex flex-col h-full bg-white relative">
-      <div className="bg-freshket-500 lg:bg-white border-b border-freshket-600 lg:border-gray-100 px-6 py-4 shrink-0">
-        <h1 className="text-lg font-bold text-white lg:text-gray-900">{isSuperAdmin ? 'หลักสูตรทั้งหมด' : 'My Course'}</h1>
-        <p className="text-xs text-freshket-200 lg:text-gray-400 mt-0.5">{visible.length} หลักสูตร</p>
+      <div className="bg-freshket-500 lg:bg-white border-b border-freshket-600 lg:border-gray-100 px-6 py-4 shrink-0 flex items-center gap-4">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg font-bold text-white lg:text-gray-900">{isSuperAdmin ? 'หลักสูตรทั้งหมด' : 'My Course'}</h1>
+          <p className="text-xs text-freshket-200 lg:text-gray-400 mt-0.5">{visible.length} หลักสูตร</p>
+        </div>
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-white text-freshket-700 lg:bg-freshket-500 lg:text-white hover:bg-freshket-100 lg:hover:bg-freshket-600 transition-all duration-150"
+          >
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            สร้างหลักสูตร
+          </button>
+        )}
       </div>
 
       {isSuperAdmin && <CourseManagementTabs />}
