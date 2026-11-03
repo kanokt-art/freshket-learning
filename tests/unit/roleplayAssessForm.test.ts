@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { roleplayGroups, missingInGroup, firstIncomplete, nextRound, buildRoleplayAssessment, validRating } from '@/lib/roleplay/assessForm'
+import { canAssessRoleplay, roleplayGroups, missingInGroup, firstIncomplete, nextRound, buildRoleplayAssessment, validRating } from '@/lib/roleplay/assessForm'
 import { ROLEPLAY_TOPICS } from '@/types/roleplay'
 
 const full = (v = 7) => Object.fromEntries(ROLEPLAY_TOPICS.map((t) => [t.key, v]))
@@ -14,6 +14,10 @@ describe('roleplay assessor form', () => {
     const g = roleplayGroups()
     expect(g.map((x) => x.name)).toEqual(['Preparation', 'Greeting', 'Discovery Flow', 'Active Listening', 'Solution', 'Closing', 'Tools', 'Follow Up'])
     expect(g.reduce((n, x) => n + x.topics.length, 0)).toBe(ROLEPLAY_TOPICS.length)
+  })
+
+  it('every topic says what to look for, so every rating means the same thing', () => {
+    for (const g of roleplayGroups()) for (const t of g.topics) expect(t.description.length, t.key).toBeGreaterThan(20)
   })
 
   it('a rating is required for every topic: missing ones are counted and the first incomplete category is named', () => {
@@ -54,5 +58,16 @@ describe('roleplay assessor form', () => {
     expect(nextRound(ex, 'pre', 's1')).toBe(3)
     expect(nextRound(ex, 'post', 's1')).toBe(2)
     expect(nextRound([], 'pre', 's1')).toBe(1)
+  })
+})
+
+describe('who may assess', () => {
+  it('team leads, managers and admins may, of someone else; a learner may not; nobody of themselves', () => {
+    expect(canAssessRoleplay({ uid: 'm1', role: 'manager' }, 's1')).toBe(true)
+    expect(canAssessRoleplay({ uid: 'l1', role: 'team_lead' }, 's1')).toBe(true)
+    expect(canAssessRoleplay({ uid: 'a1', role: 'super_admin' }, 's1')).toBe(true)
+    expect(canAssessRoleplay({ uid: 'u1', role: 'sale' }, 's1')).toBe(false)
+    expect(canAssessRoleplay({ uid: 'm1', role: 'manager' }, 'm1')).toBe(false)
+    expect(canAssessRoleplay(null, 's1')).toBe(false)
   })
 })

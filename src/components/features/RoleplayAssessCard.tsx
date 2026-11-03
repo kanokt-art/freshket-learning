@@ -115,13 +115,19 @@ export function RoleplayAssessCard({ subject, assessor, existing, onClose, onSav
         </div>
 
         <div className="border-t border-gray-100 px-5 py-4 space-y-4">
+          <p className="text-xs text-gray-400">
+            ให้คะแนน 1–10: <span className="text-rose-500 font-bold">1–3 ต้องพัฒนา</span> · <span className="text-amber-600 font-bold">4–6 พอใช้</span> · <span className="text-freshket-600 font-bold">7–10 ดี</span>
+          </p>
           <div className="divide-y divide-gray-50">
             {group.topics.map((t) => {
               const v = ratings[t.key] ?? 0
               return (
                 <div key={t.key} className="py-3 space-y-2">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm font-bold text-gray-800 leading-snug">{t.label}</p>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-800 leading-snug">{t.label}</p>
+                      {t.description && <p className="text-xs text-gray-500 leading-relaxed mt-0.5">{t.description}</p>}
+                    </div>
                     <span className={`text-xs font-bold shrink-0 ${v ? 'text-gray-700' : 'text-rose-500'}`}>{v ? `${v}/${RATING_MAX}` : 'ยังไม่ให้คะแนน'}</span>
                   </div>
                   <div className="flex gap-1 flex-wrap">

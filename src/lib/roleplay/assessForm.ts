@@ -1,5 +1,6 @@
-import { ROLEPLAY_TOPICS, type RoleplayAssessment, type RoleplayTopicScore } from '@/types/roleplay'
-import type { UserRole } from '@/types/user'
+import { ROLEPLAY_TOPICS, type RoleplayAssessment, type RoleplayTopicKey, type RoleplayTopicScore } from '@/types/roleplay'
+import { ROLEPLAY_TOPIC_GUIDE } from './topicGuide'
+import { canAccess, type UserRole } from '@/types/user'
 
 // The Role Play assessor form on a member's profile: one tab per category (group), a rating for every
 // topic of it (required) and one optional comment for the category. The pure part is here so it is
@@ -9,7 +10,8 @@ export const RATING_MAX = 10
 
 export interface RoleplayGroup {
   name: string
-  topics: Array<{ key: string; label: string }>
+  /** `description` says what the assessor looks for in the topic. */
+  topics: Array<{ key: string; label: string; description: string }>
 }
 
 /** The categories in the order the radar draws them, each with its topics. */
@@ -18,7 +20,7 @@ export function roleplayGroups(): RoleplayGroup[] {
   for (const t of ROLEPLAY_TOPICS) {
     let g = out.find((x) => x.name === t.group)
     if (!g) { g = { name: t.group, topics: [] }; out.push(g) }
-    g.topics.push({ key: t.key, label: t.label })
+    g.topics.push({ key: t.key, label: t.label, description: ROLEPLAY_TOPIC_GUIDE[t.key as RoleplayTopicKey] ?? '' })
   }
   return out
 }
@@ -77,4 +79,9 @@ export function buildRoleplayAssessment(i: AssessInput): Omit<RoleplayAssessment
     topics,
     groupComments,
   }
+}
+
+/** Who may assess a member's Role Play: team leads, managers and above (as the data door allows), never of themselves. */
+export function canAssessRoleplay(viewer: { uid: string; role: UserRole } | null | undefined, subjectUid: string): boolean {
+  return !!viewer && viewer.uid !== subjectUid && canAccess(viewer.role, 'team_lead')
 }

@@ -20,6 +20,7 @@ import { MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { RoleplayRadar } from '@/components/features/RoleplayRadar'
 import { RoleplayAssessCard } from '@/components/features/RoleplayAssessCard'
+import { canAssessRoleplay as canAssessRoleplayOf } from '@/lib/roleplay/assessForm'
 import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
 import { canAccess, ROLE_LABELS, getTeamManagerIds, getTeamLeadIds, type UserProfile } from '@/types/user'
 import type { AssessmentScore } from '@/types/assessmentScore'
@@ -534,7 +535,7 @@ function EmployeeSidebar({
   const { user: viewer } = useAuth()
   const canFeedback = viewer ? canAccess(viewer.role, 'team_lead') : false
   // Team leads and managers (and above) assess a member's Role Play from their profile — never themselves.
-  const canAssessRoleplay = canFeedback && !!viewer && viewer.uid !== user.uid
+  const canAssessRoleplay = canAssessRoleplayOf(viewer, user.uid)
 
   // Shadow Visit tab appears only when this member's department has the shadow
   // module enabled by super_admin (appConfig/moduleAccess).
