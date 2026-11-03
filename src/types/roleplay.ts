@@ -65,4 +65,6 @@ export interface RoleplayAssessment {
   type: 'pre' | 'post'
   overallNote: string
   topics: RoleplayTopicScore[]
+  /** The assessor's optional comment per category (keyed by the category name), from the profile form. */
+  groupComments?: Record<string, string>
 }

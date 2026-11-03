@@ -889,6 +889,19 @@ function AssessmentCard({
             })}
           </div>
 
+          {/* The assessor's comment per category (from the profile form) */}
+          {Object.keys(a.groupComments ?? {}).length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-bold text-gray-500">ความเห็นรายหมวด</p>
+              {Object.entries(a.groupComments ?? {}).map(([group, comment]) => (
+                <div key={group}>
+                  <p className="text-xs font-bold text-gray-700">{group}</p>
+                  <p className="text-xs text-gray-500 mt-0.5 whitespace-pre-wrap">{comment}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Feedback comments (non-empty ones) */}
           {a.topics.filter(t => t.comment).length > 0 && (
             <div className="space-y-2">

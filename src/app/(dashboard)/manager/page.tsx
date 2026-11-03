@@ -19,6 +19,7 @@ import { formatPersonName } from '@/lib/users/displayName'
 import { MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { RoleplayRadar } from '@/components/features/RoleplayRadar'
+import { RoleplayAssessCard } from '@/components/features/RoleplayAssessCard'
 import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
 import { canAccess, ROLE_LABELS, getTeamManagerIds, getTeamLeadIds, type UserProfile } from '@/types/user'
 import type { AssessmentScore } from '@/types/assessmentScore'
@@ -521,6 +522,8 @@ function EmployeeSidebar({
   const [tab, setTab] = useState<'info' | 'history' | 'assess' | 'shadow' | 'radar'>('info')
   // Which Shadow visit is open to read in full (one at a time).
   const [openVisitId, setOpenVisitId] = useState<string | null>(null)
+  // The Role Play assessor form is open in the Radar Chart tab.
+  const [assessing, setAssessing] = useState(false)
 
   // Opening the ประวัติการเรียน tab is the "read" that clears both the tab dot
   // and the member's row dot. The isUnread guard in onReadTraining makes the
@@ -530,6 +533,8 @@ function EmployeeSidebar({
   }, [tab, hasNewTraining, onReadTraining])
   const { user: viewer } = useAuth()
   const canFeedback = viewer ? canAccess(viewer.role, 'team_lead') : false
+  // Team leads and managers (and above) assess a member's Role Play from their profile — never themselves.
+  const canAssessRoleplay = canFeedback && !!viewer && viewer.uid !== user.uid
 
   // Shadow Visit tab appears only when this member's department has the shadow
   // module enabled by super_admin (appConfig/moduleAccess).
@@ -948,12 +953,46 @@ function EmployeeSidebar({
         )}
 
         {/* Tab — Radar Chart (Sale dept only): real roleplay assessment radar */}
-        {tab === 'radar' && (
+        {tab === 'radar' && canAssessRoleplay && assessing && viewer && (
+          <RoleplayAssessCard
+            subject={{ uid: user.uid, name: user.displayName, team: teamName ?? '' }}
+            assessor={{ uid: viewer.uid, name: viewer.displayName, role: viewer.role }}
+            existing={roleplayAssessments}
+            onClose={() => setAssessing(false)}
+            onSaved={() => setAssessing(false)}
+          />
+        )}
+        {tab === 'radar' && !(canAssessRoleplay && assessing) && canAssessRoleplay && (
+          <div className="px-4 pt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setAssessing(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-freshket-500 text-white hover:bg-freshket-600 transition-all duration-150"
+            >
+              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+              ประเมิน Role Play
+            </button>
+          </div>
+        )}
+        {tab === 'radar' && !(canAssessRoleplay && assessing) && (
           radarAssessments.length > 0 ? (
             <div className="p-4">
               <p className="text-sm font-bold text-gray-900 mb-1 text-center">Role Play Radar</p>
               <p className="text-xs text-gray-400 text-center mb-2">ค่าเฉลี่ยรายด้าน (เต็ม 10){radarAssessments.length > 1 ? ' · Pre เทียบ Post' : ''}</p>
               <RoleplayRadar assessments={radarAssessments} />
+              {radarAssessments.some((a) => Object.keys(a.groupComments ?? {}).length > 0) && (
+                <div className="mt-4 space-y-3">
+                  <p className="text-xs font-bold text-gray-500">ความเห็นจากผู้ประเมิน</p>
+                  {radarAssessments.map((a) => Object.entries(a.groupComments ?? {}).map(([group, comment]) => (
+                    <div key={a.id + group} className="rounded-xl border border-gray-100 px-4 py-3">
+                      <p className="text-xs font-bold text-gray-700">
+                        {group} <span className="font-normal text-gray-400">· {a.type === 'post' ? 'Post' : 'Pre'} รอบที่ {a.round} · {a.assessorName}</span>
+                      </p>
+                      <p className="text-sm text-gray-600 mt-1 whitespace-pre-wrap">{comment}</p>
+                    </div>
+                  )))}
+                </div>
+              )}
             </div>
           ) : (
           <div className="flex flex-col items-center justify-center h-full min-h-72 p-8 text-center">
