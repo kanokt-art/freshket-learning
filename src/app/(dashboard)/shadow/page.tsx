@@ -303,17 +303,19 @@ function VisitDetailModal({
   onClose: () => void
   onSaveAck: (recordId: string, rating: number, comment: string) => Promise<void> | void
 }) {
-  // A panel on the right, not a window in the middle: the list stays in view behind it, and it is where a
-  // learner reads the feedback their team lead or manager gave on this visit.
+  // A panel on the right (a sheet rising from the bottom on a phone), not a window in the middle: the list
+  // stays in view behind it, and it is where a learner reads the feedback their team lead or manager gave
+  // on this visit.
   return (
     <div
-      className="fixed inset-0 bg-slate-900/40 z-50 flex justify-end"
+      className="fixed inset-0 bg-slate-900/40 z-50 flex items-end sm:items-stretch sm:justify-end"
       onClick={onClose}
     >
       <div
-        className="bg-white h-full w-full max-w-md flex flex-col shadow-2xl overflow-hidden animate-slide-in-right"
+        className="bg-white w-full max-h-[88vh] sm:max-h-none sm:h-full sm:max-w-md rounded-t-3xl sm:rounded-none flex flex-col shadow-2xl overflow-hidden animate-sheet-up sm:animate-slide-in-right"
         onClick={e => e.stopPropagation()}
       >
+        <div className="sm:hidden flex justify-center pt-2.5 shrink-0"><span className="h-1 w-10 rounded-full bg-gray-200" /></div>
         {/* Header */}
         <div className="shrink-0 flex items-start justify-between gap-3 px-6 py-5 border-b border-gray-100">
           <div className="min-w-0 flex-1">

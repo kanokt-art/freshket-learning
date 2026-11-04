@@ -79,6 +79,11 @@ const config: Config = {
           '0%':   { opacity: '0', transform: 'translateX(24px)' },
           '100%': { opacity: '1', transform: 'translateX(0)' },
         },
+        // a sheet rising from the bottom of the screen (feedback on a phone)
+        'sheet-up': {
+          '0%':   { transform: 'translateY(100%)' },
+          '100%': { transform: 'translateY(0)' },
+        },
         'count-pop': {
           '0%':   { transform: 'scale(1)' },
           '40%':  { transform: 'scale(1.3)' },
@@ -121,6 +126,7 @@ const config: Config = {
         'shimmer':        'shimmer 3.5s linear infinite',
         'fade-in':        'fade-in 0.8s ease forwards',
         'slide-in-right': 'slide-in-right 0.45s cubic-bezier(0.25,0.46,0.45,0.94) forwards',
+        'sheet-up':       'sheet-up 0.32s cubic-bezier(0.32,0.72,0,1) forwards',
         'count-pop':      'count-pop 0.3s ease',
         'green-pulse':    'green-pulse 2s ease-in-out alternate infinite',
         'green-glow':     'green-glow 3s ease-in-out alternate infinite',

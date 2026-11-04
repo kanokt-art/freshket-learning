@@ -553,16 +553,15 @@ export default function CourseDetailPage() {
               </button>
             )}
             {feedbackOpen && (
-              <aside className="fixed inset-0 sm:inset-y-0 sm:left-auto sm:right-0 z-40 w-full sm:w-80 bg-white sm:border-l border-gray-100 shadow-2xl flex flex-col animate-slide-in-right">
+              <>
+              {/* the dimmed page behind the sheet on a phone: tap it to close */}
+              <div className="fixed inset-0 z-40 bg-slate-900/40 sm:hidden" onClick={() => setFeedbackOpen(false)} />
+              <aside className="fixed inset-x-0 bottom-0 max-h-[85vh] rounded-t-3xl sm:rounded-none sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none z-50 w-full sm:w-80 bg-white sm:border-l border-gray-100 shadow-2xl flex flex-col overflow-hidden animate-sheet-up sm:animate-slide-in-right">
+                <div className="sm:hidden flex justify-center pt-2.5 shrink-0"><span className="h-1 w-10 rounded-full bg-gray-200" /></div>
                 <div className="flex items-center gap-2 px-4 sm:px-5 py-4 border-b border-gray-100 shrink-0">
-                  {/* back arrow on a phone (the panel fills the screen), a close button on a wide one */}
-                  <button type="button" onClick={() => setFeedbackOpen(false)} aria-label="กลับ"
-                    className="sm:hidden p-1.5 -ml-1 rounded-xl hover:bg-gray-100 text-gray-500 transition-all">
-                    <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
-                  </button>
                   <p className="flex-1 text-sm font-bold text-gray-900">ความเห็นจากหัวหน้า</p>
                   <button type="button" onClick={() => setFeedbackOpen(false)} aria-label="ปิด"
-                    className="hidden sm:block p-1.5 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-all">
+                    className="p-1.5 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-all">
                     <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                   </button>
                 </div>
@@ -604,6 +603,7 @@ export default function CourseDetailPage() {
                   </div>
                 </div>
               </aside>
+              </>
             )}
           </>
         )
