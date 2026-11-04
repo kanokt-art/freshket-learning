@@ -553,21 +553,55 @@ export default function CourseDetailPage() {
               </button>
             )}
             {feedbackOpen && (
-              <aside className="fixed inset-y-0 right-0 z-40 w-80 max-w-[90vw] bg-white border-l border-gray-100 shadow-2xl flex flex-col animate-slide-in-right">
-                <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100 shrink-0">
+              <aside className="fixed inset-0 sm:inset-y-0 sm:left-auto sm:right-0 z-40 w-full sm:w-80 bg-white sm:border-l border-gray-100 shadow-2xl flex flex-col animate-slide-in-right">
+                <div className="flex items-center gap-2 px-4 sm:px-5 py-4 border-b border-gray-100 shrink-0">
+                  {/* back arrow on a phone (the panel fills the screen), a close button on a wide one */}
+                  <button type="button" onClick={() => setFeedbackOpen(false)} aria-label="กลับ"
+                    className="sm:hidden p-1.5 -ml-1 rounded-xl hover:bg-gray-100 text-gray-500 transition-all">
+                    <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+                  </button>
                   <p className="flex-1 text-sm font-bold text-gray-900">ความเห็นจากหัวหน้า</p>
                   <button type="button" onClick={() => setFeedbackOpen(false)} aria-label="ปิด"
-                    className="p-1.5 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-all">
+                    className="hidden sm:block p-1.5 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-all">
                     <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                   </button>
                 </div>
-                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-                  <p className="text-xs text-gray-400">หลักสูตร {course.title}</p>
-                  {leadFeedback.leadName && <p className="text-sm font-bold text-gray-800">{leadFeedback.leadName}</p>}
-                  {toStars(leadFeedback.score) !== null && <StarsDisplay value={toStars(leadFeedback.score) as number} />}
-                  {leadFeedback.comment?.trim() && (
-                    <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{leadFeedback.comment.trim()}</p>
+                <div className="flex-1 overflow-y-auto">
+                  {/* Who it is about */}
+                  {user && (
+                    <div className="flex items-center gap-3 px-5 py-4 bg-gray-50 border-b border-gray-100">
+                      <div className="size-11 rounded-full bg-freshket-100 text-freshket-700 shrink-0 overflow-hidden flex items-center justify-center text-sm font-bold">
+                        {user.photoURL
+                          // eslint-disable-next-line @next/next/no-img-element
+                          ? <img src={user.photoURL} alt="" className="size-full object-cover" />
+                          : (user.displayName ?? '?').charAt(0)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-gray-900 truncate">{formatPersonName(user)}</p>
+                        {(user.position || user.department) && (
+                          <p className="text-xs text-gray-500 truncate">{[user.position, user.department].filter(Boolean).join(' · ')}</p>
+                        )}
+                      </div>
+                    </div>
                   )}
+                  {/* Which course */}
+                  <div className="px-5 py-4 border-b border-gray-100">
+                    <p className="text-xs text-gray-400 mb-0.5">หลักสูตรที่ได้รับความเห็น</p>
+                    <p className="text-sm font-bold text-gray-900">{course.title}</p>
+                  </div>
+                  {/* What the lead wrote */}
+                  <div className="px-5 py-4 space-y-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {leadFeedback.leadName && <p className="text-sm font-bold text-gray-800">{leadFeedback.leadName}</p>}
+                      {leadFeedback.updatedAt && !isNaN(new Date(leadFeedback.updatedAt).getTime()) && (
+                        <span className="text-xs text-gray-400">{new Date(leadFeedback.updatedAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
+                      )}
+                    </div>
+                    {toStars(leadFeedback.score) !== null && <StarsDisplay value={toStars(leadFeedback.score) as number} />}
+                    {leadFeedback.comment?.trim() && (
+                      <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{leadFeedback.comment.trim()}</p>
+                    )}
+                  </div>
                 </div>
               </aside>
             )}
