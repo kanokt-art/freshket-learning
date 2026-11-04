@@ -9,6 +9,7 @@ import { slackText } from '@/lib/notifications/slackText'
 import { resolveAnnouncementText } from '@/lib/notifications/courseAnnouncement'
 import { toStars } from '@/lib/feedback/stars'
 import { saleTrainers } from '@/lib/server/saleTrainers'
+import { notifyTrainers } from '@/lib/server/trainerNotice'
 import { ROLEPLAY_TOPICS } from '@/types/roleplay'
 import type { UserProfile } from '@/types/user'
 import {
@@ -230,6 +231,14 @@ export async function POST(req: NextRequest) {
           rating,
           shadowUrl: appUrl('/shadow'),
         })
+        if (observerDoc && isSalesDepartment(observerDoc.department)) {
+          await notifyTrainers(store, {
+            exceptUid: gate.uid, type: 'shadow_ack_received', key: `${recordId}_${gate.uid}`,
+            title: `${reviewer} ประเมิน Shadow Visit ของ ${observer}`,
+            body: [visit.storeName ? `ร้าน ${visit.storeName}` : '', stars, review.comment ? excerpt(review.comment, 120) : ''].filter(Boolean).join(' · '),
+            refId: recordId, refPath: `/manager?user=${encodeURIComponent(visit.observerUid)}`,
+          })
+        }
         break
       }
 
@@ -293,6 +302,13 @@ export async function POST(req: NextRequest) {
             rating: stars ?? undefined,
             trainers: await saleTrainers(),
             memberUrl: appUrl(`/manager?user=${encodeURIComponent(memberUid)}`),
+          })
+          // The Sale Trainer reads it in their own notifications (the comment is on the learner's page).
+          await notifyTrainers(store, {
+            exceptUid: gate.uid, type: 'course_feedback_received', key: `${memberUid}_${courseId}_${gate.uid}`,
+            title: `${reviewer} ให้ความเห็น ${formatPersonName(learner) || 'พนักงาน'} ในหลักสูตร ${title}`,
+            body: [starLine, comment ? excerpt(comment, 120) : ''].filter(Boolean).join(' · '),
+            refId: courseId, refPath: `/manager?user=${encodeURIComponent(memberUid)}`,
           })
         }
         break
@@ -364,6 +380,12 @@ export async function POST(req: NextRequest) {
             perGroup: perGroup || undefined,
             trainers: await saleTrainers(),
             memberUrl: appUrl(`/manager?user=${encodeURIComponent(a.subjectUid)}`),
+          })
+          await notifyTrainers(store, {
+            exceptUid: gate.uid, type: 'roleplay_assessed', key: assessmentId,
+            title: `${assessor} ประเมิน Role Play ของ ${formatPersonName(learner) || 'พนักงาน'}`,
+            body: [kindLabel, overall ? `เฉลี่ย ${overall}/10` : ''].filter(Boolean).join(' · '),
+            refId: assessmentId, refPath: `/manager?user=${encodeURIComponent(a.subjectUid)}`,
           })
         }
         break

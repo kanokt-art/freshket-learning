@@ -10,6 +10,8 @@ const claimed = new Set<string>()
 let bells: Array<{ path: string; id: string; data: Record<string, unknown> }> = []
 
 const fakeStore = {
+  // the trainer: person 'trainer1', found by the configured company email
+  findUsers: async ({ email }: { email: string }) => (email === 'trainer@freshket.co' ? [{ id: 'trainer1', email }] : []),
   get: async (path: string, id: string) => (docs[path] ?? []).find((d) => d.id === id) ?? null,
   getMany: async (path: string, ids: string[]) => (docs[path] ?? []).filter((d) => ids.includes(d.id)),
   claim: async (path: string, id: string) => {
@@ -35,6 +37,7 @@ vi.mock('@/lib/notifications/slack', async (orig) => ({
   postRoleplayAssessedToSlack: (e: unknown) => groupPost.roleplay(e),
 }))
 vi.mock('@/lib/server/saleTrainers', () => ({
+  trainerEmails: () => ['trainer@freshket.co'],
   saleTrainers: async () => [{ name: 'Kanok (Benz) Thongtaem', slackUserId: 'U07ABCDEF12' }],
 }))
 const dm = vi.fn(async (..._a: unknown[]) => 1)
@@ -91,9 +94,9 @@ describe('course feedback', () => {
   it('rings the in-app bell as well, whether or not a Slack DM reached them', async () => {
     asLead(); dm.mockResolvedValue(1)
     await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })
-    expect(bells).toHaveLength(1)
-    expect(bells[0].path).toBe('notifications/sale1/items')
-    expect(bells[0].data).toMatchObject({ type: 'course_feedback_received', refPath: '/courses/c1?feedback=1', read: false })
+    const mine = bells.filter((b) => b.path === 'notifications/sale1/items')
+    expect(mine).toHaveLength(1)
+    expect(mine[0].data).toMatchObject({ type: 'course_feedback_received', refPath: '/courses/c1?feedback=1', read: false })
   })
 
   it('tells them once: editing the feedback later says nothing more', async () => {
@@ -153,6 +156,47 @@ describe('the Sale Trainer hears it too', () => {
   })
 })
 
+describe('the Sale Trainer reads it in their own notifications', () => {
+  const forTrainer = () => bells.filter((b) => b.path === 'notifications/trainer1/items')
+
+  it('a course comment: a notice for the trainer naming the learner, with the stars, a short comment and a link to the learner', async () => {
+    asLead()
+    await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })
+    expect(forTrainer()).toHaveLength(1)
+    const n = forTrainer()[0].data
+    expect(String(n.title)).toContain('Somchai')
+    expect(String(n.title)).toContain('Product Knowledge')
+    expect(String(n.body)).toContain('4/5 ดาว')
+    expect(String(n.body)).toContain('ตั้งใจเรียนดีมาก')
+    expect(n).toMatchObject({ type: 'course_feedback_received', refPath: '/manager?user=sale1', read: false })
+  })
+
+  it('a role play assessment: a notice with the average', async () => {
+    asLead()
+    await call({ kind: 'roleplay_assessed', assessmentId: 'rp1' })
+    expect(forTrainer()).toHaveLength(1)
+    expect(forTrainer()[0].data).toMatchObject({ type: 'roleplay_assessed', refPath: '/manager?user=sale1' })
+  })
+
+  it('tells them once, like the learner, and not about their own feedback', async () => {
+    asLead()
+    await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })
+    await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })
+    expect(forTrainer()).toHaveLength(1)
+    caller = { uid: 'trainer1', role: 'super_admin', isSuperAdmin: true, person: { id: 'trainer1', displayNameEN: 'Kanok T' } }
+    docs.courseFeedback.push({ id: 'sale1_c9', memberUid: 'sale1', courseId: 'c9', leadUid: 'trainer1', score: 5, comment: 'ok' })
+    await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c9' })
+    expect(forTrainer()).toHaveLength(1)
+  })
+
+  it('nothing for someone outside the sales organisation', async () => {
+    asLead()
+    docs.courseFeedback.push({ id: 'sale4_c1', memberUid: 'sale4', courseId: 'c1', leadUid: 'lead1', score: 5, comment: 'x' })
+    await call({ kind: 'course_feedback', memberUid: 'sale4', courseId: 'c1' })
+    expect(forTrainer()).toHaveLength(0)
+  })
+})
+
 describe('role play assessment', () => {
   it('tells the member, with the average and the category averages from the saved scores', async () => {
     asLead()
@@ -169,8 +213,9 @@ describe('role play assessment', () => {
     asLead()
     await call({ kind: 'roleplay_assessed', assessmentId: 'rp1' })
     await call({ kind: 'roleplay_assessed', assessmentId: 'rp1' })
-    expect(bells).toHaveLength(1)
-    expect(bells[0].data).toMatchObject({ type: 'roleplay_assessed', refPath: '/courses/roleplay' })
+    const mine = bells.filter((b) => b.path === 'notifications/sale1/items')
+    expect(mine).toHaveLength(1)
+    expect(mine[0].data).toMatchObject({ type: 'roleplay_assessed', refPath: '/courses/roleplay' })
   })
 
   it('says nothing for an assessment someone else made, a missing one, or from a learner', async () => {

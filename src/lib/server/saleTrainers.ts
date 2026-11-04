@@ -34,6 +34,11 @@ function configured(): Array<{ name: string; email: string }> {
   return emails.map((email) => ({ name: DEFAULT_TRAINERS.find((t) => t.email === email)?.name ?? email, email }))
 }
 
+/** The company emails of the trainers who are tagged and told. */
+export function trainerEmails(): string[] {
+  return configured().map((t) => t.email)
+}
+
 export async function saleTrainers(
   lookup: (email: string) => Promise<SlackLookup> = findSlackIdByEmail,
 ): Promise<TrainerRef[]> {
