@@ -521,7 +521,11 @@ function EmployeeSidebar({
   onReadTraining: () => void
   onClose: () => void
 }) {
-  const [tab, setTab] = useState<'info' | 'history' | 'assess' | 'shadow' | 'radar'>('info')
+  // A notice about feedback opens the member on the tab where it is read (?tab=history | shadow | radar).
+  const tabParam = useSearchParams().get('tab')
+  const [tab, setTab] = useState<'info' | 'history' | 'assess' | 'shadow' | 'radar'>(
+    tabParam === 'history' || tabParam === 'shadow' || tabParam === 'radar' ? tabParam : 'info',
+  )
   // Which Shadow visit is open to read in full (one at a time).
   const [openVisitId, setOpenVisitId] = useState<string | null>(null)
   // The Role Play assessor form is open in the Radar Chart tab.
@@ -617,8 +621,15 @@ function EmployeeSidebar({
   const feedback = useMemo(() => {
     const m: Record<string, { comment: string; score: number | null; leadName?: string }> = {}
     for (const d of feedbackDocs.data) if (d.courseId) m[d.courseId] = { comment: d.comment ?? '', score: d.score ?? null, leadName: d.leadName }
+    // Demo mode never opens the listener above: give the member's first courses a sample comment so the
+    // feedback can be seen and reviewed.
+    if (getDemoMode()) {
+      for (const r of records.filter((x) => x.userId === user.uid).slice(0, 2)) {
+        m[r.courseId] = { comment: 'ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ ครั้งหน้าลองสรุป Pain ของลูกค้าให้ลูกค้ายืนยันก่อนเสนอสินค้า', score: 4, leadName: 'Pataranuch (Tao) Suyavech' }
+      }
+    }
     return { ...m, ...feedbackOverlay }
-  }, [feedbackDocs.data, feedbackOverlay])
+  }, [feedbackDocs.data, feedbackOverlay, records, user.uid])
 
   async function saveFeedback(courseId: string, comment: string, score: number | null) {
     const next = { comment, score, leadName: viewer?.displayName }

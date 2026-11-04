@@ -168,14 +168,14 @@ describe('the Sale Trainer reads it in their own notifications', () => {
     expect(String(n.title)).toContain('Product Knowledge')
     expect(String(n.body)).toContain('4/5 ดาว')
     expect(String(n.body)).toContain('ตั้งใจเรียนดีมาก')
-    expect(n).toMatchObject({ type: 'course_feedback_received', refPath: '/manager?user=sale1', read: false })
+    expect(n).toMatchObject({ type: 'course_feedback_received', refPath: '/manager?user=sale1&tab=history', read: false })
   })
 
   it('a role play assessment: a notice with the average', async () => {
     asLead()
     await call({ kind: 'roleplay_assessed', assessmentId: 'rp1' })
     expect(forTrainer()).toHaveLength(1)
-    expect(forTrainer()[0].data).toMatchObject({ type: 'roleplay_assessed', refPath: '/manager?user=sale1' })
+    expect(forTrainer()[0].data).toMatchObject({ type: 'roleplay_assessed', refPath: '/manager?user=sale1&tab=radar' })
   })
 
   it('tells them once, like the learner, and not about their own feedback', async () => {

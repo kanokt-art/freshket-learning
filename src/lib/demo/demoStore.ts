@@ -115,8 +115,23 @@ const _notifications = new Map<string, AppNotification[]>()
 // read and cleared like real ones, and come back after a reset.
 const _seeded = new Set<string>()
 
-function sampleNotifications(): AppNotification[] {
+function sampleNotifications(role?: string): AppNotification[] {
   const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000)
+  // A trainer, team lead or manager is told about feedback given to a learner, and opens the learner's page.
+  if (role === 'super_admin' || role === 'manager' || role === 'team_lead') {
+    return [
+      {
+        id: 'demo-t-feedback', type: 'course_feedback_received', read: false, createdAt: ago(5),
+        title: 'Pataranuch (Tao) Suyavech ให้ความเห็น Somchai (Chai) Chandee ในหลักสูตร Freshket Product Knowledge',
+        body: '4/5 ดาว · ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ', refId: 'course-01', refPath: '/manager?user=mock-sale-01&tab=history',
+      },
+      {
+        id: 'demo-t-shadow', type: 'shadow_ack_received', read: false, createdAt: ago(20),
+        title: 'Max ประเมิน Shadow Visit ของ นิรชา สุดใจ',
+        body: 'ร้าน Pastel · 4/5 ดาว · ถามลึกเรื่องคุณภาพได้ดี', refId: 'sh-02', refPath: '/shadow?visit=sh-02',
+      },
+    ]
+  }
   return [
     {
       id: 'demo-feedback', type: 'course_feedback_received', read: false, createdAt: ago(5),
@@ -268,7 +283,9 @@ export const demoStore = {
   getNotifications(uid: string): AppNotification[] {
     if (!_seeded.has(uid)) {
       _seeded.add(uid)
-      if (!_notifications.has(uid)) _notifications.set(uid, sampleNotifications())
+      ensureHydrated()
+      const role = _state.users.find((u) => u.uid === uid)?.role
+      if (!_notifications.has(uid)) _notifications.set(uid, sampleNotifications(role))
     }
     return (_notifications.get(uid) ?? []).slice().sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
   },

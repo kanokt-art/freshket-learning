@@ -236,7 +236,7 @@ export async function POST(req: NextRequest) {
             exceptUid: gate.uid, type: 'shadow_ack_received', key: `${recordId}_${gate.uid}`,
             title: `${reviewer} ประเมิน Shadow Visit ของ ${observer}`,
             body: [visit.storeName ? `ร้าน ${visit.storeName}` : '', stars, review.comment ? excerpt(review.comment, 120) : ''].filter(Boolean).join(' · '),
-            refId: recordId, refPath: `/manager?user=${encodeURIComponent(visit.observerUid)}`,
+            refId: recordId, refPath: `/shadow?visit=${encodeURIComponent(recordId)}`,
           })
         }
         break
@@ -308,7 +308,7 @@ export async function POST(req: NextRequest) {
             exceptUid: gate.uid, type: 'course_feedback_received', key: `${memberUid}_${courseId}_${gate.uid}`,
             title: `${reviewer} ให้ความเห็น ${formatPersonName(learner) || 'พนักงาน'} ในหลักสูตร ${title}`,
             body: [starLine, comment ? excerpt(comment, 120) : ''].filter(Boolean).join(' · '),
-            refId: courseId, refPath: `/manager?user=${encodeURIComponent(memberUid)}`,
+            refId: courseId, refPath: `/manager?user=${encodeURIComponent(memberUid)}&tab=history`,
           })
         }
         break
@@ -385,7 +385,7 @@ export async function POST(req: NextRequest) {
             exceptUid: gate.uid, type: 'roleplay_assessed', key: assessmentId,
             title: `${assessor} ประเมิน Role Play ของ ${formatPersonName(learner) || 'พนักงาน'}`,
             body: [kindLabel, overall ? `เฉลี่ย ${overall}/10` : ''].filter(Boolean).join(' · '),
-            refId: assessmentId, refPath: `/manager?user=${encodeURIComponent(a.subjectUid)}`,
+            refId: assessmentId, refPath: `/manager?user=${encodeURIComponent(a.subjectUid)}&tab=radar`,
           })
         }
         break
