@@ -87,6 +87,10 @@ export function managedMembersUnfiltered(
   allUsers: readonly UserProfile[],
   teams: readonly Team[],
 ): UserProfile[] {
+  // A super_admin works across teams (Sale Trainer, HR…) and reads everyone's records and comments, so
+  // they are not limited to a team they lead: the Team page, a Slack link to a learner's history, the
+  // feedback leads gave. (An admin viewing as a manager is not a super_admin here, so keeps that view.)
+  if (user.role === 'super_admin') return allUsers.filter((u) => u.uid !== user.uid)
   const managed = managedTeamIds(user, allUsers, teams)
   // Only members at or below the viewer's level (a team_lead never sees the manager).
   // A super_admin who works in the team (Kanok, in People) is a member like any other to the manager

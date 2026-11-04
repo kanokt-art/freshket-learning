@@ -13,7 +13,7 @@ import { useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 import { useAuth } from '@/hooks/useAuth'
-import { useAllUsers, useMyTrainingRecords, useTeams, useDepartments, saveLocalImportedUsers, saveLocalTeam, deleteLocalTeam, deleteLocalTeams, getLocalTeams, applyLocalUserPatch, getLocalUserPatches, clearDeletedTeamIds, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
+import { useAllUsers, useMyTrainingRecords, useTeams, useDepartments, saveLocalImportedUsers, saveLocalTeam, deleteLocalTeam, deleteLocalTeams, getLocalTeams, applyLocalUserPatch, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { canAccess, ROLE_LABELS, getTeamManagerIds, type UserRole, type UserProfile, type Department, type Team, type EmploymentStatus } from '@/types/user'
 import type { ShadowRecord } from '@/types/shadow'
@@ -27,7 +27,7 @@ import { computeAutoTeamMappings } from '@/lib/users/autoMapTeam'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { patch } from '@/lib/data/collection'
 import { parseSlackMemberId } from '@/lib/slack/memberId'
-import { alertError, alertSuccess, alertWarning, confirmAction } from '@/lib/ui/alert'
+import { alertError, alertSuccess, confirmAction } from '@/lib/ui/alert'
 import { ImportAssessmentModal } from '@/components/features/ImportAssessmentModal'
 import { OrgBoard, isRosterRole, PHASE1_DEPARTMENTS } from '@/components/features/OrgBoard'
 import { demoStore } from '@/lib/demo/demoStore'
@@ -131,13 +131,9 @@ export default function UsersPage() {
   const [fixedDeptsCount, setFixedDeptsCount] = useState<number | null>(null)
   const [rebuildingStats, setRebuildingStats] = useState(false)
   const [autoMapping, setAutoMapping] = useState(false)
-  const [savingAssignments, setSavingAssignments] = useState(false)
-  const [savedAssignments, setSavedAssignments] = useState(false)
   const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number; hidden: number; missing: number } | null>(null)
   const [undoDelete, setUndoDelete] = useState<{ team: Team; memberIds: string[] } | null>(null)
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
-  const [refreshed, setRefreshed] = useState(false)
   const [showRestartConfirm, setShowRestartConfirm] = useState(false)
   const [restartResult, setRestartResult] = useState<{ unassignedCount: number; deletedTeams: number; totalMembers: number } | null>(null)
   const [teamSearch, setTeamSearch] = useState('')
@@ -364,19 +360,6 @@ export default function UsersPage() {
     else applyLocalUserPatch(userId, { role: newRole })
   }
 
-  function handleRefreshOrgBoard() {
-    setRefreshing(true)
-    setRefreshed(false)
-    // Clear optimistic-deleted team IDs so Firestore snapshot takes full effect
-    clearDeletedTeamIds()
-    // Short delay to let state propagate, then show "done" feedback
-    setTimeout(() => {
-      setRefreshing(false)
-      setRefreshed(true)
-      setTimeout(() => setRefreshed(false), 2500)
-    }, 400)
-  }
-
   function handleCreateTeam(name: string, deptId?: string) {
     const teamId = `team-${Date.now()}`
     const team = { id: teamId, name, departmentId: deptId }
@@ -510,42 +493,6 @@ export default function UsersPage() {
     }
   }
 
-  // One-off migration: push every locally-patched team binding to Firestore.
-  // Covers real (non-csv) users whose teamId/visibleTeamIds previously lived only
-  // in this browser's localStorage. `role` is intentionally never sent — patches
-  // may carry stale role garbage, and roles are changed through /api/users only.
-  async function handleSaveAssignments() {
-    setSavingAssignments(true)
-    setSavedAssignments(false)
-    try {
-      const allPatches = getLocalUserPatches()
-      const assignments = Object.entries(allPatches)
-        .map(([uid, p]) => {
-          const a: { uid: string; teamId?: string | null; visibleTeamIds?: string[] | null } = { uid }
-          if (p.teamId !== undefined) a.teamId = p.teamId ?? null
-          if (p.visibleTeamIds !== undefined) a.visibleTeamIds = p.visibleTeamIds ?? null
-          return a
-        })
-        .filter(a => 'teamId' in a || 'visibleTeamIds' in a)
-      if (assignments.length === 0) { setSavedAssignments(true); return }
-      const res = await authedFetch('/api/users/save-assignments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignments }),
-      })
-      if (!res.ok) { void alertError('บันทึกไม่สำเร็จ', 'เซิร์ฟเวอร์ปฏิเสธคำขอ'); return }
-      const json = await res.json()
-      if (json.skipped?.length > 0) {
-        void alertWarning('บันทึกสำเร็จบางส่วน', `ข้าม ${json.skipped.length} คนที่ไม่พบข้อมูลใน Firestore แล้ว (อาจถูกรวม/ลบไปก่อนหน้านี้)`)
-      }
-      setSavedAssignments(true)
-    } catch {
-      void alertError('บันทึกไม่สำเร็จ', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
-    } finally {
-      setSavingAssignments(false)
-    }
-  }
-
   return (
     <div className="flex flex-col h-full bg-white">
       <Header title="Members" subtitle={`${users.length} members`} />
@@ -664,52 +611,6 @@ export default function UsersPage() {
                 )}
               </div>
             </div>
-            {canManageTeams && (
-              <div className="flex items-center justify-end mb-4">
-                <div className="flex items-center gap-2">
-                  {/* Migrate any browser-local team bindings into Firestore so they
-                      persist across devices (fixes managers showing 0 members). */}
-                  <button
-                    onClick={handleSaveAssignments}
-                    disabled={savingAssignments}
-                    title="บันทึกการผูกทีมของทุกคนลง Firestore (ให้ข้ามเบราว์เซอร์ได้)"
-                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all disabled:opacity-60"
-                  >
-                    {savedAssignments ? (
-                      <>
-                        <svg className="size-4 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                        </svg>
-                        บันทึกทีมแล้ว
-                      </>
-                    ) : (
-                      <>
-                        <svg className={`size-4 ${savingAssignments ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M17 21v-8H7v8M7 3v5h8" />
-                        </svg>
-                        {savingAssignments ? 'กำลังบันทึก...' : 'บันทึกทีมลง Firestore'}
-                      </>
-                    )}
-                  </button>
-                  {refreshed ? (
-                    <span className="text-xs text-freshket-600 font-bold px-3 py-2">✓ Synced</span>
-                  ) : (
-                    <button
-                      onClick={handleRefreshOrgBoard}
-                      disabled={refreshing}
-                      title="Sync employee data from Firestore"
-                      className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all disabled:opacity-60"
-                    >
-                      <svg className={`size-4 ${refreshing ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-                      </svg>
-                      {refreshing ? 'Syncing...' : 'Sync'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
             <OrgBoard
               departments={departments}
               teams={teams}
