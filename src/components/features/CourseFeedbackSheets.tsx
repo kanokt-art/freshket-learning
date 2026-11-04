@@ -113,7 +113,19 @@ export function LearnerFeedbackSheet({ uid, courseId, courseTitle, onClose }: {
   )
 }
 
-type Row = { id: string; uid?: string; rating?: number; comment?: string; text?: string; updatedAt?: Date | string }
+type Row = { id: string; uid?: string; name?: string; rating?: number; comment?: string; text?: string; updatedAt?: Date | string }
+
+// Demo mode has no database: the reader opens with a few made-up learners so the sheet can be seen.
+const ago = (days: number) => new Date(Date.now() - days * 86_400_000)
+const DEMO_FEEDBACK: Row[] = [
+  { id: 'd1', name: 'Somchai (Chai) Chandee', rating: 5, comment: 'เนื้อหาชัดเจนมาก เอาไปใช้คุยกับลูกค้าได้ทันที อยากให้มีตัวอย่างร้านจริงเพิ่ม', updatedAt: ago(1) },
+  { id: 'd2', name: 'Niracha (Nira) Sudjai', rating: 4, comment: 'วิดีโอยาวไปนิดนึง แต่ส่วนสรุปสาระสำคัญช่วยได้เยอะ', updatedAt: ago(3) },
+  { id: 'd3', name: 'Malee (Mali) Sriwong', rating: 3, updatedAt: ago(6) },
+]
+const DEMO_TAKEAWAYS: Row[] = [
+  { id: 't1', name: 'Somchai (Chai) Chandee', text: 'ต้องฟัง Pain ของลูกค้าให้ครบก่อนเสนอสินค้า และสรุปให้ลูกค้ายืนยันทุกครั้ง', updatedAt: ago(1) },
+  { id: 't2', name: 'Niracha (Nira) Sudjai', text: 'รู้ข้อมูลร้านล่วงหน้าทำให้คุยได้ตรงจุดขึ้น จะเตรียม Key to Win ก่อนเข้าพบทุกครั้ง', updatedAt: ago(3) },
+]
 
 const dmy = (d?: Date | string) => {
   if (!d) return ''
@@ -126,12 +138,14 @@ export function FeedbackReaderSheet({ courseId, courseTitle, onClose }: { course
   const where = [{ type: 'where' as const, field: 'courseId', op: '==' as const, value: courseId }]
   // Demo mode has no database behind it: the sheet opens empty.
   const live = !getDemoMode()
-  const { data: feedback } = useFirestoreList<Row>('learnerFeedback', where, live)
-  const { data: takeaways } = useFirestoreList<Row>('takeaways', where, live)
+  const { data: liveFeedback } = useFirestoreList<Row>('learnerFeedback', where, live)
+  const { data: liveTakeaways } = useFirestoreList<Row>('takeaways', where, live)
+  const feedback = live ? liveFeedback : DEMO_FEEDBACK
+  const takeaways = live ? liveTakeaways : DEMO_TAKEAWAYS
   const { data: users } = useAllUsers(live, { includeAll: true })
   const nameOf = useMemo(() => {
     const m = new Map(users.map((u) => [u.uid, formatPersonName(u)] as const))
-    return (uid?: string) => (uid && m.get(uid)) || uid || '—'
+    return (row: Row) => row.name || (row.uid && m.get(row.uid)) || row.uid || '—'
   }, [users])
 
   const rated = feedback.filter((f) => typeof f.rating === 'number')
@@ -167,7 +181,7 @@ export function FeedbackReaderSheet({ courseId, courseTitle, onClose }: { course
           ) : sortNew(feedback).map((f) => (
             <div key={f.id} className="rounded-2xl border border-gray-100 p-4 space-y-1.5">
               <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-sm font-bold text-gray-900">{nameOf(f.uid)}</p>
+                <p className="text-sm font-bold text-gray-900">{nameOf(f)}</p>
                 <span className="text-xs text-gray-400">{dmy(f.updatedAt)}</span>
                 {typeof f.rating === 'number' && <StarsDisplay value={f.rating} className="ml-auto" />}
               </div>
@@ -184,7 +198,7 @@ export function FeedbackReaderSheet({ courseId, courseTitle, onClose }: { course
           ) : sortNew(takeaways).map((t) => (
             <div key={t.id} className="rounded-2xl border border-gray-100 p-4 space-y-1.5">
               <div className="flex items-center gap-2">
-                <p className="text-sm font-bold text-gray-900">{nameOf(t.uid)}</p>
+                <p className="text-sm font-bold text-gray-900">{nameOf(t)}</p>
                 <span className="text-xs text-gray-400">{dmy(t.updatedAt)}</span>
               </div>
               <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{(t.text ?? '').trim() || '—'}</p>

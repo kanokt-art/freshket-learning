@@ -711,7 +711,7 @@ export default function CourseDetailPage() {
 
           {/* Feedback on the course: opens once the learner has finished it */}
           {!isAdmin && user && (() => {
-            const finished = progress.slideDone || serverStatus === 'completed'
+            const finished = progress.slideDone || serverStatus === 'completed' || DEMO_MODE
             return (
               <button
                 type="button"
