@@ -11,6 +11,7 @@ import { useCourse, useCourseTrainingRecords, useAllUsers, useTeams, useDepartme
 import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
 import { formatPersonName } from '@/lib/users/displayName'
 import { StarsDisplay } from '@/components/common/Stars'
+import { LearnerFeedbackSheet, FeedbackReaderSheet } from '@/components/features/CourseFeedbackSheets'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { toStars } from '@/lib/feedback/stars'
 import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
@@ -216,6 +217,8 @@ export default function CourseDetailPage() {
   // the learner can open the notification they got and find it.
   const [leadFeedback, setLeadFeedback] = useState<{ comment?: string; score?: number | null; leadName?: string; updatedAt?: Date } | null>(null)
   const feedbackUid = user?.uid
+  // The feedback sheets: a learner gives theirs; a super_admin reads what learners wrote about the course.
+  const [feedbackSheet, setFeedbackSheet] = useState<'give' | 'read' | null>(null)
   // The panel opens by itself when the learner arrives from the notification (?feedback=1).
   const [feedbackOpen, setFeedbackOpen] = useState(search.get('feedback') === '1')
   // Whether they have already opened it for this feedback: the signal on its handle goes once they have.
@@ -477,6 +480,20 @@ export default function CourseDetailPage() {
           </div>
           <h1 className="text-sm font-bold text-gray-900 truncate">{course.title}</h1>
         </div>
+        {/* Only a super_admin reads what learners wrote about the course */}
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => setFeedbackSheet('read')}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold text-gray-700 hover:border-freshket-300 hover:text-freshket-700 transition-all duration-150"
+          >
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+            </svg>
+            อ่าน Feedback ผู้เรียน
+          </button>
+        )}
+
         {/* Tab switcher — admin/lead only */}
         {isAdmin && (
           <div className="flex items-center gap-0.5 bg-gray-100 rounded-xl p-1 shrink-0">
@@ -609,6 +626,13 @@ export default function CourseDetailPage() {
         )
       })()}
 
+      {feedbackSheet === 'give' && user && (
+        <LearnerFeedbackSheet uid={user.uid} courseId={id} courseTitle={course.title} onClose={() => setFeedbackSheet(null)} />
+      )}
+      {feedbackSheet === 'read' && isSuperAdmin && (
+        <FeedbackReaderSheet courseId={id} courseTitle={course.title} onClose={() => setFeedbackSheet(null)} />
+      )}
+
       {/* ── Results dashboard tab ───────────────────────────────────────── */}
       {isAdmin && tab === 'results' && (
         <CourseResultsDashboard
@@ -684,6 +708,27 @@ export default function CourseDetailPage() {
               </button>
             )
           })}
+
+          {/* Feedback on the course: opens once the learner has finished it */}
+          {!isAdmin && user && (() => {
+            const finished = progress.slideDone || serverStatus === 'completed'
+            return (
+              <button
+                type="button"
+                disabled={!finished}
+                onClick={() => setFeedbackSheet('give')}
+                className="mt-1 flex items-center gap-3 px-3 py-3 rounded-xl text-left border border-dashed border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-freshket-300 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:border-gray-200"
+              >
+                <span className="size-7 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                  <svg className="size-4" viewBox="0 0 24 24" fill="currentColor"><path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" /></svg>
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-xs font-bold truncate">Feedback หลักสูตร</span>
+                  <span className="block text-xs text-gray-400 truncate">{finished ? 'ให้คะแนนและบอกความเห็น' : 'ทำได้หลังเรียนจบ'}</span>
+                </span>
+              </button>
+            )
+          })()}
 
           {/* Course info */}
           <div className="mt-auto pt-4 border-t border-gray-100 space-y-2">

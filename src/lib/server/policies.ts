@@ -306,6 +306,16 @@ const POLICIES: Record<string, Policy> = {
     update: (w) => w.incoming?.uid === w.actor.uid && w.id.startsWith(`${w.actor.uid}_`),
   },
 
+  // A learner's feedback on a course. They write their own, under their own id (so no one can write into
+  // or overwrite someone else's). Reading is cut down in viewOf: a learner sees only their own, a super_admin
+  // sees all, and nobody else — not a team lead, not a manager — sees what a learner wrote about a course.
+  learnerFeedback: {
+    read: staffRead,
+    create: (w) => w.incoming?.uid === w.actor.uid && w.id === `${w.actor.uid}_${String(w.incoming?.courseId ?? '')}`,
+    update: (w) => w.incoming?.uid === w.actor.uid && w.id === `${w.actor.uid}_${String(w.incoming?.courseId ?? '')}`,
+    delete: (w) => isSuper(w.actor),
+  },
+
   // A lead's comment and score on a member. A lead must sign their own feedback
   // (leadUid is the caller), so one lead cannot silently overwrite another's.
   // super_admin stays unrestricted because impersonation writes as the viewed user.
@@ -349,6 +359,9 @@ const isLearner = (a: Actor) => a.role === 'sale'
  * Teams, courses and the rest pass through untouched.
  */
 export function viewOf(actor: Actor, collection: string, doc: Record<string, unknown> & { id: string }): (Record<string, unknown> & { id: string }) | null {
+  // Feedback on a course: the learner's own, or everything for a super_admin. Applies to every role.
+  if (collection === 'learnerFeedback') return actor.role === 'super_admin' || doc.uid === actor.uid ? doc : null
+
   if (!isLearner(actor)) return doc
 
   if (collection === 'users' && doc.id !== actor.uid) {

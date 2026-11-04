@@ -668,6 +668,18 @@ export const COURSE_FEEDBACK: TableSpec = {
   required: ['course_id'],
 }
 
+/** A learner's own feedback on a course (stars and a comment). Read only by that learner and a super_admin. */
+export const LEARNER_FEEDBACK: TableSpec = {
+  source: 'learnerFeedback', table: 'learner_feedback', keyColumns: ['id'], hasExtra: true,
+  fields: {
+    uid: fText('uid'), courseId: fText('course_id'), courseTitle: fText('course_title'),
+    rating: fInt('rating'), comment: fText('comment'),
+    createdAt: fTs('created_at'), updatedAt: fTs('updated_at'),
+  },
+  uidFields: ['uid'],
+  required: ['uid', 'course_id', 'rating'],
+}
+
 export const SLACK_POSTS: TableSpec = {
   source: 'slackPosts', table: 'slack_posts', keyColumns: ['id'], hasExtra: false,
   fields: {
@@ -706,7 +718,7 @@ export const SPECS: TableSpec[] = [
   TEAMS, COURSES, ASSESSMENTS, ASSESSMENT_SESSIONS, ASSESSMENT_ATTEMPTS, TRAINING_RECORDS,
   USER_STATS, USER_BUCKET_RESULTS, TOOLS, KNOWLEDGE_DECKS, CUISINE_GUIDES, MANDATORY_ITEMS,
   ANNOUNCEMENTS, RESOURCES, CSV_IMPORTS, APP_CONFIG, ASSESSMENT_SCORES, SHADOW_RECORDS,
-  SHADOW_ACKNOWLEDGMENTS, ROLEPLAY_ASSESSMENTS, TAKEAWAYS, COURSE_FEEDBACK, SLACK_POSTS, NOTIFICATIONS,
+  SHADOW_ACKNOWLEDGMENTS, ROLEPLAY_ASSESSMENTS, TAKEAWAYS, COURSE_FEEDBACK, LEARNER_FEEDBACK, SLACK_POSTS, NOTIFICATIONS,
 ]
 
 const BY_COLLECTION = new Map<string, TableSpec>([USERS, ...SPECS].map((s) => [s.source, s]))
