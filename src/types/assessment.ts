@@ -62,6 +62,8 @@ export interface Assessment {
   antiCheatEnabled?: boolean
   /** May a learner who failed sit it again? On unless this is exactly false. */
   allowRetakeOnFail?: boolean
+  /** What a learner sees of their answers after submitting; absent = every question (see lib/assessment/reveal.ts). */
+  revealMode?: 'none' | 'correct' | 'wrong' | 'all'
   answerViewMode?: QuizAnswerViewMode
   createdAt: Date
   updatedAt: Date

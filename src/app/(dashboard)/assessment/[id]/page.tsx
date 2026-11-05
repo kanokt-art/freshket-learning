@@ -8,6 +8,7 @@ import { getDemoMode } from '@/lib/demo/demoMode'
 import { MOCK_ASSESSMENTS } from '@/lib/utils/mockData'
 import { gradeSubmission, sanitizeQuestion } from '@/lib/assessment/grade'
 import { quizBriefing, formatMinutes, type QuizBriefing } from '@/lib/assessment/briefing'
+import { normalizeRevealMode, revealResults, type RevealMode } from '@/lib/assessment/reveal'
 import { get as getDoc } from '@/lib/data/collection'
 import type { Question, DragPair, Assessment } from '@/types/assessment'
 
@@ -66,6 +67,8 @@ export interface SubmitResult {
   pointsEarned: number
   pointsPossible: number
   attemptNumber: number
+  /** How much of the key the quiz shows (the server has already cut `results` to it). */
+  revealMode?: RevealMode
   results: {
     questionId: string
     correct: boolean | null
@@ -379,13 +382,14 @@ export default function TakeAssessmentPage() {
         pointsEarned: graded.pointsEarned,
         pointsPossible: graded.pointsPossible,
         attemptNumber: 1,
-        results: graded.answers.map((a) => ({
+        revealMode: normalizeRevealMode(previewSource?.revealMode),
+        results: revealResults(graded.answers.map((a) => ({
           questionId: a.questionId,
           correct: a.correct,
           pointsEarned: a.pointsEarned,
           pointsPossible: a.pointsPossible,
           correctLabel: source.find((q) => q.id === a.questionId)?.choices?.find((c) => c.isCorrect)?.text ?? '',
-        })),
+        })), normalizeRevealMode(previewSource?.revealMode)),
       })
       if (returnCtx) sessionStorage.removeItem('assessment_return')
       setSubmitted(true)
@@ -606,6 +610,8 @@ export default function TakeAssessmentPage() {
         result={submitResult}
         onBack={handleBack}
         fromCourse={!!returnCtx}
+        stage={returnCtx?.step}
+        canRetry={assessment.allowRetakeOnFail !== false}
       />
       </div>
     )
@@ -1076,6 +1082,8 @@ function ResultScreen({
   result,
   onBack,
   fromCourse,
+  stage,
+  canRetry,
 }: {
   score: number
   passingScore: number
@@ -1086,30 +1094,75 @@ function ResultScreen({
   result: SubmitResult | null
   onBack: () => void
   fromCourse?: boolean
+  /** Before or after the course, when the quiz was opened from one. */
+  stage?: 'pre' | 'post'
+  /** The quiz lets someone who did not pass sit it again. */
+  canRetry?: boolean
 }) {
   const passed = result ? result.passed : score >= passingScore
   const verdictByQuestion = new Map(
     (result?.results ?? []).map((r) => [r.questionId, r]),
   )
   const openEndedCount = questions.filter((q) => q.type === 'open_ended').length
+  const mode = normalizeRevealMode(result?.revealMode)
+  // Which questions the review lists: all of them, or only the ones this quiz chooses to reveal.
+  const reviewed = mode === 'none' ? [] : questions.filter((q) => verdictByQuestion.has(q.id))
+  const reviewTitle = mode === 'correct' ? 'ข้อที่คุณตอบถูก' : mode === 'wrong' ? 'ข้อที่ควรทบทวน' : 'สรุปคำตอบ'
+
+  // "12/15 คะแนน": points won out of the points that could be won. A quiz of written answers only has none to
+  // count, so it shows the percentage alone.
+  const earned = result?.pointsEarned
+  const possible = result?.pointsPossible ?? 0
+  const hasPoints = earned !== undefined && possible > 0
+  const when = stage === 'pre' ? 'ก่อนเรียน' : stage === 'post' ? 'หลังเรียน' : ''
+  // A before-the-course score is a starting point, not a verdict, so it is always celebrated as one.
+  const celebrate = stage === 'pre' || passed
+  const heading = stage === 'pre'
+    ? 'เยี่ยมมาก! ทำแบบทดสอบก่อนเรียนเสร็จแล้ว'
+    : passed ? 'ยินดีด้วย! คุณผ่านแบบทดสอบ' : 'ยังไม่ผ่านในครั้งนี้'
+  const message = stage === 'pre'
+    ? 'เก็บคะแนนนี้ไว้เทียบ — เมื่อเรียนจบจะได้ทำอีกครั้งเพื่อดูว่าคุณพัฒนาขึ้นแค่ไหน'
+    : passed
+      ? 'คะแนนของคุณผ่านเกณฑ์แล้ว เก่งมาก ไปต่อได้เลย'
+      : canRetry
+        ? 'ไม่เป็นไร ทบทวนเนื้อหาอีกครั้งแล้วลองใหม่ได้ ทุกครั้งที่ทำจะบันทึกไว้'
+        : 'แบบทดสอบนี้ไม่เปิดให้ทำซ้ำ หากต้องการทำใหม่ ให้ติดต่อ Admin'
 
   return (
     <div className="flex flex-col h-full bg-white overflow-auto">
+      {celebrate && <Confetti />}
       <div className="max-w-lg mx-auto w-full p-6 space-y-5">
 
         {/* Score card */}
         <div className="animate-pop-in bg-white rounded-3xl border border-gray-100 shadow-md p-8 text-center">
-          {/* Score circle */}
-          <div className={`size-24 rounded-full border-4 flex items-center justify-center mx-auto mb-4 ${
-            passed ? 'border-freshket-500 bg-freshket-50' : 'border-rose-400 bg-rose-50'
-          }`}>
-            <span className={`text-3xl font-bold ${passed ? 'text-freshket-600' : 'text-rose-600'}`}>{score}</span>
-          </div>
-          <p className={`text-lg font-bold ${passed ? 'text-freshket-600' : 'text-rose-600'}`}>
-            {passed ? 'ผ่านแบบทดสอบ!' : 'ยังไม่ผ่าน'}
-          </p>
+          <p className="text-lg font-bold text-gray-900">{heading}</p>
           <p className="text-sm text-gray-500 mt-1">
-            คะแนน {score} / 100 · เกณฑ์ผ่าน {passingScore}%
+            {when ? `คะแนนแบบทดสอบ${when}ของคุณคือ` : 'คะแนนของคุณคือ'}
+          </p>
+
+          {/* Two-tone score disc */}
+          <div className="relative size-36 rounded-full overflow-hidden mx-auto my-5 shadow-sm" role="img"
+            aria-label={hasPoints ? `${earned} จาก ${possible} คะแนน` : `${score} เปอร์เซ็นต์`}>
+            <div className={`absolute inset-x-0 top-0 h-1/2 ${passed ? 'bg-freshket-700' : 'bg-rose-700'}`} />
+            <div className={`absolute inset-x-0 bottom-0 h-1/2 ${passed ? 'bg-freshket-500' : 'bg-rose-400'}`} />
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
+              {hasPoints ? (
+                <>
+                  <span className="text-4xl font-extrabold leading-none tabular-nums">{earned}<span className="text-2xl font-bold opacity-80">/{possible}</span></span>
+                  <span className="text-xs font-bold mt-1.5 opacity-90">คะแนน</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-4xl font-extrabold leading-none tabular-nums">{score}<span className="text-2xl font-bold opacity-80">%</span></span>
+                  <span className="text-xs font-bold mt-1.5 opacity-90">คะแนน</span>
+                </>
+              )}
+            </div>
+          </div>
+
+          <p className="text-sm text-gray-600 leading-relaxed">{message}</p>
+          <p className="text-xs text-gray-400 mt-2">
+            {hasPoints ? `ได้ ${score}% · ` : ''}เกณฑ์ผ่าน {passingScore}%
           </p>
           {openEndedCount > 0 && (
             <p className="text-xs text-amber-600 mt-2 bg-amber-50 px-3 py-1.5 rounded-full inline-block">
@@ -1118,10 +1171,12 @@ function ResultScreen({
           )}
         </div>
 
-        {/* Answer review */}
+        {/* Answer review — only what this quiz chooses to reveal */}
+        {reviewed.length > 0 && (
         <div className="space-y-3">
-          <p className="text-xs font-bold text-gray-500">สรุปคำตอบ</p>
-          {questions.map((q, i) => {
+          <p className="text-xs font-bold text-gray-500">{reviewTitle}</p>
+          {reviewed.map((q) => {
+            const i = questions.indexOf(q)
             const ans = answers[q.id]
             // Verdict and the revealed answer both come from the server response.
             // The sanitized question this page holds has no key to check against.
@@ -1170,6 +1225,7 @@ function ResultScreen({
             )
           })}
         </div>
+        )}
 
         <button onClick={onBack}
           className="w-full py-3 rounded-xl text-sm font-bold bg-freshket-500 text-white hover:bg-freshket-600 transition-all">
@@ -1179,3 +1235,43 @@ function ResultScreen({
     </div>
   )
 }
+
+// A few seconds of paper falling over the page, once. Pure CSS (see .confetti-piece in globals.css), drawn
+// only on the client after the quiz is submitted, and switched off for anyone who asks for less motion.
+const CONFETTI_COLORS = ['#00ce7c', '#00a862', '#fbbf24', '#60a5fa', '#f472b6', '#a78bfa', '#fb923c']
+function Confetti() {
+  const [visible, setVisible] = useState(true)
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(false), 6500)
+    return () => clearTimeout(t)
+  }, [])
+  // Positions come from the index, not Math.random(), so the pieces are the same on every render.
+  const pieces = Array.from({ length: 44 }, (_, i) => ({
+    left: (i * 37) % 100,
+    delay: ((i * 13) % 10) / 12,
+    duration: 2.6 + ((i * 7) % 12) / 6,
+    size: 6 + (i % 4) * 2,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    round: i % 3 === 0,
+    sway: (i % 2 === 0 ? 1 : -1) * (20 + (i % 5) * 12),
+  }))
+  if (!visible) return null
+  return (
+    <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden" aria-hidden="true">
+      {pieces.map((p, i) => (
+        <span key={i} className="confetti-piece"
+          style={{
+            left: `${p.left}%`,
+            width: p.size,
+            height: p.round ? p.size : p.size * 1.8,
+            background: p.color,
+            borderRadius: p.round ? '9999px' : '2px',
+            animationDuration: `${p.duration}s`,
+            animationDelay: `${p.delay}s`,
+            ['--sway' as string]: `${p.sway}px`,
+          }} />
+      ))}
+    </div>
+  )
+}
+

@@ -16,9 +16,11 @@ import {
   type DragPair,
 } from '@/types/assessment'
 import { save, remove, patch } from '@/lib/data/collection'
-import { alertError } from '@/lib/ui/alert'
+import { alertError, confirmAction } from '@/lib/ui/alert'
 import { parseFormJson, type ImportResult } from '@/lib/assessment/importFormJson'
 import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
+import { duplicateKeys, hasDuplicateAnswers, normalizeText } from '@/lib/assessment/authoring'
+import { REVEAL_MODES, normalizeRevealMode, type RevealMode } from '@/lib/assessment/reveal'
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
 
@@ -469,7 +471,12 @@ function AssessmentEditor({
   const [isPublished, setIsPublished] = useState(initial?.isPublished ?? false)
   // On unless the admin turns it off: a learner who fails may sit it again.
   const [allowRetakeOnFail, setAllowRetakeOnFail] = useState(initial?.allowRetakeOnFail !== false)
+  // What a learner sees of their answers once they submit.
+  const [revealMode, setRevealMode] = useState<RevealMode>(normalizeRevealMode(initial?.revealMode))
   const [questions, setQuestions] = useState<Question[]>(initial?.questions ?? [])
+  // Drag-to-reorder: the question being dragged and the one it is over.
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
   const [googleFormUrl, setGoogleFormUrl] = useState(initial?.googleFormUrl ?? '')
   const [saving, setSaving] = useState(false)
   const [titleErr, setTitleErr] = useState('')
@@ -515,6 +522,41 @@ function AssessmentEditor({
       return next.map((q, i) => ({ ...q, order: i + 1 }))
     })
   }
+  function moveQuestion(fromId: string, toId: string) {
+    if (fromId === toId) return
+    setQuestions((prev) => {
+      const from = prev.findIndex((q) => q.id === fromId)
+      const to = prev.findIndex((q) => q.id === toId)
+      if (from < 0 || to < 0) return prev
+      const next = [...prev]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      return next.map((q, i) => ({ ...q, order: i + 1 }))
+    })
+  }
+  function shiftQuestion(id: string, delta: -1 | 1) {
+    const idx = questions.findIndex((q) => q.id === id)
+    const target = questions[idx + delta]
+    if (idx >= 0 && target) moveQuestion(id, target.id)
+  }
+
+  // A Google Form replaces the questions built here. Switching to it with questions in the editor asks first,
+  // so a draft is not lost by a stray click (the questions stay until the quiz is saved as a form).
+  async function chooseMode(next: AssessmentMode) {
+    if (next === mode) return
+    if (next === 'google_form' && questions.length > 0) {
+      const ok = await confirmAction({
+        title: 'แนบ Google Form แทนคำถามที่สร้างไว้?',
+        text: `ตอนนี้มีคำถาม ${questions.length} ข้อในแบบทดสอบนี้ เมื่อบันทึกเป็น Google Form คำถามเหล่านี้จะถูกลบ ถ้าต้องการเก็บไว้ ให้กดยกเลิกแล้วใช้ "นำเข้าจาก Google Form" แทน`,
+        confirmText: 'ใช่ ใช้ Google Form',
+        cancelText: 'ยกเลิก',
+        danger: true,
+      })
+      if (!ok) return
+    }
+    setMode(next)
+  }
+
   function updateQuestion(id: string, patch: Partial<Question>) {
     setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, ...patch } : q)))
     setQuestionErrors((prev) => {
@@ -527,6 +569,16 @@ function AssessmentEditor({
   const handleSave = useCallback(async () => {
     if (!title.trim()) { setTitleErr('กรุณากรอกชื่อแบบทดสอบ'); return }
     if (mode === 'google_form' && !googleFormUrl.trim()) { setFormUrlErr('กรุณากรอก URL ของ Google Form'); return }
+    if (mode === 'google_form' && questions.length > 0) {
+      const ok = await confirmAction({
+        title: `บันทึกเป็น Google Form และลบคำถาม ${questions.length} ข้อ?`,
+        text: 'คำถามที่สร้างไว้ในแบบทดสอบนี้จะหายไปและกู้คืนไม่ได้',
+        confirmText: 'บันทึกและลบคำถาม',
+        cancelText: 'กลับไปแก้ไข',
+        danger: true,
+      })
+      if (!ok) return
+    }
 
     if (mode === 'builder') {
       const errors: Record<string, { noText?: boolean; noCorrect?: boolean }> = {}
@@ -550,6 +602,7 @@ function AssessmentEditor({
         isPublished,
         passingScore: Number(passingScore) || 70,
         allowRetakeOnFail,
+        revealMode,
         createdBy: userId,
       }
       if (DEMO_MODE) {
@@ -571,32 +624,96 @@ function AssessmentEditor({
     } finally {
       setSaving(false)
     }
-  }, [title, description, passingScore, allowRetakeOnFail, isPublished, questions, googleFormUrl, mode, userId, initial, onSave])
+  }, [title, description, passingScore, allowRetakeOnFail, revealMode, isPublished, questions, googleFormUrl, mode, userId, initial, onSave])
+
+  const dupQuestionCount = mode === 'builder' ? questions.filter(hasDuplicateAnswers).length : 0
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="animate-pop-in bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl max-h-[92vh] flex flex-col">
+    <div className="fixed inset-0 bg-slate-50 z-50 flex flex-col">
+      <div className="animate-pop-in flex flex-col flex-1 min-h-0">
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
-          <h2 className="font-bold text-gray-900">{initial ? 'แก้ไขแบบทดสอบ' : 'สร้างแบบทดสอบใหม่'}</h2>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 mr-2">
-              <span className="text-xs text-gray-500">{isPublished ? 'Published' : 'Draft'}</span>
-              <button type="button" onClick={() => setIsPublished((v) => !v)}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${isPublished ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${isPublished ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-              </button>
-            </div>
-            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
+        {/* Header: title, publish, save */}
+        <div className="flex items-center justify-between gap-3 px-6 py-3 bg-white border-b border-gray-100 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <button onClick={onClose} aria-label="ปิด" className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
               <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
+            <h2 className="font-bold text-gray-900 truncate">{initial ? 'แก้ไขแบบทดสอบ' : 'สร้างแบบทดสอบใหม่'}</h2>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-500">{isPublished ? 'Published' : 'Draft'}</span>
+              <button type="button" role="switch" aria-checked={isPublished} aria-label="เผยแพร่" onClick={() => setIsPublished((v) => !v)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${isPublished ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${isPublished ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-normal text-gray-600 hover:text-gray-800 rounded-xl hover:bg-gray-100 transition-all">
+              ยกเลิก
+            </button>
+            <button onClick={handleSave} disabled={saving}
+              className="flex items-center gap-2 px-5 py-2 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all disabled:opacity-60">
+              {saving
+                ? <span className="size-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                : <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+              }
+              {saving ? 'กำลังบันทึก...' : 'บันทึก'}
+            </button>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+        {/* Quiz settings, kept at the top where they are seen before the questions */}
+        <div className="bg-white border-b border-gray-100 px-6 py-3 shrink-0">
+          <div className="max-w-5xl mx-auto flex flex-wrap items-center gap-x-6 gap-y-3">
+            <label className="flex items-center gap-2 text-xs font-bold text-gray-600">
+              เกณฑ์ผ่าน (%)
+              <input type="number" min={0} max={100} value={passingScore} onChange={(e) => setPassingScore(e.target.value)}
+                className="w-16 px-2.5 py-1.5 text-sm font-normal rounded-lg border border-gray-200 hover:border-freshket-500 focus:outline-none focus:border-freshket-500"
+              />
+            </label>
+
+            {mode === 'builder' && (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-gray-600">ทำซ้ำได้เมื่อสอบไม่ผ่าน</span>
+                  <button type="button" role="switch" aria-checked={allowRetakeOnFail} aria-label="อนุญาตให้ทำซ้ำเมื่อสอบไม่ผ่าน"
+                    title={allowRetakeOnFail ? 'ผู้เรียนที่ไม่ผ่านทำใหม่ได้ และบันทึกคะแนนทุกครั้ง' : 'ปิดอยู่: ผู้เรียนที่ไม่ผ่านจะทำซ้ำไม่ได้ (ต้องให้ Admin ล้างประวัติ)'}
+                    onClick={() => setAllowRetakeOnFail((v) => !v)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 shrink-0 ${allowRetakeOnFail ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                    <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${allowRetakeOnFail ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-gray-600">การเฉลย</span>
+                  <div className="flex gap-0.5 p-0.5 bg-gray-100 rounded-lg" role="radiogroup" aria-label="การเฉลยหลังทำเสร็จ">
+                    {REVEAL_MODES.map((m) => (
+                      <button key={m.value} type="button" role="radio" aria-checked={revealMode === m.value} title={m.hint}
+                        onClick={() => setRevealMode(m.value)}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${revealMode === m.value ? 'bg-white text-freshket-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {dupQuestionCount > 0 && (
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                </svg>
+                ตัวเลือกซ้ำกัน {dupQuestionCount} ข้อ
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+        <div className="max-w-5xl mx-auto p-6 space-y-5">
 
           {/* Meta */}
           <div className="space-y-3">
@@ -604,43 +721,18 @@ function AssessmentEditor({
               <label className="text-xs font-bold text-gray-600 block mb-1.5">ชื่อแบบทดสอบ <span className="text-rose-500">*</span></label>
               <input type="text" value={title} onChange={(e) => { setTitle(e.target.value); setTitleErr('') }}
                 placeholder="เช่น ทดสอบก่อนเรียน Product Knowledge"
-                className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 hover:border-freshket-500 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300"
+                className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white hover:border-freshket-500 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300"
               />
               {titleErr && <p className="text-xs text-rose-500 mt-1">{titleErr}</p>}
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2">
-                <label className="text-xs font-bold text-gray-600 block mb-1.5">คำอธิบาย</label>
-                <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
-                  placeholder="วัตถุประสงค์ของแบบทดสอบนี้..."
-                  className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 hover:border-freshket-500 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1.5">เกณฑ์ผ่าน (%)</label>
-                <input type="number" min={0} max={100} value={passingScore} onChange={(e) => setPassingScore(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 hover:border-freshket-500 focus:outline-none focus:border-freshket-500"
-                />
-              </div>
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1.5">คำอธิบาย</label>
+              <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
+                placeholder="วัตถุประสงค์ของแบบทดสอบนี้..."
+                className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white hover:border-freshket-500 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300"
+              />
             </div>
           </div>
-
-          {/* Retake after failing — on by default; off means one go, a failed learner cannot sit it again */}
-          {mode === 'builder' && (
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 px-4 py-3">
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-gray-700">อนุญาตให้ทำซ้ำเมื่อสอบไม่ผ่าน</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {allowRetakeOnFail ? 'ผู้เรียนที่ไม่ผ่านทำใหม่ได้ และบันทึกคะแนนทุกครั้ง' : 'ปิดอยู่: ผู้เรียนที่ไม่ผ่านจะทำซ้ำไม่ได้ (ต้องให้ Admin ล้างประวัติ)'}
-                </p>
-              </div>
-              <button type="button" role="switch" aria-checked={allowRetakeOnFail} aria-label="อนุญาตให้ทำซ้ำเมื่อสอบไม่ผ่าน"
-                onClick={() => setAllowRetakeOnFail((v) => !v)}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 shrink-0 ${allowRetakeOnFail ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${allowRetakeOnFail ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-              </button>
-            </div>
-          )}
 
           {/* Mode toggle */}
           <div>
@@ -648,7 +740,7 @@ function AssessmentEditor({
             <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
               <button
                 type="button"
-                onClick={() => setMode('builder')}
+                onClick={() => void chooseMode('builder')}
                 className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-all ${
                   mode === 'builder' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                 }`}
@@ -660,7 +752,7 @@ function AssessmentEditor({
               </button>
               <button
                 type="button"
-                onClick={() => setMode('google_form')}
+                onClick={() => void chooseMode('google_form')}
                 className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-all ${
                   mode === 'google_form' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                 }`}
@@ -715,9 +807,24 @@ function AssessmentEditor({
               </div>
 
               {questions.map((q, idx) => (
-                <QuestionEditor key={q.id} question={q} index={idx} error={questionErrors[q.id]}
-                  onChange={(patch) => updateQuestion(q.id, patch)}
-                  onRemove={() => removeQuestion(q.id)} onDuplicate={() => duplicateQuestion(q.id)} />
+                <div key={q.id}
+                  onDragOver={(e) => { if (dragId) { e.preventDefault(); if (overId !== q.id) setOverId(q.id) } }}
+                  onDrop={(e) => { e.preventDefault(); if (dragId) moveQuestion(dragId, q.id); setDragId(null); setOverId(null) }}
+                  className={`rounded-2xl transition-all ${dragId === q.id ? 'opacity-40' : ''} ${dragId && overId === q.id && dragId !== q.id ? 'ring-2 ring-freshket-400 ring-offset-2' : ''}`}>
+                  <QuestionEditor question={q} index={idx} error={questionErrors[q.id]}
+                    isFirst={idx === 0} isLast={idx === questions.length - 1}
+                    onMove={(delta) => shiftQuestion(q.id, delta)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = 'move'
+                      e.dataTransfer.setData('text/plain', q.id)
+                      const card = (e.currentTarget as HTMLElement).closest('[data-question-card]')
+                      if (card) e.dataTransfer.setDragImage(card, 24, 24)
+                      setDragId(q.id)
+                    }}
+                    onDragEnd={() => { setDragId(null); setOverId(null) }}
+                    onChange={(patch) => updateQuestion(q.id, patch)}
+                    onRemove={() => removeQuestion(q.id)} onDuplicate={() => duplicateQuestion(q.id)} />
+                </div>
               ))}
 
               <div className="flex flex-wrap gap-2 pt-1">
@@ -735,20 +842,6 @@ function AssessmentEditor({
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3 shrink-0">
-          <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm font-normal text-gray-600 hover:text-gray-800 rounded-xl hover:bg-gray-100 transition-all">
-            ยกเลิก
-          </button>
-          <button onClick={handleSave} disabled={saving}
-            className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all disabled:opacity-60">
-            {saving
-              ? <span className="size-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              : <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-            }
-            {saving ? 'กำลังบันทึก...' : 'บันทึก'}
-          </button>
         </div>
       </div>
 
@@ -767,6 +860,11 @@ function QuestionEditor({
   question,
   index,
   error,
+  isFirst,
+  isLast,
+  onMove,
+  onDragStart,
+  onDragEnd,
   onChange,
   onRemove,
   onDuplicate,
@@ -774,10 +872,20 @@ function QuestionEditor({
   question: Question
   index: number
   error?: { noText?: boolean; noCorrect?: boolean }
+  isFirst: boolean
+  isLast: boolean
+  onMove: (delta: -1 | 1) => void
+  onDragStart: (e: React.DragEvent<HTMLElement>) => void
+  onDragEnd: () => void
   onChange: (patch: Partial<Question>) => void
   onRemove: () => void
   onDuplicate: () => void
 }) {
+  // The same answer written twice, which a learner could not tell apart and an admin rarely means.
+  const dupChoices = duplicateKeys((question.choices ?? []).map((c) => c.text))
+  const dupLeft = duplicateKeys((question.dragPairs ?? []).map((p) => p.left))
+  const dupRight = duplicateKeys((question.dragPairs ?? []).map((p) => p.right))
+  const isDupChoice = (t: string) => dupChoices.has(normalizeText(t))
   function updateChoice(id: string, patch: Partial<Choice>) {
     onChange({ choices: question.choices?.map((c) => (c.id === id ? { ...c, ...patch } : c)) })
   }
@@ -805,11 +913,33 @@ function QuestionEditor({
   const hasError = !!error?.noText || !!error?.noCorrect
 
   return (
-    <div className={`bg-white rounded-2xl border shadow-sm transition-all p-5 space-y-4 ${
+    <div data-question-card className={`bg-white rounded-2xl border shadow-sm transition-all p-5 space-y-4 ${
       hasError ? 'border-rose-300' : 'border-gray-200 hover:border-freshket-300'
     }`}>
       {/* Header row */}
       <div className="flex items-center gap-3">
+        {/* Grab here to drag the question to another place; the arrows do the same a step at a time */}
+        <div className="flex items-center gap-0.5 -ml-1.5">
+          <button type="button" draggable onDragStart={onDragStart} onDragEnd={onDragEnd}
+            aria-label="ลากเพื่อสลับลำดับข้อ" title="ลากเพื่อสลับลำดับข้อ"
+            className="p-1 rounded-lg text-gray-300 hover:text-gray-500 hover:bg-gray-100 cursor-grab active:cursor-grabbing transition-colors">
+            <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="9" cy="6" r="1.5" /><circle cx="15" cy="6" r="1.5" />
+              <circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
+              <circle cx="9" cy="18" r="1.5" /><circle cx="15" cy="18" r="1.5" />
+            </svg>
+          </button>
+          <div className="flex flex-col">
+            <button type="button" onClick={() => onMove(-1)} disabled={isFirst} aria-label="เลื่อนขึ้น" title="เลื่อนขึ้น"
+              className="text-gray-300 hover:text-gray-600 disabled:opacity-30 disabled:hover:text-gray-300 transition-colors">
+              <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" /></svg>
+            </button>
+            <button type="button" onClick={() => onMove(1)} disabled={isLast} aria-label="เลื่อนลง" title="เลื่อนลง"
+              className="text-gray-300 hover:text-gray-600 disabled:opacity-30 disabled:hover:text-gray-300 transition-colors">
+              <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+            </button>
+          </div>
+        </div>
         <span className="text-sm font-bold text-gray-800">
           ข้อที่ {index + 1}<span className="text-rose-500">*</span>
         </span>
@@ -889,7 +1019,7 @@ function QuestionEditor({
               </button>
               <input type="text" value={choice.text} onChange={(e) => updateChoice(choice.id, { text: e.target.value })}
                 placeholder={`ตัวเลือกที่ ${i + 1}`}
-                className="flex-1 px-3.5 py-2.5 text-sm rounded-lg border border-gray-200 bg-white focus:outline-none hover:border-freshket-500 focus:border-freshket-500 placeholder:text-gray-300"
+                className={`flex-1 px-3.5 py-2.5 text-sm rounded-lg border bg-white focus:outline-none placeholder:text-gray-300 ${isDupChoice(choice.text) ? 'border-amber-400 bg-amber-50/40 focus:border-amber-500' : 'border-gray-200 hover:border-freshket-500 focus:border-freshket-500'}`}
               />
               {(question.choices?.length ?? 0) > 2 && (
                 <button onClick={() => removeChoice(choice.id)} className="p-1 text-gray-400 hover:text-rose-500 transition-colors">
@@ -900,6 +1030,14 @@ function QuestionEditor({
               )}
             </div>
           ))}
+          {dupChoices.size > 0 && (
+            <p className="text-xs text-amber-700 flex items-center gap-1">
+              <svg className="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+              มีตัวเลือกที่เหมือนกัน ({Array.from(dupChoices).map((t) => `"${t}"`).join(', ')}) — ตรวจการสะกดอีกครั้ง
+            </p>
+          )}
           {error?.noCorrect && (
             <p className="text-xs text-rose-500 flex items-center gap-1">
               <svg className="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -935,11 +1073,11 @@ function QuestionEditor({
           {question.dragPairs?.map((pair) => (
             <div key={pair.id} className="grid grid-cols-2 gap-2 items-center">
               <input type="text" value={pair.left} onChange={(e) => updatePair(pair.id, { left: e.target.value })}
-                placeholder="รายการ..." className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none hover:border-freshket-500 focus:border-freshket-500 placeholder:text-gray-300"
+                placeholder="รายการ..." className={`px-3 py-1.5 text-xs rounded-lg border bg-white focus:outline-none placeholder:text-gray-300 ${dupLeft.has(normalizeText(pair.left)) ? 'border-amber-400 bg-amber-50/40' : 'border-gray-200 hover:border-freshket-500 focus:border-freshket-500'}`}
               />
               <div className="flex gap-1.5 items-center">
                 <input type="text" value={pair.right} onChange={(e) => updatePair(pair.id, { right: e.target.value })}
-                  placeholder="คู่ที่ถูก..." className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white focus:outline-none hover:border-freshket-500 focus:border-freshket-500 placeholder:text-gray-300"
+                  placeholder="คู่ที่ถูก..." className={`flex-1 px-3 py-1.5 text-xs rounded-lg border bg-white focus:outline-none placeholder:text-gray-300 ${dupRight.has(normalizeText(pair.right)) ? 'border-amber-400 bg-amber-50/40' : 'border-gray-200 hover:border-freshket-500 focus:border-freshket-500'}`}
                 />
                 {(question.dragPairs?.length ?? 0) > 2 && (
                   <button onClick={() => removePair(pair.id)} className="p-1 text-gray-400 hover:text-rose-500 transition-colors shrink-0">
@@ -951,6 +1089,9 @@ function QuestionEditor({
               </div>
             </div>
           ))}
+          {(dupLeft.size > 0 || dupRight.size > 0) && (
+            <p className="text-xs text-amber-700">มีรายการที่เหมือนกัน — ตรวจการสะกดอีกครั้ง</p>
+          )}
           <button onClick={addPair} className="text-xs text-freshket-600 font-normal hover:underline">
             + เพิ่มคู่
           </button>
@@ -1002,7 +1143,7 @@ function ImportFromFormModal({ onCancel, onImport }: {
             <li>เปิด Google Form → เมนู ⋮ มุมขวาบน → <span className="font-bold">Apps Script</span></li>
             <li>วางไฟล์ <span className="font-mono text-freshket-700">FormToQuestions.gs</span> (อยู่ใน docs/apps-script) แล้วบันทึก</li>
             <li>กด Run ที่ฟังก์ชัน <span className="font-mono text-freshket-700">exportQuestions</span> แล้วอนุญาตสิทธิ์</li>
-            <li>เปิด View → Logs แล้วคัดลอก JSON ที่อยู่ระหว่างบรรทัด <span className="font-mono">=====</span></li>
+            <li>เปิดลิงก์เอกสาร Google Docs ที่ปรากฏใน Log (ที่เก็บ JSON ไว้) แล้วกด Ctrl+A, Ctrl+C</li>
           </ol>
 
           <div>

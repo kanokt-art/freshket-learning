@@ -291,3 +291,19 @@
 .animate-pop-in {
   animation: pop-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+
+/* Paper falling over the quiz result. Each piece sets its own left, size, colour, duration, delay and --sway. */
+@keyframes confetti-fall {
+  0%   { transform: translate3d(0, -12vh, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate3d(var(--sway, 30px), 108vh, 0) rotate(720deg); opacity: 0.9; }
+}
+.confetti-piece {
+  position: absolute;
+  top: 0;
+  animation-name: confetti-fall;
+  animation-timing-function: cubic-bezier(0.3, 0.1, 0.5, 1);
+  animation-fill-mode: forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .confetti-piece { display: none; }
+}

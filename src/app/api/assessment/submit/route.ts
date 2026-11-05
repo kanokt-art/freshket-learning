@@ -12,6 +12,7 @@ import { teamLeadsOf } from '@/lib/server/teamLeads'
 import { saleTrainers } from '@/lib/server/saleTrainers'
 import { retakeRefusal } from '@/lib/server/retakeGuard'
 import { retakeOnFailBlocked, retakeOnFailRefusal } from '@/lib/server/retakeOnFail'
+import { normalizeRevealMode, revealResults } from '@/lib/assessment/reveal'
 import type { Assessment, Question } from '@/types/assessment'
 import type { Course } from '@/types/course'
 import type { UserProfile } from '@/types/user'
@@ -388,7 +389,9 @@ export async function POST(req: NextRequest) {
       pointsEarned: graded.pointsEarned,
       pointsPossible: graded.pointsPossible,
       attemptNumber,
-      results: graded.answers.map((a) => {
+      // The quiz decides how much of the key the learner gets back; what it does not reveal is not sent.
+      revealMode: normalizeRevealMode(assessment.revealMode),
+      results: revealResults(graded.answers.map((a) => {
         const q = questions.find((x) => x.id === a.questionId)
         const correctChoice = q?.choices?.find((c) => c.isCorrect)
         return {
@@ -398,7 +401,7 @@ export async function POST(req: NextRequest) {
           pointsPossible: a.pointsPossible,
           correctLabel: correctChoice?.text ?? '',
         }
-      }),
+      }), normalizeRevealMode(assessment.revealMode)),
     })
   } catch (err) {
     console.error('assessment/submit failed', err)
