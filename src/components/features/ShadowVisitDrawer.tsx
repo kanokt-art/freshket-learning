@@ -31,7 +31,16 @@ const EVAL_FIELDS: { key: keyof ShadowRecord; label: string; color: string }[] =
   { key: 'beyondClassroom',    label: 'Beyond Classroom',     color: 'bg-teal-100 text-teal-700 border border-teal-200' },
 ]
 
-export function ShadowVisitDrawer({ record, onClose }: { record: ShadowRecord; onClose: () => void }) {
+export function ShadowVisitDrawer({ record, onClose, rating, hideEvaluatorFeedback, children }: {
+  record: ShadowRecord
+  onClose: () => void
+  /** The stars to show in the header when it is not the score written on the visit (the average of its reviews). */
+  rating?: number | null
+  /** The visit's own evaluator note is left out when reviews carry the feedback instead. */
+  hideEvaluatorFeedback?: boolean
+  /** Shown under the visit: the reviews and the form to give one. */
+  children?: React.ReactNode
+}) {
   const mentorName = useMentorName()
   if (typeof document === 'undefined') return null
 
@@ -68,8 +77,8 @@ export function ShadowVisitDrawer({ record, onClose }: { record: ShadowRecord; o
           <div className="flex items-center gap-2 flex-wrap mt-3">
             <span className={`text-xs font-bold px-3 py-1 rounded-full ${SEGMENT_STYLE[record.segment] ?? 'bg-gray-100 text-gray-600'}`}>{record.segment}</span>
             <span className={`text-xs font-bold px-3 py-1 rounded-full ${PERSONA_STYLE[record.persona] ?? 'bg-gray-100 text-gray-600'}`}>{record.persona}</span>
-            {record.ratingScore != null && (
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-50 text-amber-700">{record.ratingScore}/5 ★</span>
+            {(rating ?? record.ratingScore) != null && (
+              <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-50 text-amber-700">{rating ?? record.ratingScore}/5 ★</span>
             )}
           </div>
           <p className="text-xs text-gray-500 mt-2.5">
@@ -80,7 +89,7 @@ export function ShadowVisitDrawer({ record, onClose }: { record: ShadowRecord; o
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-          {record.evaluationFeedback && (
+          {record.evaluationFeedback && !hideEvaluatorFeedback && (
             <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
               <p className="text-xs font-bold text-blue-600 mb-1.5">Evaluator Feedback</p>
               <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{record.evaluationFeedback}</p>
@@ -102,6 +111,7 @@ export function ShadowVisitDrawer({ record, onClose }: { record: ShadowRecord; o
               </div>
             )
           })}
+          {children}
         </div>
       </aside>
     </div>,

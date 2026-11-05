@@ -1,7 +1,7 @@
 import { formatPersonName } from '@/lib/users/displayName'
 import { isActiveEmployee } from '@/lib/users/active'
 import { findSlackIdByEmail, type SlackLookup } from '@/lib/notifications/slackDm'
-import { getTeamLeadIds, type UserProfile } from '@/types/user'
+import { getTeamLeadIds, getTeamManagerIds, type UserProfile } from '@/types/user'
 
 // The Team Lead(s) of a learner's team as team management has them. Used to tag them in the Slack
 // group when the learner finishes something. A lead with a Slack id on file is mentioned; one without is
@@ -49,11 +49,29 @@ export async function teamLeadsOf(
   learner: { teamId?: string; uid?: string },
   lookup: (email: string) => Promise<SlackLookup> = findSlackIdByEmail,
 ): Promise<TeamLeadRef[]> {
+  return teamPeopleOf(store, learner, (team) => getTeamLeadIds(team as never), lookup)
+}
+
+/** The Manager(s) of a learner's team as team management has them; the same rules as teamLeadsOf. */
+export async function teamManagersOf(
+  store: TeamStore,
+  learner: { teamId?: string; uid?: string },
+  lookup: (email: string) => Promise<SlackLookup> = findSlackIdByEmail,
+): Promise<TeamLeadRef[]> {
+  return teamPeopleOf(store, learner, (team) => getTeamManagerIds(team as never), lookup)
+}
+
+async function teamPeopleOf(
+  store: TeamStore,
+  learner: { teamId?: string; uid?: string },
+  idsOf: (team: Doc) => string[],
+  lookup: (email: string) => Promise<SlackLookup>,
+): Promise<TeamLeadRef[]> {
   try {
     if (!learner.teamId) return []
     const team = await store.get('teams', learner.teamId)
     if (!team) return []
-    const ids = getTeamLeadIds(team as never).filter((id) => id !== learner.uid)
+    const ids = idsOf(team).filter((id) => id !== learner.uid)
     if (ids.length === 0) return []
     const people = (await store.getMany('users', ids)) as unknown as UserProfile[]
     const leads: TeamLeadRef[] = []

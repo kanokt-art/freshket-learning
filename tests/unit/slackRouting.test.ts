@@ -151,3 +151,48 @@ describe('dmPeople', () => {
     expect(await dmPeople(store, [], { text: 'x' })).toBe(0)
   })
 })
+
+describe('a Shadow visit and its reviews in the group', () => {
+  const bot = () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    vi.stubEnv('SLACK_TRAINER_CHANNEL_ID', 'C0C1C9GS7N1')
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, body: JSON.parse(String(init.body)) })
+      return new Response(JSON.stringify({ ok: true, ts: '1700000000.000100', channel: 'C0C1C9GS7N1' }))
+    }))
+  }
+
+  it('tags the team lead, the manager and the trainer, and hands back where it posted', async () => {
+    bot()
+    let ref: unknown
+    await postShadowSubmittedToSlack({
+      ...submitted,
+      teamLeads: [{ name: 'Lead', slackUserId: 'U0LEAD0001' }],
+      managers: [{ name: 'Mgr', slackUserId: 'U0MGR00002' }],
+      trainers: [{ name: 'Trainer', slackUserId: 'U0TRN00003' }],
+      onPosted: (r) => { ref = r },
+    })
+    const text = JSON.stringify(calls[0].body.blocks)
+    expect(text).toContain('Team Lead: <@U0LEAD0001>')
+    expect(text).toContain('Manager: <@U0MGR00002>')
+    expect(text).toContain('Sale Trainer: <@U0TRN00003>')
+    expect(ref).toEqual({ channel: 'C0C1C9GS7N1', ts: '1700000000.000100' })
+  })
+
+  it('replies under the visit post and tags the trainer', async () => {
+    bot()
+    await postShadowAckedToSlack({
+      ...acked,
+      trainers: [{ name: 'Trainer', slackUserId: 'U0TRN00003' }],
+      replyTo: { channel: 'C0C1C9GS7N1', ts: '1700000000.000100' },
+    })
+    expect(calls[0].body.thread_ts).toBe('1700000000.000100')
+    expect(JSON.stringify(calls[0].body.blocks)).toContain('Sale Trainer: <@U0TRN00003>')
+  })
+
+  it('posts a review on its own when the visit post cannot be replied to', async () => {
+    bot()
+    await postShadowAckedToSlack(acked)
+    expect(calls[0].body.thread_ts).toBeUndefined()
+  })
+})

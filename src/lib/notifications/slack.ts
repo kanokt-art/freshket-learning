@@ -9,7 +9,7 @@
 // module reads a non-NEXT_PUBLIC_ env var and is only imported from route
 // handlers.
 
-import { sendSlackDm } from '@/lib/notifications/slackDm'
+import { sendSlackDm, sendSlackMessage, type SlackThreadRef } from '@/lib/notifications/slackDm'
 import { slackText } from '@/lib/notifications/slackText'
 import { COURSE_ADDED_PREFIX, COURSE_NEW_PREFIX } from '@/lib/notifications/courseAnnouncement'
 
@@ -63,6 +63,11 @@ function mentionLine(label: string, people: readonly SlackTeamLead[] | undefined
     .map((l) => (l.slackUserId && /^[UW][A-Z0-9]{6,}$/.test(l.slackUserId) ? `<@${l.slackUserId}>` : slackText(l.name)))
     .filter(Boolean)
   return parts.length > 0 ? `${label}: ${parts.join(' ')}` : ''
+}
+
+/** "Manager: @A" — the manager(s) of the learner's team. Same rules as teamLeadLine. */
+export function managerLine(managers: readonly SlackTeamLead[] | undefined): string {
+  return mentionLine('Manager', managers)
 }
 
 export interface SlackCompletionEvent {
@@ -186,10 +191,24 @@ export async function postCourseCompletedToSlack(ev: SlackCourseCompletedEvent):
  * everyone (new course, mandatory reading, take-away) still use the webhook's channel.
  */
 async function postToTeam(payload: { text: string; blocks?: unknown[] }): Promise<boolean> {
+  return (await postToTeamRef(payload)).posted
+}
+
+/**
+ * postToTeam that also says where the message landed (the app can reply under it later; a webhook post
+ * cannot be replied to) and can itself be a reply under an earlier message of the group.
+ */
+async function postToTeamRef(
+  payload: { text: string; blocks?: unknown[] },
+  replyTo?: SlackThreadRef,
+): Promise<{ posted: boolean; ref?: SlackThreadRef }> {
   const channel = process.env.SLACK_TRAINER_CHANNEL_ID?.trim()
-  if (channel && process.env.SLACK_BOT_TOKEN?.trim()) return sendSlackDm(channel, payload)
+  if (channel && process.env.SLACK_BOT_TOKEN?.trim()) {
+    const sent = await sendSlackMessage(replyTo?.channel ?? channel, payload, replyTo?.ts)
+    return { posted: sent.ok, ...(sent.ref ? { ref: sent.ref } : {}) }
+  }
   const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
-  return webhook ? post(webhook, payload) : false
+  return { posted: webhook ? await post(webhook, payload) : false }
 }
 
 /**
@@ -252,6 +271,11 @@ export interface SlackShadowSubmittedEvent {
   shadowUrl?: string
   /** The sender's Team Lead(s), tagged so the one who should review sees it. */
   teamLeads?: SlackTeamLead[]
+  /** The sender's Manager(s) and the Sale Trainer(s), tagged too. */
+  managers?: SlackTeamLead[]
+  trainers?: SlackTeamLead[]
+  /** Told where the post landed, so the reviews can reply under it. */
+  onPosted?: (ref: SlackThreadRef) => void | Promise<void>
 }
 
 /**
@@ -261,10 +285,10 @@ export interface SlackShadowSubmittedEvent {
  */
 export async function postShadowSubmittedToSlack(ev: SlackShadowSubmittedEvent): Promise<boolean> {
   const meta = slackText([ev.position, ev.department].filter(Boolean).join(' · '))
-  const leadLine = teamLeadLine(ev.teamLeads)
+  const leadLine = [teamLeadLine(ev.teamLeads), managerLine(ev.managers), trainerLine(ev.trainers)].filter(Boolean).join('\n')
 
-  return postToTeam({
-    text: `${slackText(ev.observerName)} ส่ง Shadow Visit ใหม่ — รอการประเมิน${leadLine ? ` · ${leadLine}` : ''}`,
+  const sent = await postToTeamRef({
+    text: `${slackText(ev.observerName)} ส่ง Shadow Visit ใหม่ — รอการประเมิน${leadLine ? ` · ${leadLine.replace(/\n/g, ' · ')}` : ''}`,
     blocks: [
       {
         type: 'section',
@@ -290,6 +314,10 @@ export async function postShadowSubmittedToSlack(ev: SlackShadowSubmittedEvent):
         : []),
     ],
   })
+  if (sent.posted && sent.ref && ev.onPosted) {
+    try { await ev.onPosted(sent.ref) } catch (err) { console.error('Slack thread ref not kept', err) }
+  }
+  return sent.posted
 }
 
 export interface SlackCoursePublishedEvent {
@@ -454,6 +482,10 @@ export interface SlackShadowAckedEvent {
   observerName: string
   rating?: number
   shadowUrl?: string
+  /** The Sale Trainer(s), tagged. */
+  trainers?: SlackTeamLead[]
+  /** The visit's post in the group, when the app made it: the review goes under it as a reply. */
+  replyTo?: SlackThreadRef
 }
 
 /**
@@ -463,9 +495,10 @@ export interface SlackShadowAckedEvent {
  */
 export async function postShadowAckedToSlack(ev: SlackShadowAckedEvent): Promise<boolean> {
   const score = typeof ev.rating === 'number' ? ` — ${ev.rating}/5` : ''
+  const trainerText = trainerLine(ev.trainers)
 
-  return postToTeam({
-    text: `${slackText(ev.reviewerName)} ประเมิน Shadow Visit ของ ${slackText(ev.observerName)} แล้ว`,
+  return (await postToTeamRef({
+    text: `${slackText(ev.reviewerName)} ประเมิน Shadow Visit ของ ${slackText(ev.observerName)} แล้ว${trainerText ? ` · ${trainerText}` : ''}`,
     blocks: [
       {
         type: 'section',
@@ -474,6 +507,7 @@ export async function postShadowAckedToSlack(ev: SlackShadowAckedEvent): Promise
           text: `✅ *${slackText(ev.reviewerName)}* ประเมิน Shadow Visit ของ *${slackText(ev.observerName)}* แล้ว${score}`,
         },
       },
+      ...(trainerText ? [{ type: 'section', text: { type: 'mrkdwn', text: trainerText } }] : []),
       ...(ev.shadowUrl
         ? [{
             type: 'actions',
@@ -485,7 +519,7 @@ export async function postShadowAckedToSlack(ev: SlackShadowAckedEvent): Promise
           }]
         : []),
     ],
-  })
+  }, ev.replyTo)).posted
 }
 
 export interface SlackTakeAwayEvent {

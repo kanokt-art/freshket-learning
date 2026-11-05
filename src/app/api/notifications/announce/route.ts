@@ -251,11 +251,18 @@ export async function POST(req: NextRequest) {
 
         const observerDoc = (await store.get('users', visit.observerUid)) as Partial<UserProfile> | null
         const observer = observerDoc ? formatPersonName(observerDoc) : 'พนักงาน'
+        // Under the visit's own post in the group when the app made it, tagging the Sale Trainer.
+        const origin = (await store.get('slackPosts', `shadow_submitted:${recordId}`)) as (Doc & { channel?: string; payload?: { ts?: string } }) | null
+        const replyTo = typeof origin?.channel === 'string' && typeof origin.payload?.ts === 'string'
+          ? { channel: origin.channel, ts: origin.payload.ts }
+          : undefined
         posted = await postShadowAckedToSlack({
           reviewerName: reviewer,
           observerName: observer,
           rating,
           shadowUrl: appUrl('/shadow'),
+          trainers: await saleTrainers(),
+          replyTo,
         })
         if (observerDoc && isSalesDepartment(observerDoc.department)) {
           await notifyTrainers(store, {

@@ -54,27 +54,45 @@ export async function findSlackIdByEmail(email: string): Promise<SlackLookup> {
 const MISS_TTL_MS = 10 * 60 * 1000
 const misses = new Map<string, number>()
 
+/** Where a posted message lives, so a later message can reply under it. */
+export interface SlackThreadRef {
+  channel: string
+  ts: string
+}
+
 /** Send one DM. Posting to a member id lands in the app's direct conversation with that person. */
 export async function sendSlackDm(slackUserId: string, dm: SlackDm): Promise<boolean> {
+  return (await sendSlackMessage(slackUserId, dm)).ok
+}
+
+/**
+ * Post a message through the app, optionally as a reply under an earlier one (threadTs, in the same
+ * channel). Returns where it landed so a later message can reply to it.
+ */
+export async function sendSlackMessage(
+  slackUserId: string,
+  dm: SlackDm,
+  threadTs?: string,
+): Promise<{ ok: boolean; ref?: SlackThreadRef }> {
   const token = process.env.SLACK_BOT_TOKEN?.trim()
-  if (!token || !slackUserId) return false
+  if (!token || !slackUserId) return { ok: false }
   try {
     const res = await fetch('https://slack.com/api/chat.postMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ channel: slackUserId, text: dm.text, blocks: dm.blocks, unfurl_links: false }),
+      body: JSON.stringify({ channel: slackUserId, text: dm.text, blocks: dm.blocks, unfurl_links: false, ...(threadTs ? { thread_ts: threadTs } : {}) }),
       // A hanging Slack must not hold the serverless function open.
       signal: AbortSignal.timeout(5_000),
     })
-    const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null
+    const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; ts?: string; channel?: string } | null
     if (!json?.ok) {
       console.error('Slack DM rejected', json?.error ?? res.status)
-      return false
+      return { ok: false }
     }
-    return true
+    return { ok: true, ...(json.ts && json.channel ? { ref: { channel: json.channel, ts: json.ts } } : {}) }
   } catch (err) {
     console.error('Slack DM failed', err)
-    return false
+    return { ok: false }
   }
 }
 

@@ -2,7 +2,8 @@ import type { Store } from '@/lib/server/store'
 import { formatPersonName } from '@/lib/users/displayName'
 import { slackText } from '@/lib/notifications/slackText'
 import { isSalesDepartment, postShadowSubmittedToSlack } from '@/lib/notifications/slack'
-import { teamLeadsOf } from '@/lib/server/teamLeads'
+import { teamLeadsOf, teamManagersOf } from '@/lib/server/teamLeads'
+import { saleTrainers } from '@/lib/server/saleTrainers'
 import { getTeamLeadIds, type UserProfile } from '@/types/user'
 
 // Telling people about a new Shadow Visit, whichever way it arrived: logged in the app
@@ -76,12 +77,16 @@ export async function announceNewShadowVisit(
   if (!v.force && !isSalesDepartment(v.sender.department)) return false
   if (!(await once(`shadow_submitted:${v.recordId}`, 'shadow_submitted'))) return false
 
+  const learner = { teamId: v.sender.teamId, uid: v.senderUid }
+  const [teamLeads, managers, trainers] = await Promise.all([teamLeadsOf(store, learner), teamManagersOf(store, learner), saleTrainers()])
   return postShadowSubmittedToSlack({
     observerName: who,
     position: v.sender.position,
     department: v.sender.department,
     visitSummary: slackText([...parts, 'รอการประเมิน'].join(' · ')),
     shadowUrl: appUrl(visitPath),
-    teamLeads: await teamLeadsOf(store, { teamId: v.sender.teamId, uid: v.senderUid }),
+    teamLeads, managers, trainers,
+    // Where the post is, so the team lead's and the manager's reviews can reply under it.
+    onPosted: (ref) => store.set('slackPosts', `shadow_submitted:${v.recordId}`, { channel: ref.channel, payload: { ts: ref.ts } }, { merge: true }),
   })
 }

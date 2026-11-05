@@ -5,7 +5,6 @@ import { ShadowReviews } from '@/components/features/ShadowReviews'
 import { groupByRecord, averageRating, type ReviewDoc } from '@/lib/shadow/reviews'
 import { submitShadowReview } from '@/lib/shadow/submitReview'
 import { toStars } from '@/lib/feedback/stars'
-import { answeredQuestions } from '@/lib/shadow/fields'
 import { NO_TEAM, teamChoices, effectiveTeamChoice, matchesTeam } from '@/lib/users/teamFilter'
 import { useState, useMemo, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
@@ -17,6 +16,7 @@ import { useCourses, useTeamTrainingRecords, useAllUsers, useTeams, useShadowRec
 import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
 import { useMentorName } from '@/hooks/useMentorName'
 import { CourseCover } from '@/components/features/CourseCover'
+import { ShadowVisitDrawer } from '@/components/features/ShadowVisitDrawer'
 import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import { OpenableMbtiPill } from '@/components/features/MbtiBadge'
 import { formatPersonName } from '@/lib/users/displayName'
@@ -30,9 +30,8 @@ import { hasContent, latestBySlot, leadReviewId, slotOfReview, type LeadReview, 
 import { canAssessRoleplay as canAssessRoleplayOf } from '@/lib/roleplay/assessForm'
 import { announce } from '@/lib/notifications/announce'
 import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
-import { canAccess, ROLE_LABELS, getTeamManagerIds, getTeamLeadIds, type UserProfile } from '@/types/user'
+import { canAccess, ROLE_LABELS, type UserProfile } from '@/types/user'
 import type { AssessmentScore } from '@/types/assessmentScore'
-import { canViewByLevel } from '@/lib/jobLevel'
 import { managedMembers, managedTeamIds } from '@/lib/users/managedMembers'
 import { CopyableText, CopyIcon, StartDateCell } from '@/components/common/EmployeeCells'
 import { formatDateEN } from '@/lib/utils/dateFormatter'
@@ -884,13 +883,12 @@ function EmployeeSidebar({
               // The average of the reviews given; a score written on the visit itself (older) otherwise.
               const rating = averageRating(reviews) ?? rec.ratingScore ?? null
               const isOpen = openVisitId === rec.id
-              const answers = isOpen ? answeredQuestions(rec) : []
               return (
                 <div key={rec.id} className={`border rounded-xl transition-colors ${isOpen ? 'border-freshket-200 bg-freshket-50/30' : 'border-gray-100 hover:border-gray-200'}`}>
                   <button
                     type="button"
-                    onClick={() => setOpenVisitId(isOpen ? null : rec.id)}
-                    aria-expanded={isOpen}
+                    onClick={() => setOpenVisitId(rec.id)}
+                    aria-haspopup="dialog"
                     className="w-full text-left p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-freshket-300 rounded-xl"
                   >
                     {/* Line 1: the store, who the sale met there, and the type of restaurant */}
@@ -906,7 +904,7 @@ function EmployeeSidebar({
                             {rating}/5 ★
                           </span>
                         )}
-                        <svg className={`size-4 text-gray-300 transition-transform duration-150 ${isOpen ? 'rotate-90 text-freshket-500' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <svg className={`size-4 transition-colors duration-150 ${isOpen ? 'text-freshket-500' : 'text-gray-300'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                         </svg>
                       </div>
@@ -931,27 +929,14 @@ function EmployeeSidebar({
                     </div>
                   </button>
 
+                  {/* The visit opens in a drawer on the right, over the list */}
                   {isOpen && (
-                    <div className="px-4 pb-4 space-y-3 border-t border-gray-100 pt-3">
-                      {answers.length === 0 && !rec.evaluationFeedback && (
-                        <p className="text-xs text-gray-400">ไม่มีรายละเอียดที่บันทึกไว้</p>
-                      )}
-                      {answers.map(a => (
-                        <div key={a.label}>
-                          <p className="text-xs font-bold text-freshket-700 mb-1.5">{a.label}</p>
-                          <div className="bg-white border border-gray-100 rounded-xl p-3">
-                            {a.value.split('\n').map((line, i) => (
-                              <p key={i} className="text-sm text-gray-900 leading-relaxed">{line || ' '}</p>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                      {reviews.length === 0 && rec.evaluationFeedback && (
-                        <div>
-                          <p className="text-xs font-bold text-freshket-700 mb-1.5">ความเห็นจากผู้ประเมิน</p>
-                          <p className="text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">{rec.evaluationFeedback}</p>
-                        </div>
-                      )}
+                    <ShadowVisitDrawer
+                      record={rec}
+                      rating={rating}
+                      hideEvaluatorFeedback={reviews.length > 0}
+                      onClose={() => setOpenVisitId(null)}
+                    >
                       <ShadowReviews
                         reviews={reviews}
                         viewerUid={viewer?.uid}
@@ -964,7 +949,7 @@ function EmployeeSidebar({
                           comment,
                         })}
                       />
-                    </div>
+                    </ShadowVisitDrawer>
                   )}
                 </div>
               )
