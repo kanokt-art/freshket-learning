@@ -1,11 +1,13 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { createPortal } from 'react-dom'
 import { StarsDisplay } from '@/components/common/Stars'
 import { JourneyList, JourneyStep, stepStates } from '@/components/features/LearningJourneySheet'
 import { useFirestoreList } from '@/hooks/useFirestore'
+import { authedFetch } from '@/lib/api/authedFetch'
+import { formatElapsed } from '@/lib/assessment/briefing'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { toStars } from '@/lib/feedback/stars'
 import { latestBySlot, type LeadReview, type LeadSlot } from '@/lib/feedback/leadReviews'
@@ -24,6 +26,29 @@ const dmy = (d?: Date | string) => {
 }
 
 const SLOT_LABEL: Record<LeadSlot, string> = { team_lead: 'Team Lead', manager: 'Manager' }
+
+interface QuizAttempt {
+  id: string
+  assessmentTitle: string
+  step?: 'pre' | 'post'
+  attemptNumber?: number
+  score: number
+  passingScore?: number
+  passed: boolean
+  elapsedMs?: number
+  limitMs?: number
+  timedOut?: boolean
+  autoSubmitted?: boolean
+  createdAt?: string
+}
+
+const STEP_LABEL = { pre: 'ก่อนเรียน', post: 'หลังเรียน' } as const
+
+const dmyHm = (d?: string) => {
+  if (!d) return ''
+  const t = new Date(d)
+  return isNaN(t.getTime()) ? '' : t.toLocaleString('th-TH', { day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
 
 export function MemberCourseDrawer({ memberUid, memberName, courseId, courseTitle, onClose }: {
   memberUid: string
@@ -54,6 +79,19 @@ export function MemberCourseDrawer({ memberUid, memberName, courseId, courseTitl
     // Demo mode has no database: one sample Team Lead comment so the drawer can be seen.
     return [{ leadUid: 'demo-tl', leadRole: 'team_lead', leadName: 'Pataranuch (Tao) Suyavech', score: 4, updatedAt: new Date('2026-11-03T09:00:00'), comment: 'ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ' }]
   }, [reviewDocs.data])
+
+  // Every try at this course's quiz: which one, the score, how long it took. Read through the server (the
+  // attempts table is an audit trail the browser cannot read); nothing is shown when there are none.
+  const [attempts, setAttempts] = useState<QuizAttempt[]>([])
+  useEffect(() => {
+    if (!live) return
+    let cancelled = false
+    authedFetch(`/api/assessment/attempts?uid=${encodeURIComponent(memberUid)}&courseId=${encodeURIComponent(courseId)}`)
+      .then(async (res) => (res.ok ? ((await res.json()) as { attempts?: QuizAttempt[] }).attempts ?? [] : []))
+      .then((list) => { if (!cancelled) setAttempts(list) })
+      .catch(() => { if (!cancelled) setAttempts([]) })
+    return () => { cancelled = true }
+  }, [live, memberUid, courseId])
 
   const latest = latestBySlot(reviews)
   const states = stepStates([!!takeaway, !!latest.team_lead, !!latest.manager])
@@ -117,6 +155,39 @@ export function MemberCourseDrawer({ memberUid, memberName, courseId, courseTitl
               {reviewStep('team_lead', 1)}
               {reviewStep('manager', 2)}
             </JourneyList>
+          )}
+
+          {attempts.length > 0 && (
+            <section className="mt-8">
+              <h3 className="text-sm font-bold text-gray-900">ประวัติการทำแบบทดสอบ</h3>
+              <p className="text-xs text-gray-500 mt-0.5">ทำไป {attempts.length} ครั้ง · บันทึกทุกครั้ง</p>
+              <ul className="mt-3 space-y-2">
+                {attempts.map((a, i) => (
+                  <li key={a.id} className="rounded-xl border border-gray-100 px-3.5 py-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-bold text-gray-900 min-w-0 truncate">
+                        ครั้งที่ {a.attemptNumber ?? i + 1}
+                        {a.step && <span className="font-normal text-gray-500">{` · ${STEP_LABEL[a.step]}`}</span>}
+                      </p>
+                      {a.timedOut ? (
+                        <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 shrink-0">หมดเวลา</span>
+                      ) : (
+                        <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full shrink-0 ${a.passed ? 'bg-freshket-100 text-freshket-700' : 'bg-rose-50 text-rose-600'}`}>
+                          {a.score}% · {a.passed ? 'ผ่าน' : 'ไม่ผ่าน'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {[
+                        dmyHm(a.createdAt),
+                        a.elapsedMs !== undefined ? `ใช้เวลา ${formatElapsed(a.elapsedMs)}${a.limitMs ? ` / ${formatElapsed(a.limitMs)}` : ''}` : '',
+                        a.autoSubmitted ? 'ส่งอัตโนมัติ (สลับหน้าจอ)' : '',
+                      ].filter(Boolean).join(' · ')}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
         </div>
 

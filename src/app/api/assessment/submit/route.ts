@@ -210,6 +210,9 @@ export async function POST(req: NextRequest) {
     // not the caller's, already used (replay), or past its deadline.
     let timedOutSession: { id: string; elapsedMs: number; limitMs: number } | null = null
     let burnSessionId: string | null = null
+    // How long this attempt took and what it was given, from the server's own start time.
+    let elapsedMs: number | undefined
+    let limitMs: number | undefined
 
     if (typeof sessionId === 'string') {
       const sDoc = await store.get('assessmentSessions', sessionId)
@@ -227,6 +230,8 @@ export async function POST(req: NextRequest) {
       }
 
       const limitMin = Number(s.timeLimitMinutes ?? 0)
+      if (s.startedAt instanceof Date) elapsedMs = Math.max(0, Date.now() - s.startedAt.getTime())
+      if (limitMin > 0) limitMs = limitMin * 60_000
       if (limitMin > 0 && s.startedAt instanceof Date) {
         const elapsedMs = Date.now() - s.startedAt.getTime()
         const limitMs = limitMin * 60_000
@@ -300,6 +305,8 @@ export async function POST(req: NextRequest) {
       attemptNumber,
       answers: graded.answers,
       autoSubmitted,
+      ...(elapsedMs !== undefined ? { elapsedMs } : {}),
+      ...(limitMs !== undefined ? { limitMs } : {}),
       createdAt: new Date(),
     }, { merge: false })
 

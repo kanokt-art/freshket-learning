@@ -7,6 +7,7 @@ import { authedFetch } from '@/lib/api/authedFetch'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { MOCK_ASSESSMENTS } from '@/lib/utils/mockData'
 import { gradeSubmission, sanitizeQuestion } from '@/lib/assessment/grade'
+import { quizBriefing, formatMinutes, type QuizBriefing } from '@/lib/assessment/briefing'
 import { get as getDoc } from '@/lib/data/collection'
 import type { Question, DragPair, Assessment } from '@/types/assessment'
 
@@ -29,6 +30,12 @@ interface TakeAssessment {
   questions: Question[]
   googleFormUrl?: string
   antiCheatEnabled?: boolean
+  /** 0 / absent = untimed. */
+  timeLimitMinutes?: number
+  /** Whether the course (when opened from one) lets a finished learner sit it again. */
+  allowRetake?: boolean
+  /** How many times this learner has already sat it. */
+  attemptsSoFar?: number
 }
 
 // Mirrors courses/[id]/page.tsx's toFormEmbedUrl — converts an ALREADY-RESOLVED
@@ -79,7 +86,10 @@ export default function TakeAssessmentPage() {
   const { user } = useAuth()
   // ?preview=1 (super_admin only): a try-out. The quiz is graded here in the browser against
   // the key the admin may already read; nothing is started, submitted, recorded or announced.
-  const isPreview = useSearchParams().get('preview') === '1' && user?.role === 'super_admin'
+  const search = useSearchParams()
+  const isPreview = search.get('preview') === '1' && user?.role === 'super_admin'
+  // The course the quiz was opened from, so the intro can say how retakes work there.
+  const courseIdParam = search.get('courseId')
   const [previewSource, setPreviewSource] = useState<Assessment | null>(null)
 
   // Loaded from the API, not Firestore: the route strips every answer key before
@@ -173,6 +183,7 @@ export default function TakeAssessmentPage() {
             description: found.description,
             passingScore: found.passingScore,
             questions: found.questions.map(sanitizeQuestion),
+            timeLimitMinutes: found.timeLimitMinutes,
             antiCheatEnabled: found.antiCheatEnabled,
           }
         : null)
@@ -197,6 +208,7 @@ export default function TakeAssessmentPage() {
             passingScore: full.passingScore,
             questions: (full.questions ?? []).map(sanitizeQuestion),
             googleFormUrl: full.googleFormUrl,
+            timeLimitMinutes: full.timeLimitMinutes,
             antiCheatEnabled: false, // no fullscreen lock or violation counter while trying it out
           })
         })
@@ -206,7 +218,7 @@ export default function TakeAssessmentPage() {
     }
 
     setLoading(true)
-    authedFetch(`/api/assessment/${encodeURIComponent(id)}/take`)
+    authedFetch(`/api/assessment/${encodeURIComponent(id)}/take${courseIdParam ? `?courseId=${encodeURIComponent(courseIdParam)}` : ''}`)
       .then(async (res) => {
         const json = await res.json().catch(() => null)
         if (cancelled) return
@@ -220,7 +232,7 @@ export default function TakeAssessmentPage() {
       .catch(() => { if (!cancelled) setLoadError('เชื่อมต่อ server ไม่ได้') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [id, user, isPreview])
+  }, [id, user, isPreview, courseIdParam])
 
   // Read course context written by course detail page before navigation
   useEffect(() => {
@@ -244,6 +256,12 @@ export default function TakeAssessmentPage() {
   async function handleStartAntiCheat() {
     try { await document.documentElement.requestFullscreen() } catch {}
     setStarted(true)
+  }
+
+  // The intro card's button: the clock (and, when the quiz is guarded, fullscreen) begins here.
+  function handleBegin() {
+    if (antiCheatEnabled) void handleStartAntiCheat()
+    else setStarted(true)
   }
 
   async function handleAckViolationWarning() {
@@ -294,9 +312,8 @@ export default function TakeAssessmentPage() {
   const current = questions[currentIndex]
 
   // Open the server-side session once the learner can actually start answering —
-  // i.e. after the anti-cheat gate when there is one, so the clock doesn't run
-  // while they read the warning screen.
-  const readyToStart = !!assessment && !assessment.googleFormUrl && !submitted && (!antiCheatEnabled || started)
+  // i.e. after the intro card, so the clock doesn't run while they read how the quiz works.
+  const readyToStart = !!assessment && !assessment.googleFormUrl && !submitted && started
   useEffect(() => {
     if (DEMO_MODE || isPreview || !readyToStart || sessionId || !user) return
     let cancelled = false
@@ -547,8 +564,20 @@ export default function TakeAssessmentPage() {
     )
   }
 
-  if (antiCheatEnabled && !started) {
-    return <AntiCheatGate onStart={handleStartAntiCheat} />
+  if (!started) {
+    return (
+      <QuizIntro
+        title={assessment.title}
+        description={assessment.description}
+        briefing={quizBriefing(questions, assessment.passingScore, assessment.timeLimitMinutes)}
+        attemptsSoFar={isPreview ? 0 : assessment.attemptsSoFar ?? 0}
+        allowRetake={assessment.allowRetake}
+        antiCheat={antiCheatEnabled}
+        isPreview={isPreview}
+        onStart={handleBegin}
+        onBack={() => router.back()}
+      />
+    )
   }
 
   const previewNote = isPreview ? (
@@ -714,23 +743,75 @@ export default function TakeAssessmentPage() {
 }
 
 // ── Anti-Cheat gate & warning ─────────────────────────────────────────────────
-function AntiCheatGate({ onStart }: { onStart: () => void }) {
+// Shown before the quiz starts, and before the clock does: how long there is, how many questions, what it takes
+// to pass, and how retakes work. Every attempt is kept (score, time) and the admin can read them.
+function QuizIntro({ title, description, briefing, attemptsSoFar, allowRetake, antiCheat, isPreview, onStart, onBack }: {
+  title: string
+  description: string
+  briefing: QuizBriefing
+  attemptsSoFar: number
+  allowRetake?: boolean
+  antiCheat: boolean
+  isPreview: boolean
+  onStart: () => void
+  onBack: () => void
+}) {
+  const { questionCount, timeLimitMinutes, passingScore, passItems } = briefing
+  const facts: { label: string; value: string }[] = [
+    { label: 'เวลา', value: timeLimitMinutes ? formatMinutes(timeLimitMinutes) : 'ไม่จำกัดเวลา' },
+    { label: 'จำนวนข้อ', value: `${questionCount} ข้อ` },
+    { label: 'เกณฑ์ผ่าน', value: passItems !== null ? `${passingScore}% (${passItems} ข้อ)` : `${passingScore}%` },
+  ]
   return (
-    <div className="flex flex-col items-center justify-center h-full bg-white p-6">
-      <div className="animate-pop-in max-w-md w-full bg-white rounded-2xl border border-gray-100 shadow-sm p-8 text-center">
-        <div className="size-14 rounded-2xl bg-freshket-100 flex items-center justify-center mx-auto mb-4">
-          <svg className="size-7 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-          </svg>
+    <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6 overflow-auto">
+      <div className="animate-pop-in max-w-lg w-full bg-white rounded-2xl border border-gray-100 shadow-sm p-7">
+        <button onClick={onBack} className="text-xs font-bold text-gray-400 hover:text-gray-600 transition-colors mb-3">← กลับ</button>
+        <h2 className="text-lg font-bold text-gray-900 leading-snug">{title}</h2>
+        {description && <p className="text-sm text-gray-500 mt-1 leading-relaxed">{description}</p>}
+
+        <div className="grid grid-cols-3 gap-3 mt-5">
+          {facts.map((f) => (
+            <div key={f.label} className="rounded-xl bg-freshket-50 border border-freshket-200 px-3 py-3 text-center">
+              <p className="text-xs text-gray-500">{f.label}</p>
+              <p className="text-sm font-bold text-freshket-700 mt-1">{f.value}</p>
+            </div>
+          ))}
         </div>
-        <h2 className="text-lg font-bold text-gray-900 mb-2">แบบทดสอบนี้มีระบบป้องกันการทุจริต</h2>
-        <p className="text-sm text-gray-500 mb-5 leading-relaxed">
-          เมื่อเริ่มทำแบบทดสอบ หน้าจอจะเข้าสู่โหมดเต็มจอ (Fullscreen) โดยอัตโนมัติ ห้ามสลับแท็บหรือหน้าต่างระหว่างทำแบบทดสอบ
-          ระบบจะแจ้งเตือนทุกครั้งที่ตรวจพบการสลับหน้าจอ และจะ<span className="font-bold text-rose-600">ส่งคำตอบอัตโนมัติทันที</span>หากถูกแจ้งเตือนครบ 3 ครั้ง
-        </p>
+
+        <ul className="mt-5 space-y-2 text-sm text-gray-600 leading-relaxed list-disc pl-5">
+          {timeLimitMinutes ? (
+            <li>เมื่อกดเริ่ม ระบบจะ<span className="font-bold text-gray-900">เริ่มจับเวลา {formatMinutes(timeLimitMinutes)}</span> ทันที หมดเวลาแล้วต้องเริ่มทำใหม่</li>
+          ) : (
+            <li>แบบทดสอบนี้ไม่จำกัดเวลา</li>
+          )}
+          <li>
+            {allowRetake
+              ? 'หากไม่ผ่านสามารถทำได้อีกครั้ง และหลักสูตรนี้ทำซ้ำได้แม้เรียนจบแล้ว'
+              : 'หากไม่ผ่านสามารถทำได้อีกครั้ง จนกว่าจะผ่าน (เมื่อผ่านและเรียนจบแล้วจะทำซ้ำไม่ได้)'}
+          </li>
+          <li>คะแนนจะถูกบันทึกทุกครั้งที่ทำ Admin ดูได้ว่าทำไปกี่ครั้ง ได้กี่คะแนน และใช้เวลาเท่าไร</li>
+          {antiCheat && (
+            <li>
+              แบบทดสอบนี้มีระบบป้องกันการทุจริต จะเข้าสู่โหมดเต็มจอ ห้ามสลับแท็บหรือหน้าต่าง
+              หากถูกแจ้งเตือนครบ 3 ครั้งจะ<span className="font-bold text-rose-600">ส่งคำตอบอัตโนมัติ</span>
+            </li>
+          )}
+        </ul>
+
+        {attemptsSoFar > 0 && (
+          <p className="mt-4 text-xs font-bold text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
+            คุณทำแบบทดสอบนี้ไปแล้ว {attemptsSoFar} ครั้ง — ครั้งนี้จะเป็นครั้งที่ {attemptsSoFar + 1}
+          </p>
+        )}
+        {isPreview && (
+          <p className="mt-4 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+            โหมดทดลองของ Admin — ไม่จับเวลา และไม่บันทึกคะแนน
+          </p>
+        )}
+
         <button onClick={onStart}
-          className="w-full px-5 py-3 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all">
-          เข้าสู่โหมดเต็มจอและเริ่มทำแบบทดสอบ
+          className="w-full mt-6 px-5 py-3 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all duration-150">
+          {antiCheat ? 'เข้าสู่โหมดเต็มจอและเริ่มทำแบบทดสอบ' : timeLimitMinutes ? 'เริ่มทำแบบทดสอบและจับเวลา' : 'เริ่มทำแบบทดสอบ'}
         </button>
       </div>
     </div>

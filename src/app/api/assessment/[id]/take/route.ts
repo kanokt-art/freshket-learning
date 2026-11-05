@@ -16,6 +16,8 @@ import type { Assessment, Question } from '@/types/assessment'
 // Also enforces `isPublished`, which the old client path never checked: a draft
 // quiz was fully playable by URL.
 
+const ID_RE = /^[A-Za-z0-9_-]{1,128}$/
+
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const gate = await requireStaff(req)
   if (!gate.ok) return gate.response
@@ -53,11 +55,24 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const questions = (data.questions ?? []) as Question[]
 
+    // What the learner is told before the clock starts: the time limit, and how it stands with retakes.
+    // A course (?courseId=) says whether a finished course may be sat again; the number of times this
+    // learner has already sat the quiz comes from their own attempts, which only the server can read.
+    const courseId = req.nextUrl.searchParams.get('courseId') ?? ''
+    const course = ID_RE.test(courseId) ? ((await getStore().get('courses', courseId)) as { allowRetake?: unknown } | null) : null
+    const attempts = await getStore().query('assessmentAttempts', {
+      where: [{ field: 'uid', op: '==', value: gate.uid }, { field: 'assessmentId', op: '==', value: id }],
+    })
+    const rawLimit = Number(data.timeLimitMinutes ?? 0)
+
     return NextResponse.json({
       id: doc.id,
       title: data.title ?? '',
       description: data.description ?? '',
       passingScore: typeof data.passingScore === 'number' ? data.passingScore : 70,
+      timeLimitMinutes: Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 600) : 0,
+      allowRetake: course ? course.allowRetake === true : undefined,
+      attemptsSoFar: attempts.filter((a) => !(a as { timedOut?: unknown }).timedOut).length,
       antiCheatEnabled: data.antiCheatEnabled === true,
       questions: questions
         .slice()

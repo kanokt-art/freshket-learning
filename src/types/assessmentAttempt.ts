@@ -39,5 +39,11 @@ export interface AssessmentAttempt {
   answers: AttemptAnswer[]
   /** True when the submission was forced by the anti-cheat violation limit. */
   autoSubmitted: boolean
+  /** How long the attempt took, from the server's start time (absent for attempts recorded before this was kept). */
+  elapsedMs?: number
+  /** The time limit it was given, when it was timed. */
+  limitMs?: number
+  /** The attempt ran past its deadline: recorded, but no score was written. */
+  timedOut?: boolean
   createdAt: Date
 }
