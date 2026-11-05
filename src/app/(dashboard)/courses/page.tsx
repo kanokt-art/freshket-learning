@@ -4322,6 +4322,13 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   const [saveError, setSaveError] = useState<string | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
+  // Save / Save draft / Cancel only show once something has been changed: the form as it opened is the baseline.
+  // (Saving closes the editor, so the baseline never has to move.) A brand-new course always shows them.
+  const baselineRef = useRef<string | null>(null)
+  if (baselineRef.current === null) baselineRef.current = JSON.stringify(form)
+  const formJson = useMemo(() => JSON.stringify(form), [form])
+  const isDirty = !isEdit || formJson !== baselineRef.current
+
   // computeAssignedRows does an allUsers.find + allTrainingRecords.find per
   // assignee (O(assignees × records)) — was called inline in JSX, unmemoized,
   // recomputing on every render of this modal while the Learners tab is open.
@@ -5217,7 +5224,8 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
           </div>
         </div>
 
-        {/* Footer */}
+        {/* Footer: only while there is something to save (or a save just failed) */}
+        {(isDirty || saveError) && (
         <div className="px-6 py-4 border-t border-gray-100 shrink-0 space-y-2">
           {saveError && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-600">
@@ -5242,6 +5250,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
             </button>
           </div>
         </div>
+        )}
       </form>
 
       {showCond && condMasterOn && openPanel === null && (

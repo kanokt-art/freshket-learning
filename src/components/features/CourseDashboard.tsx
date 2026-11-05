@@ -90,16 +90,14 @@ export function CourseDashboard({ courseId, rows }: { courseId: string; rows: Da
 
       {/* Date range: one row above everything it scopes */}
       <div className="flex flex-wrap items-center gap-3">
-        <fieldset className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl">
-          <legend className="sr-only">ช่วงเวลา</legend>
+        <div role="radiogroup" aria-label="ช่วงเวลา" className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl">
           {RANGES.map((r) => (
-            <label key={r.id}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all select-none ${range === r.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              <input type="radio" name="dash-range" value={r.id} checked={range === r.id} onChange={() => setRange(r.id)} className="sr-only" />
+            <button key={r.id} type="button" role="radio" aria-checked={range === r.id} onClick={() => setRange(r.id)}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all select-none ${range === r.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               {r.label}
-            </label>
+            </button>
           ))}
-        </fieldset>
+        </div>
         <p className="text-xs text-gray-400">นับผู้เรียนที่เริ่มเรียนในช่วงนี้ · {nf.format(scoped.length)} คน</p>
       </div>
 
@@ -201,15 +199,14 @@ export function CourseDashboard({ courseId, rows }: { courseId: string; rows: Da
               <li className="flex items-center gap-1.5 text-xs text-gray-600"><span className="size-2.5 rounded-sm" style={{ background: C.good }} />ตอบถูก</li>
               <li className="flex items-center gap-1.5 text-xs text-gray-600"><span className="size-2.5 rounded-sm" style={{ background: C.orange }} />ตอบผิด</li>
             </ul>
-            <fieldset className="flex items-center gap-0.5 p-0.5 bg-gray-100 rounded-lg">
-              <legend className="sr-only">เรียงข้อ</legend>
+            <div role="radiogroup" aria-label="เรียงข้อ" className="flex items-center gap-0.5 p-0.5 bg-gray-100 rounded-lg">
               {([['order', 'ตามลำดับข้อ'], ['wrong', 'ผิดมากสุด']] as const).map(([id, label]) => (
-                <label key={id} className={`px-3 py-1 rounded-md text-xs font-bold cursor-pointer select-none transition-all ${questionSort === id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                  <input type="radio" name="q-sort" value={id} checked={questionSort === id} onChange={() => setQuestionSort(id)} className="sr-only" />
+                <button key={id} type="button" role="radio" aria-checked={questionSort === id} onClick={() => setQuestionSort(id)}
+                  className={`px-3 py-1 rounded-md text-xs font-bold select-none transition-all ${questionSort === id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                   {label}
-                </label>
+                </button>
               ))}
-            </fieldset>
+            </div>
           </div>
         ) : undefined}>
         <div className={quizLoading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
