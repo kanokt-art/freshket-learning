@@ -21,6 +21,7 @@ import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { RoleplayRadar } from '@/components/features/RoleplayRadar'
 import { RoleplayAssessCard } from '@/components/features/RoleplayAssessCard'
 import { FeedbackReadSheet } from '@/components/features/FeedbackReadSheet'
+import { hasContent, leadReviewId, slotOfReview, type LeadReview } from '@/lib/feedback/leadReviews'
 import { canAssessRoleplay as canAssessRoleplayOf } from '@/lib/roleplay/assessForm'
 import { announce } from '@/lib/notifications/announce'
 import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
@@ -592,7 +593,7 @@ function EmployeeSidebar({
     [{ type: 'where', field: 'uid', op: '==', value: user.uid }],
     !getDemoMode() && !!user.uid,
   )
-  const feedbackDocs = useFirestoreList<{ courseId?: string; comment?: string; score?: number | null; leadName?: string }>(
+  const feedbackDocs = useFirestoreList<LeadReview & { id: string }>(
     'courseFeedback',
     [{ type: 'where', field: 'memberUid', op: '==', value: user.uid }],
     !getDemoMode() && !!user.uid,
@@ -621,30 +622,35 @@ function EmployeeSidebar({
   // course card until the score and the lead's feedback fell off screen, so the
   // card carries an excerpt and the full text opens here.
   const [readingReflection, setReadingReflection] = useState<{ courseTitle: string; text: string } | null>(null)
-  const [feedbackOverlay, setFeedbackOverlay] = useState<Record<string, { comment: string; score: number | null; leadName?: string }>>({})
+  // The viewer's own feedback just saved, keyed by course, laid over the live docs until they catch up.
+  const [feedbackOverlay, setFeedbackOverlay] = useState<Record<string, LeadReview>>({})
+  // Every reviewer's feedback on each course (a team lead's and a manager's are kept apart).
   const feedback = useMemo(() => {
-    const m: Record<string, { comment: string; score: number | null; leadName?: string }> = {}
-    for (const d of feedbackDocs.data) if (d.courseId) m[d.courseId] = { comment: d.comment ?? '', score: d.score ?? null, leadName: d.leadName }
-    // Demo mode never opens the listener above: give the member's first courses a sample comment so the
-    // feedback can be seen and reviewed.
+    const m: Record<string, LeadReview[]> = {}
+    const add = (courseId: string, r: LeadReview) => { (m[courseId] = m[courseId] ?? []).push(r) }
+    for (const d of feedbackDocs.data) if (d.courseId) add(d.courseId, d)
+    // Demo mode never opens the listener above: give the member's first courses a sample team lead comment.
     if (getDemoMode()) {
       for (const r of records.filter((x) => x.userId === user.uid).slice(0, 2)) {
-        m[r.courseId] = { comment: 'ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ ครั้งหน้าลองสรุป Pain ของลูกค้าให้ลูกค้ายืนยันก่อนเสนอสินค้า', score: 4, leadName: 'Pataranuch (Tao) Suyavech' }
+        add(r.courseId, { leadUid: 'demo-tl', leadRole: 'team_lead', leadName: 'Pataranuch (Tao) Suyavech', score: 4, updatedAt: new Date('2026-11-03T09:00:00'), comment: 'ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ ครั้งหน้าลองสรุป Pain ของลูกค้าให้ลูกค้ายืนยันก่อนเสนอสินค้า' })
       }
     }
-    return { ...m, ...feedbackOverlay }
+    for (const [courseId, mine] of Object.entries(feedbackOverlay)) {
+      m[courseId] = [...(m[courseId] ?? []).filter((r) => r.leadUid !== mine.leadUid), mine]
+    }
+    return m
   }, [feedbackDocs.data, feedbackOverlay, records, user.uid])
 
   async function saveFeedback(courseId: string, comment: string, score: number | null) {
-    const next = { comment, score, leadName: viewer?.displayName }
-    setFeedbackOverlay((prev) => ({ ...prev, [courseId]: next }))
+    if (!viewer) return
+    const mine: LeadReview = {
+      memberUid: user.uid, courseId, comment, score,
+      leadUid: viewer.uid, leadName: viewer.displayName ?? '', leadRole: viewer.role, updatedAt: new Date(),
+    }
+    setFeedbackOverlay((prev) => ({ ...prev, [courseId]: mine }))
     try {
-      await save('courseFeedback', {
-        id: `${user.uid}_${courseId}`,
-        memberUid: user.uid, courseId, comment, score,
-        leadUid: viewer?.uid ?? '', leadName: viewer?.displayName ?? '',
-        updatedAt: new Date(),
-      })
+      // Each reviewer saves their own, so a manager's feedback no longer replaces the team lead's.
+      await save('courseFeedback', { id: leadReviewId(user.uid, courseId, viewer.uid), ...mine })
       // Tell the member (once per lead and course; the server decides and words it).
       void announce({ kind: 'course_feedback', memberUid: user.uid, courseId })
     } catch (e) {
@@ -851,7 +857,8 @@ function EmployeeSidebar({
                       courseId={rec.courseId}
                       courseTitle={rec.courseTitle}
                       memberName={enName(user)}
-                      existing={feedback[rec.courseId]}
+                      reviews={feedback[rec.courseId] ?? []}
+                      viewerUid={viewer?.uid}
                       canEdit={canFeedback}
                       onSave={saveFeedback}
                     />
@@ -1201,25 +1208,29 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
 }
 
 // ── Feedback (lead/manager comment + score on a member's course) ────────────────
-function FeedbackBlock({ courseId, courseTitle, memberName, existing, canEdit, onSave }: {
+function FeedbackBlock({ courseId, courseTitle, memberName, reviews, viewerUid, canEdit, onSave }: {
   courseId: string
   courseTitle?: string
   memberName?: string
-  existing?: { comment: string; score: number | null; leadName?: string }
+  /** Every reviewer's feedback on this course (a team lead's and a manager's). */
+  reviews: LeadReview[]
+  viewerUid?: string
   canEdit: boolean
   onSave: (courseId: string, comment: string, score: number | null) => Promise<void>
 }) {
+  const mine = reviews.find((r) => r.leadUid === viewerUid)
+  const shown = reviews.filter(hasContent).sort((a, b) => (slotOfReview(a) === slotOfReview(b) ? 0 : slotOfReview(a) === 'team_lead' ? -1 : 1))
   const [editing, setEditing] = useState(false)
-  const [comment, setComment] = useState(existing?.comment ?? '')
-  const [stars, setStars] = useState<number | null>(toStars(existing?.score))
+  const [comment, setComment] = useState(mine?.comment ?? '')
+  const [stars, setStars] = useState<number | null>(toStars(mine?.score))
   const [saving, setSaving] = useState(false)
-  // The feedback opened in the same sheet the learner reads it in.
-  const [reading, setReading] = useState(false)
+  // A feedback opened in the same sheet the learner reads it in.
+  const [reading, setReading] = useState<LeadReview | null>(null)
 
   useEffect(() => {
-    setComment(existing?.comment ?? '')
-    setStars(toStars(existing?.score))
-  }, [existing])
+    setComment(mine?.comment ?? '')
+    setStars(toStars(mine?.score))
+  }, [mine])
 
   async function submit() {
     setSaving(true)
@@ -1231,64 +1242,65 @@ function FeedbackBlock({ courseId, courseTitle, memberName, existing, canEdit, o
     }
   }
 
-  // Read-only view of existing feedback
-  if (!editing) {
+  if (editing) {
     return (
-      <>
-        {existing && (existing.comment || toStars(existing.score) != null) ? (
-          <div className="rounded-xl bg-blue-50 border border-blue-100 p-3">
-            {reading && (
-              <FeedbackReadSheet
-                person={memberName ? { name: memberName } : undefined}
-                courseTitle={courseTitle}
-                leadName={existing.leadName}
-                rating={toStars(existing.score)}
-                comment={existing.comment}
-                onClose={() => setReading(false)}
-              />
-            )}
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <p className="text-xs font-bold text-blue-700">ความเห็นหัวหน้า{existing.leadName ? ` · ${existing.leadName}` : ''}</p>
-              {toStars(existing.score) != null && <StarsDisplay value={toStars(existing.score) as number} />}
-            </div>
-            {existing.comment && <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{existing.comment}</p>}
-            <div className="flex items-center gap-3 mt-1.5">
-              <button onClick={() => setReading(true)} className="text-xs font-bold text-blue-600 hover:text-blue-700">อ่านแบบเต็ม</button>
-              {canEdit && (
-                <button onClick={() => setEditing(true)} className="text-xs font-bold text-blue-600 hover:text-blue-700">แก้ไข</button>
-              )}
-            </div>
+      <div className="space-y-2">
+        <textarea
+          rows={2}
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          placeholder="คอมเมนต์ถึงพนักงาน..."
+          className="w-full px-2.5 py-2 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <StarsInput value={stars} onChange={setStars} disabled={saving} />
+          <div className="ml-auto flex gap-2">
+            <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">ยกเลิก</button>
+            <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs font-bold rounded-lg bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-60">
+              {saving ? 'บันทึก...' : 'บันทึก'}
+            </button>
           </div>
-        ) : canEdit ? (
-          <button onClick={() => setEditing(true)} className="text-xs font-bold text-freshket-600 hover:text-freshket-700">
-            + ให้ดาว / คอมเมนต์
-          </button>
-        ) : (
-          <p className="text-xs text-gray-300 italic">ยังไม่มีความเห็นจากหัวหน้า</p>
-        )}
-      </>
+        </div>
+      </div>
     )
   }
 
-  // Edit form
   return (
     <div className="space-y-2">
-      <textarea
-        rows={2}
-        value={comment}
-        onChange={(e) => setComment(e.target.value)}
-        placeholder="คอมเมนต์ถึงพนักงาน..."
-        className="w-full px-2.5 py-2 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
-      />
-      <div className="flex flex-wrap items-center gap-2">
-        <StarsInput value={stars} onChange={setStars} disabled={saving} />
-        <div className="ml-auto flex gap-2">
-          <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">ยกเลิก</button>
-          <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs font-bold rounded-lg bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-60">
-            {saving ? 'บันทึก...' : 'บันทึก'}
-          </button>
+      {reading && (
+        <FeedbackReadSheet
+          title={slotOfReview(reading) === 'manager' ? 'Feedback จาก Manager' : 'Feedback จาก Team Lead'}
+          person={memberName ? { name: memberName } : undefined}
+          courseTitle={courseTitle}
+          leadName={reading.leadName}
+          rating={toStars(reading.score)}
+          comment={reading.comment}
+          onClose={() => setReading(null)}
+        />
+      )}
+      {shown.map((r) => (
+        <div key={r.leadUid ?? r.id} className="rounded-xl bg-blue-50 border border-blue-100 p-3">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <p className="text-xs font-bold text-blue-700">
+              {slotOfReview(r) === 'manager' ? 'Manager' : 'Team Lead'}{r.leadName ? ` · ${r.leadName}` : ''}
+            </p>
+            {toStars(r.score) != null && <StarsDisplay value={toStars(r.score) as number} />}
+          </div>
+          {r.comment && <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed line-clamp-3">{r.comment}</p>}
+          <div className="flex items-center gap-3 mt-1.5">
+            <button onClick={() => setReading(r)} className="text-xs font-bold text-blue-600 hover:text-blue-700">อ่านแบบเต็ม</button>
+            {canEdit && r.leadUid === viewerUid && (
+              <button onClick={() => setEditing(true)} className="text-xs font-bold text-blue-600 hover:text-blue-700">แก้ไข</button>
+            )}
+          </div>
         </div>
-      </div>
+      ))}
+      {canEdit && !(mine && hasContent(mine)) && (
+        <button onClick={() => setEditing(true)} className="text-xs font-bold text-freshket-600 hover:text-freshket-700">
+          + ให้ดาว / คอมเมนต์
+        </button>
+      )}
+      {!canEdit && shown.length === 0 && <p className="text-xs text-gray-300 italic">ยังไม่มีความเห็นจากหัวหน้า</p>}
     </div>
   )
 }

@@ -8,6 +8,7 @@ import { formatPersonName } from '@/lib/users/displayName'
 import { slackText } from '@/lib/notifications/slackText'
 import { resolveAnnouncementText } from '@/lib/notifications/courseAnnouncement'
 import { toStars } from '@/lib/feedback/stars'
+import { leadReviewId } from '@/lib/feedback/leadReviews'
 import { saleTrainers } from '@/lib/server/saleTrainers'
 import { notifyTrainers } from '@/lib/server/trainerNotice'
 import { ROLEPLAY_TOPICS } from '@/types/roleplay'
@@ -252,7 +253,10 @@ export async function POST(req: NextRequest) {
         if (!memberUid || !courseId) return bad('Invalid memberUid or courseId')
         if (memberUid === gate.uid) return NextResponse.json({ ok: true, posted: false })
 
-        const fb = (await store.get('courseFeedback', `${memberUid}_${courseId}`)) as (Doc & { leadUid?: string; comment?: string; score?: number }) | null
+        type Feedback = Doc & { leadUid?: string; comment?: string; score?: number }
+        // The caller's own record; a record saved before each reviewer had one is under the shared id.
+        const fb = ((await store.get('courseFeedback', leadReviewId(memberUid, courseId, gate.uid))) as Feedback | null)
+          ?? ((await store.get('courseFeedback', `${memberUid}_${courseId}`)) as Feedback | null)
         // Only for feedback the caller really gave.
         if (!fb || fb.leadUid !== gate.uid) return NextResponse.json({ ok: true, posted: false })
         const stars = toStars(fb.score)

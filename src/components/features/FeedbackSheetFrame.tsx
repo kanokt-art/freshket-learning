@@ -1,14 +1,33 @@
 'use client'
 
-// The frame every feedback sheet shares: a white card that rises from the bottom of a phone (a centred card
-// on a wide screen), a close ✕ at the top right, the content centred, and a big rounded button at the foot.
+// The frame every feedback sheet shares: a white card that rises from the bottom of a phone, a close ✕ at
+// the top right, the content centred, and a big rounded button at the foot. With `inline` (a computer) it
+// is not a floating card but a panel in the page itself, where the lesson would be.
 // Used to give feedback on a course and to read what a team lead or manager wrote — for every role.
-export function FeedbackSheetFrame({ onClose, footer, children }: {
+export function FeedbackSheetFrame({ onClose, footer, children, inline = false }: {
   onClose: () => void
+  /** Sit in the page instead of floating over it. */
+  inline?: boolean
   /** The big button row at the foot (e.g. the green "Done" button). */
   footer?: React.ReactNode
   children: React.ReactNode
 }) {
+  if (inline) {
+    return (
+      <section className="relative max-w-2xl mx-auto bg-white rounded-2xl border border-gray-100 shadow-sm">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="ปิด"
+          className="absolute top-4 right-4 p-2 rounded-full text-gray-500 hover:bg-gray-100 transition-all duration-150"
+        >
+          <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+        <div className="px-8 pt-8 pb-4 text-center">{children}</div>
+        {footer && <div className="px-8 pb-8 pt-2 max-w-sm mx-auto">{footer}</div>}
+      </section>
+    )
+  }
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center bg-slate-900/40" onClick={onClose}>
       <div

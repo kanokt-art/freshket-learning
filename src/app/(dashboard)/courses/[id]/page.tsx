@@ -7,14 +7,13 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { useCourse, useCourseTrainingRecords, useAllUsers, useTeams, useDepartments, useBucketResultsFor } from '@/hooks/useFirestore'
+import { useCourse, useCourseTrainingRecords, useAllUsers, useTeams, useDepartments, useBucketResultsFor, useFirestoreList } from '@/hooks/useFirestore'
 import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
 import { formatPersonName } from '@/lib/users/displayName'
-import { StarsDisplay } from '@/components/common/Stars'
 import { LearnerFeedbackSheet, FeedbackReaderSheet } from '@/components/features/CourseFeedbackSheets'
-import { FeedbackReadSheet } from '@/components/features/FeedbackReadSheet'
+import { LearningJourneySheet } from '@/components/features/LearningJourneySheet'
+import { newestReviewTime, type LeadReview } from '@/lib/feedback/leadReviews'
 import { getDemoMode } from '@/lib/demo/demoMode'
-import { toStars } from '@/lib/feedback/stars'
 import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
@@ -214,35 +213,59 @@ export default function CourseDetailPage() {
   const [progress, setProgress] = useState<Progress>(EMPTY_PROG)
   // The status the server holds for this learner's record (the local copy can lag or be edited).
   const [serverStatus, setServerStatus] = useState<string | undefined>(undefined)
-  // What a team lead or manager wrote about this learner on this course (stars and comment), read here so
-  // the learner can open the notification they got and find it.
-  const [leadFeedback, setLeadFeedback] = useState<{ comment?: string; score?: number | null; leadName?: string; updatedAt?: Date } | null>(null)
+  // What the learner's team lead and manager wrote about them on this course (each their own), and the
+  // learner's own Key Take Away: the three steps of the journey sheet "Feedback หลักสูตร" opens.
   const feedbackUid = user?.uid
-  // The feedback sheets: a learner gives theirs; a super_admin reads what learners wrote about the course.
-  const [feedbackSheet, setFeedbackSheet] = useState<'give' | 'read' | null>(null)
-  // The panel opens by itself when the learner arrives from the notification (?feedback=1).
-  const [feedbackOpen, setFeedbackOpen] = useState(search.get('feedback') === '1')
-  // Whether they have already opened it for this feedback: the signal on its handle goes once they have.
+  const reviewDocs = useFirestoreList<LeadReview>(
+    'courseFeedback',
+    [
+      { type: 'where', field: 'memberUid', op: '==', value: feedbackUid ?? '' },
+      { type: 'where', field: 'courseId', op: '==', value: id },
+    ],
+    !DEMO_MODE && !!feedbackUid,
+  )
+  const leadReviews = useMemo<LeadReview[]>(() => DEMO_MODE
+    ? [{ id: 'demo-tl', leadRole: 'team_lead', leadName: 'Pataranuch (Tao) Suyavech', score: 4, updatedAt: new Date('2026-11-03T09:00:00'),
+        comment: 'ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ\nครั้งหน้าลองสรุป Pain ของลูกค้าให้ลูกค้ายืนยันก่อนเสนอสินค้า' }]
+    : reviewDocs.data, [reviewDocs.data])
+  const [takeawayText, setTakeawayText] = useState('')
+  useEffect(() => {
+    if (!feedbackUid) return
+    let cancelled = false
+    setTakeawayText(loadTakeAway(feedbackUid, id))
+    if (DEMO_MODE) return
+    get<{ text?: string }>('takeaways', `${feedbackUid}_${id}`)
+      .then((t) => { if (!cancelled && t?.text) setTakeawayText(t.text) })
+      .catch(() => { /* the local copy stands */ })
+    return () => { cancelled = true }
+  }, [feedbackUid, id])
+  // The sheets: 'journey' is the learner's path (Key Take Away → Team Lead → Manager), 'give' rates the
+  // course, 'read' is a super_admin reading what learners wrote. A notification opens the journey (?feedback=1).
+  const [feedbackSheet, setFeedbackSheet] = useState<'journey' | 'give' | 'read' | null>(search.get('feedback') === '1' ? 'journey' : null)
+  // Whether they have opened it since the newest feedback: the signal on the handle goes once they have.
   const [feedbackSeen, setFeedbackSeen] = useState(0)
   const seenKey = `fk_lead_feedback_seen_${feedbackUid ?? ''}_${id}`
   useEffect(() => {
     try { setFeedbackSeen(Number(localStorage.getItem(seenKey) ?? 0)) } catch { /* no storage: shown as new */ }
   }, [seenKey])
+  const newestReview = newestReviewTime(leadReviews)
+  // A computer (the steps sit on the left, lg and up) shows the journey and the rating in the page; a phone
+  // gets them as a card rising from the bottom.
+  const [wide, setWide] = useState(false)
   useEffect(() => {
-    if (!feedbackUid) return
-    if (DEMO_MODE) {
-      setLeadFeedback({
-        leadName: 'Pataranuch (Tao) Suyavech', score: 4, updatedAt: new Date('2026-11-03T09:00:00'),
-        comment: 'ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ\nครั้งหน้าลองสรุป Pain ของลูกค้าให้ลูกค้ายืนยันก่อนเสนอสินค้า',
-      })
-      return
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const update = () => setWide(mq.matches)
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
+  function openJourney() {
+    setFeedbackSheet('journey')
+    if (newestReview > 0) {
+      setFeedbackSeen(newestReview)
+      try { localStorage.setItem(seenKey, String(newestReview)) } catch { /* ignore */ }
     }
-    let cancelled = false
-    get<{ comment?: string; score?: number | null; leadName?: string; updatedAt?: Date }>('courseFeedback', `${feedbackUid}_${id}`)
-      .then((fb) => { if (!cancelled) setLeadFeedback(fb ?? null) })
-      .catch(() => { /* no feedback to show */ })
-    return () => { cancelled = true }
-  }, [feedbackUid, id])
+  }
   const [activeStep, setActiveStep] = useState<StepId>('slide')
 
   // Load progress from localStorage on mount. Keyed by uid, so it has to wait
@@ -539,55 +562,45 @@ export default function CourseDetailPage() {
         </div>
       )}
 
-      {/* What a team lead or manager said about this learner on this course: a panel on the right */}
-      {!isAdmin && leadFeedback && (toStars(leadFeedback.score) !== null || !!leadFeedback.comment?.trim()) && (() => {
-        const stamp = leadFeedback.updatedAt ? new Date(leadFeedback.updatedAt).getTime() || 1 : 1
-        const isNew = stamp > feedbackSeen
-        const open = () => {
-          setFeedbackOpen(true)
-          setFeedbackSeen(stamp)
-          try { localStorage.setItem(seenKey, String(stamp)) } catch { /* ignore */ }
-        }
+      {/* A signal on the right edge when a team lead or manager has said something new: opens the journey */}
+      {!isAdmin && newestReview > 0 && feedbackSheet === null && (() => {
+        const isNew = newestReview > feedbackSeen
         return (
-          <>
-            {!feedbackOpen && (
-              <button
-                type="button"
-                onClick={open}
-                title={isNew ? 'มีความเห็นใหม่จากหัวหน้า กดเพื่ออ่าน' : 'ความเห็นจากหัวหน้า'}
-                className="fixed right-0 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1.5 py-3 px-1.5 rounded-l-xl bg-white border border-gray-200 border-r-0 shadow-md text-gray-500 hover:text-freshket-600 hover:border-freshket-300 transition-colors"
-              >
-                <svg className="size-4 shrink-0 rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                </svg>
-                <span className="text-xs font-bold whitespace-nowrap" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
-                  {isNew ? 'มีความเห็นใหม่จากหัวหน้า' : 'ความเห็นจากหัวหน้า'}
-                </span>
-                {isNew && (
-                  <span className="absolute -top-1.5 -left-1.5 size-3.5 rounded-full bg-rose-500">
-                    <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping" />
-                  </span>
-                )}
-              </button>
+          <button
+            type="button"
+            onClick={openJourney}
+            title={isNew ? 'มีความเห็นใหม่จากหัวหน้า กดเพื่ออ่าน' : 'ความเห็นจากหัวหน้า'}
+            className="fixed right-0 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1.5 py-3 px-1.5 rounded-l-xl bg-white border border-gray-200 border-r-0 shadow-md text-gray-500 hover:text-freshket-600 hover:border-freshket-300 transition-colors"
+          >
+            <svg className="size-4 shrink-0 rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+            <span className="text-xs font-bold whitespace-nowrap" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+              {isNew ? 'มีความเห็นใหม่จากหัวหน้า' : 'ความเห็นจากหัวหน้า'}
+            </span>
+            {isNew && (
+              <span className="absolute -top-1.5 -left-1.5 size-3.5 rounded-full bg-rose-500">
+                <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping" />
+              </span>
             )}
-            {feedbackOpen && (
-              <FeedbackReadSheet
-                person={user ? { name: formatPersonName(user), photoURL: user.photoURL } : undefined}
-                courseTitle={course.title}
-                leadName={leadFeedback.leadName}
-                dateText={leadFeedback.updatedAt && !isNaN(new Date(leadFeedback.updatedAt).getTime())
-                  ? new Date(leadFeedback.updatedAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
-                  : undefined}
-                rating={toStars(leadFeedback.score)}
-                comment={leadFeedback.comment}
-                onClose={() => setFeedbackOpen(false)}
-              />
-            )}
-          </>
+          </button>
         )
       })()}
 
-      {feedbackSheet === 'give' && user && (
+      {!wide && feedbackSheet === 'journey' && user && (
+        <LearningJourneySheet
+          courseTitle={course.title}
+          takeaway={takeawayText}
+          hasTakeAwayStep={!!course.hasKeyTakeAway}
+          reviews={leadReviews}
+          finished={progress.slideDone || serverStatus === 'completed' || DEMO_MODE}
+          person={{ name: formatPersonName(user), photoURL: user.photoURL }}
+          onWriteTakeAway={course.hasKeyTakeAway && !isLocked('takeaway') ? () => { setFeedbackSheet(null); setActiveStep('takeaway') } : undefined}
+          onRateCourse={() => setFeedbackSheet('give')}
+          onClose={() => setFeedbackSheet(null)}
+        />
+      )}
+      {!wide && feedbackSheet === 'give' && user && (
         <LearnerFeedbackSheet uid={user.uid} courseId={id} courseTitle={course.title} onClose={() => setFeedbackSheet(null)} />
       )}
       {feedbackSheet === 'read' && isSuperAdmin && (
@@ -646,7 +659,7 @@ export default function CourseDetailPage() {
             const active = activeStep === step.id
             return (
               <button key={step.id}
-                onClick={() => !locked && setActiveStep(step.id)}
+                onClick={() => { if (!locked) { setActiveStep(step.id); setFeedbackSheet(null) } }}
                 disabled={locked}
                 className={`flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-all ${
                   active ? 'bg-freshket-500 text-white shadow-sm' :
@@ -670,14 +683,14 @@ export default function CourseDetailPage() {
             )
           })}
 
-          {/* Feedback on the course: opens once the learner has finished it */}
+          {/* Feedback หลักสูตร: the learner's path — their Key Take Away, the Team Lead's and the Manager's feedback */}
           {!isAdmin && user && (() => {
-            const finished = progress.slideDone || serverStatus === 'completed' || DEMO_MODE
+            const finished = true
             return (
               <button
                 type="button"
                 disabled={!finished}
-                onClick={() => setFeedbackSheet('give')}
+                onClick={openJourney}
                 className="mt-1 flex items-center gap-3 px-3 py-3 rounded-xl text-left border border-dashed border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-freshket-300 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:border-gray-200"
               >
                 <span className="size-7 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
@@ -685,7 +698,7 @@ export default function CourseDetailPage() {
                 </span>
                 <span className="min-w-0">
                   <span className="block text-xs font-bold truncate">Feedback หลักสูตร</span>
-                  <span className="block text-xs text-gray-400 truncate">{finished ? 'ให้คะแนนและบอกความเห็น' : 'ทำได้หลังเรียนจบ'}</span>
+                  <span className="block text-xs text-gray-400 truncate">Key Take Away และความเห็นหัวหน้า</span>
                 </span>
               </button>
             )
@@ -701,8 +714,23 @@ export default function CourseDetailPage() {
         </aside>
 
         {/* ── Content area (less padding for slide view) ───────────────── */}
-        <main className={`flex-1 overflow-auto ${currentStep?.id === 'slide' ? 'p-4' : 'p-6'}`}>
-          {currentStep && (
+        <main className={`flex-1 overflow-auto ${currentStep?.id === 'slide' && !(wide && (feedbackSheet === 'journey' || feedbackSheet === 'give')) ? 'p-4' : 'p-6'}`}>
+          {wide && feedbackSheet === 'journey' && user ? (
+            <LearningJourneySheet
+              inline
+              courseTitle={course.title}
+              takeaway={takeawayText}
+              hasTakeAwayStep={!!course.hasKeyTakeAway}
+              reviews={leadReviews}
+              finished={progress.slideDone || serverStatus === 'completed' || DEMO_MODE}
+              person={{ name: formatPersonName(user), photoURL: user.photoURL }}
+              onWriteTakeAway={course.hasKeyTakeAway && !isLocked('takeaway') ? () => { setFeedbackSheet(null); setActiveStep('takeaway') } : undefined}
+              onRateCourse={() => setFeedbackSheet('give')}
+              onClose={() => setFeedbackSheet(null)}
+            />
+          ) : wide && feedbackSheet === 'give' && user ? (
+            <LearnerFeedbackSheet inline uid={user.uid} courseId={id} courseTitle={course.title} onClose={() => setFeedbackSheet('journey')} />
+          ) : currentStep && (
             <StepContent
               step={currentStep}
               course={course}

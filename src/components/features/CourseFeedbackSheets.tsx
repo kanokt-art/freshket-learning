@@ -18,8 +18,10 @@ import { keepValidTags, tagsFor } from '@/lib/courses/feedbackTags'
 //    their Key Take Away. Nobody else can read it (policies.ts / viewOf), so a team lead or manager never
 //    sees what a learner said about a course.
 
-export function LearnerFeedbackSheet({ uid, courseId, courseTitle, onClose }: {
+export function LearnerFeedbackSheet({ uid, courseId, courseTitle, onClose, inline = false }: {
   uid: string; courseId: string; courseTitle: string; onClose: () => void
+  /** In the page (a computer) instead of a card over it (a phone). */
+  inline?: boolean
 }) {
   const id = `${uid}_${courseId}`
   const [rating, setRating] = useState<number | null>(null)
@@ -67,7 +69,7 @@ export function LearnerFeedbackSheet({ uid, courseId, courseTitle, onClose }: {
 
   if (sent) {
     return (
-      <FeedbackSheetFrame onClose={onClose} footer={<SheetButton onClick={onClose}>เสร็จสิ้น</SheetButton>}>
+      <FeedbackSheetFrame inline={inline} onClose={onClose} footer={<SheetButton onClick={onClose}>เสร็จสิ้น</SheetButton>}>
         <div className="size-16 rounded-full bg-freshket-100 flex items-center justify-center mx-auto">
           <svg className="size-8 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
         </div>
@@ -79,7 +81,7 @@ export function LearnerFeedbackSheet({ uid, courseId, courseTitle, onClose }: {
 
   const choices = tagsFor(rating)
   return (
-    <FeedbackSheetFrame onClose={onClose} footer={<SheetButton onClick={submit} disabled={!rating || saving}>{saving ? 'กำลังส่ง…' : 'ส่ง Feedback'}</SheetButton>}>
+    <FeedbackSheetFrame inline={inline} onClose={onClose} footer={<SheetButton onClick={submit} disabled={!rating || saving}>{saving ? 'กำลังส่ง…' : 'ส่ง Feedback'}</SheetButton>}>
       <h2 className="text-xl font-extrabold text-gray-900 leading-snug px-4">คุณคิดอย่างไรกับหลักสูตรนี้?</h2>
       <p className="mt-1.5 text-sm text-gray-400 px-4 line-clamp-2">{courseTitle}</p>
 

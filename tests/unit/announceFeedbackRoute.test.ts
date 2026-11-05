@@ -99,6 +99,15 @@ describe('course feedback', () => {
     expect(mine[0].data).toMatchObject({ type: 'course_feedback_received', refPath: '/courses/c1?feedback=1', read: false })
   })
 
+  it('reads the record the caller saved under their own id, so a team lead and a manager are told apart', async () => {
+    caller = { uid: 'mgr1', role: 'manager', isSuperAdmin: false, person: { id: 'mgr1', displayNameEN: 'Boss Man' } }
+    docs.courseFeedback.push({ id: 'sale1_c1__mgr1', memberUid: 'sale1', courseId: 'c1', leadUid: 'mgr1', leadRole: 'manager', score: 5, comment: 'เยี่ยมมาก' })
+    await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })
+    expect(dm).toHaveBeenCalledTimes(1)
+    expect(dmText()).toContain('5/5 ดาว')
+    expect(dmText()).toContain('เยี่ยมมาก')
+  })
+
   it('tells them once: editing the feedback later says nothing more', async () => {
     asLead()
     await call({ kind: 'course_feedback', memberUid: 'sale1', courseId: 'c1' })
