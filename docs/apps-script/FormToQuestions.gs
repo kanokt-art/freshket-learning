@@ -12,8 +12,8 @@
  * 1. Open the Google Form → ⋮ (top right) → Apps Script.
  * 2. Paste this whole file, save.
  * 3. Run `exportQuestions` once and approve the permission prompt.
- * 4. The JSON is saved as a file in your Google Drive (the link is printed in the log). Open it, Ctrl+A, Ctrl+C.
- *    (Do not copy from the log: it truncates long output. The extra permission prompt is for creating that file.)
+ * 4. The JSON is saved in a new Google Doc in your Drive (the link is printed in the log). Open it, Ctrl+A, Ctrl+C.
+ *    (Do not copy from the log: it truncates long output. The extra permission prompt is for creating that Doc.)
  * 5. In the LMS: แบบทดสอบ → สร้างแบบทดสอบ → "นำเข้าจาก Google Form" → paste → ตรวจสอบ.
  *
  * For a form NOT open in front of you, use `exportQuestionsById` instead and
@@ -57,16 +57,15 @@ function printExport_(form) {
   var result = buildExport_(form)
 
   // The execution log cuts long output ("Logging output too large"), and a pretty-printed quiz is long. So the
-  // JSON is compact, and it is also written to a file in Drive — open that file, select all, copy, paste.
+  // JSON is compact, and it is also written into a Google Doc: Drive shows no preview for a .json file (the page
+  // looks empty), but a Doc opens as text you can select and copy.
   var json = JSON.stringify(result.payload)
-  var file = DriveApp.createFile(
-    'quiz-export-' + (str_(result.payload.title) || 'form').replace(/[^\w฀-๿ -]+/g, '').slice(0, 60) + '.json',
-    json,
-    MimeType.PLAIN_TEXT
-  )
+  var doc = DocumentApp.create('quiz-export ' + (str_(result.payload.title) || 'form').slice(0, 60))
+  doc.getBody().setText(json)
+  doc.saveAndClose()
   Logger.log('สรุป: นำเข้าได้ ' + result.payload.questions.length + ' ข้อ, ข้าม ' + result.skipped.length + ' ข้อ')
-  Logger.log('บันทึกไฟล์ JSON ไว้ใน Google Drive ของคุณแล้ว: ' + file.getUrl())
-  Logger.log('เปิดไฟล์นั้น → Ctrl+A → Ctrl+C แล้วไปวางในระบบ (ไม่ต้องคัดลอกจาก Log)')
+  Logger.log('บันทึก JSON เป็น Google Docs ไว้ใน Drive ของคุณแล้ว: ' + doc.getUrl())
+  Logger.log('เปิดเอกสารนั้น → Ctrl+A → Ctrl+C แล้วไปวางในระบบ (ไม่ต้องคัดลอกจาก Log)')
   Logger.log('ขนาด JSON ' + json.length + ' ตัวอักษร — ถ้าอยากคัดลอกจาก Log ให้คัดลอกทุกส่วนที่ขึ้นต้น [JSON n/m] ต่อกันตามลำดับ')
   // Also in the log, in pieces small enough not to be cut.
   var CHUNK = 3000
