@@ -20,7 +20,8 @@ import { alertError, confirmAction } from '@/lib/ui/alert'
 import { parseFormJson, type ImportResult } from '@/lib/assessment/importFormJson'
 import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
 import { duplicateKeys, hasDuplicateAnswers, normalizeText } from '@/lib/assessment/authoring'
-import { REVEAL_MODES, normalizeRevealMode, type RevealMode } from '@/lib/assessment/reveal'
+import { REVEAL_MODES, type RevealMode } from '@/lib/assessment/reveal'
+import { clampMinutes, loadQuizDefaults, saveQuizDefaults, startingSettings } from '@/lib/assessment/quizDefaults'
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
 
@@ -467,12 +468,15 @@ function AssessmentEditor({
   const [mode, setMode] = useState<AssessmentMode>(initial?.googleFormUrl ? 'google_form' : 'builder')
   const [title, setTitle] = useState(initial?.title ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
-  const [passingScore, setPassingScore] = useState(String(initial?.passingScore ?? 70))
+  // A new quiz starts from the settings used last time (remembered in this browser); an existing one from its own.
+  const [start] = useState(() => startingSettings(initial, initial ? null : loadQuizDefaults()))
+  const [passingScore, setPassingScore] = useState(String(start.passingScore))
+  const [timeLimit, setTimeLimit] = useState(start.timeLimitMinutes)
   const [isPublished, setIsPublished] = useState(initial?.isPublished ?? false)
   // On unless the admin turns it off: a learner who fails may sit it again.
-  const [allowRetakeOnFail, setAllowRetakeOnFail] = useState(initial?.allowRetakeOnFail !== false)
+  const [allowRetakeOnFail, setAllowRetakeOnFail] = useState(start.allowRetakeOnFail)
   // What a learner sees of their answers once they submit.
-  const [revealMode, setRevealMode] = useState<RevealMode>(normalizeRevealMode(initial?.revealMode))
+  const [revealMode, setRevealMode] = useState<RevealMode>(start.revealMode)
   const [questions, setQuestions] = useState<Question[]>(initial?.questions ?? [])
   // Drag-to-reorder: the question being dragged and the one it is over.
   const [dragId, setDragId] = useState<string | null>(null)
@@ -593,6 +597,7 @@ function AssessmentEditor({
 
     setSaving(true)
     try {
+      saveQuizDefaults({ passingScore: Number(passingScore) || 70, timeLimitMinutes: clampMinutes(timeLimit), allowRetakeOnFail, revealMode })
       const now = new Date()
       const payload = {
         title: title.trim(),
@@ -603,6 +608,7 @@ function AssessmentEditor({
         passingScore: Number(passingScore) || 70,
         allowRetakeOnFail,
         revealMode,
+        timeLimitMinutes: clampMinutes(timeLimit),
         createdBy: userId,
       }
       if (DEMO_MODE) {
@@ -624,7 +630,7 @@ function AssessmentEditor({
     } finally {
       setSaving(false)
     }
-  }, [title, description, passingScore, allowRetakeOnFail, revealMode, isPublished, questions, googleFormUrl, mode, userId, initial, onSave])
+  }, [title, description, passingScore, timeLimit, allowRetakeOnFail, revealMode, isPublished, questions, googleFormUrl, mode, userId, initial, onSave])
 
   const dupQuestionCount = mode === 'builder' ? questions.filter(hasDuplicateAnswers).length : 0
 
@@ -676,28 +682,44 @@ function AssessmentEditor({
 
             {mode === 'builder' && (
               <>
+                {/* Time limit: 15 minutes unless the admin changes it; 0 = no limit */}
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-gray-600">ทำซ้ำได้เมื่อสอบไม่ผ่าน</span>
-                  <button type="button" role="switch" aria-checked={allowRetakeOnFail} aria-label="อนุญาตให้ทำซ้ำเมื่อสอบไม่ผ่าน"
-                    title={allowRetakeOnFail ? 'ผู้เรียนที่ไม่ผ่านทำใหม่ได้ และบันทึกคะแนนทุกครั้ง' : 'ปิดอยู่: ผู้เรียนที่ไม่ผ่านจะทำซ้ำไม่ได้ (ต้องให้ Admin ล้างประวัติ)'}
-                    onClick={() => setAllowRetakeOnFail((v) => !v)}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 shrink-0 ${allowRetakeOnFail ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                    <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${allowRetakeOnFail ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-                  </button>
+                  <span className="text-xs font-bold text-gray-600">เวลาทำแบบทดสอบ</span>
+                  <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white">
+                    <button type="button" aria-label="ลดเวลา 5 นาที" onClick={() => setTimeLimit((v) => clampMinutes(v - 5))}
+                      className="size-8 flex items-center justify-center text-gray-500 hover:bg-gray-50 rounded-l-lg transition-colors">
+                      <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" /></svg>
+                    </button>
+                    <input type="number" min={0} max={600} value={timeLimit} aria-label="เวลาทำแบบทดสอบ (นาที)"
+                      onChange={(e) => setTimeLimit(clampMinutes(Number(e.target.value)))}
+                      className="w-14 h-8 text-center text-sm focus:outline-none border-x border-gray-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    />
+                    <button type="button" aria-label="เพิ่มเวลา 5 นาที" onClick={() => setTimeLimit((v) => clampMinutes(v + 5))}
+                      className="size-8 flex items-center justify-center text-gray-500 hover:bg-gray-50 rounded-r-lg transition-colors">
+                      <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
+                    </button>
+                  </div>
+                  <span className="text-xs text-gray-400">{timeLimit > 0 ? 'นาที' : 'ไม่จำกัดเวลา'}</span>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-gray-600">การเฉลย</span>
-                  <div className="flex gap-0.5 p-0.5 bg-gray-100 rounded-lg" role="radiogroup" aria-label="การเฉลยหลังทำเสร็จ">
-                    {REVEAL_MODES.map((m) => (
-                      <button key={m.value} type="button" role="radio" aria-checked={revealMode === m.value} title={m.hint}
-                        onClick={() => setRevealMode(m.value)}
-                        className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${revealMode === m.value ? 'bg-white text-freshket-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <label className="flex items-center gap-2 text-xs font-bold text-gray-600 cursor-pointer select-none"
+                  title={allowRetakeOnFail ? 'ผู้เรียนที่ไม่ผ่านทำใหม่ได้ และบันทึกคะแนนทุกครั้ง' : 'ปิดอยู่: ผู้เรียนที่ไม่ผ่านจะทำซ้ำไม่ได้ (ต้องให้ Admin ล้างประวัติ)'}>
+                  <input type="checkbox" checked={allowRetakeOnFail} onChange={(e) => setAllowRetakeOnFail(e.target.checked)}
+                    className="size-4 rounded border-gray-300 text-freshket-500 focus:ring-2 focus:ring-freshket-300 cursor-pointer" />
+                  ทำซ้ำได้เมื่อสอบไม่ผ่าน
+                </label>
+
+                <fieldset className="flex items-center gap-3">
+                  <legend className="sr-only">การเฉลยหลังทำเสร็จ</legend>
+                  <span className="text-xs font-bold text-gray-600" aria-hidden="true">การเฉลย</span>
+                  {REVEAL_MODES.map((m) => (
+                    <label key={m.value} title={m.hint} className="flex items-center gap-1.5 text-xs font-bold text-gray-600 cursor-pointer select-none">
+                      <input type="radio" name="revealMode" value={m.value} checked={revealMode === m.value} onChange={() => setRevealMode(m.value)}
+                        className="size-4 border-gray-300 text-freshket-500 focus:ring-2 focus:ring-freshket-300 cursor-pointer" />
+                      {m.label}
+                    </label>
+                  ))}
+                </fieldset>
               </>
             )}
 

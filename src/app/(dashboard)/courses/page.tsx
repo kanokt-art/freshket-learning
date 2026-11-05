@@ -57,6 +57,7 @@ import { alertError, confirmAction } from '@/lib/ui/alert'
 import { formatTenure } from '@/lib/users/tenure'
 import { CopyableText, StartDateCell } from '@/components/common/EmployeeCells'
 import { formatPersonName } from '@/lib/users/displayName'
+import { CourseDashboard } from '@/components/features/CourseDashboard'
 import { onlyCurrentOrIncoming, isCurrentOrIncoming, isActiveEmployee } from '@/lib/users/active'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { BUCKET_ASSESSMENT_LIST, getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
@@ -2325,7 +2326,7 @@ function SaveConfirmationModal({ recipientCount, skippedCount, saving, onBack, o
 }
 
 // ── Course Builder (full-page, sidebar tabs) ──────────────────────────────────
-type BuilderTab = 'details' | 'lessons' | 'quiz' | 'learners' | 'summary'
+type BuilderTab = 'details' | 'lessons' | 'quiz' | 'learners' | 'dashboard' | 'summary'
 
 // Order = setup first, then the read-only report. "สรุปผลการเรียน" sits last
 // because it reports on the course rather than configuring it. "แบบทดสอบ"
@@ -2335,6 +2336,7 @@ const BUILDER_TABS: { id: BuilderTab; label: string }[] = [
   { id: 'lessons',  label: 'บทเรียน' },
   { id: 'quiz',     label: 'แบบทดสอบ' },
   { id: 'learners', label: 'กำหนดผู้เรียน' },
+  { id: 'dashboard', label: 'แดชบอร์ด' },
   { id: 'summary',  label: 'สรุปผลการเรียน' },
 ]
 
@@ -2417,6 +2419,11 @@ function BuilderTabIcon({ id, className }: { id: BuilderTab; className?: string 
   if (id === 'learners') return (
     <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+    </svg>
+  )
+  if (id === 'dashboard') return (
+    <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.148 2.148A12.061 12.061 0 0116.5 7.605" />
     </svg>
   )
   if (id === 'summary') return (
@@ -4565,7 +4572,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   const lessonCount = form.topics.reduce((s, t) => s + t.lessons.filter((l) => l.type !== 'quiz').length, 0)
   // "สรุปผลการเรียน" only makes sense once the course exists and can have real
   // training records — hide it while creating a brand-new course.
-  const visibleTabs = isEdit ? BUILDER_TABS : BUILDER_TABS.filter((t) => t.id !== 'summary')
+  const visibleTabs = isEdit ? BUILDER_TABS : BUILDER_TABS.filter((t) => t.id !== 'summary' && t.id !== 'dashboard')
 
   // ── Learner summary tab: same targeting rule as LearnerResultsModal (explicit
   // assignedUserIds, falling back to target roles) so the count here always
@@ -5050,6 +5057,14 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                   </div>
                 )}
               </div>
+              )}
+
+              {/* ── Dashboard tab: the same learners as the summary, drawn as charts ── */}
+              {tab === 'dashboard' && editCourse && (
+                <CourseDashboard
+                  courseId={editCourse.id}
+                  rows={visibleSummaryRows.map((r) => ({ department: r.user.department, record: r.record }))}
+                />
               )}
 
               {/* ── Summary tab ── */}
