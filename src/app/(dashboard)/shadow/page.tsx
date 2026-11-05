@@ -1590,7 +1590,7 @@ export default function ShadowPage() {
           <button
             type="button"
             onClick={() => setShowForm(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors shadow-sm"
+            className="hidden lg:inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors shadow-sm"
           >
             <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -1731,6 +1731,17 @@ export default function ShadowPage() {
         )}
 
       </div>
+
+      {/* A floating + on a phone (the header button is for wider screens). Team leads and above also have the
+          admin button in that corner, so theirs sits one step higher. */}
+      <button
+        type="button"
+        onClick={() => setShowForm(true)}
+        aria-label="สร้าง Shadow Visit"
+        className={`lg:hidden fixed right-4 z-40 size-14 rounded-full bg-freshket-500 text-white shadow-xl flex items-center justify-center hover:bg-freshket-600 active:scale-95 transition-all duration-150 ${isLead ? 'bottom-[150px]' : 'bottom-[78px]'}`}
+      >
+        <svg className="size-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
 
       {/* ── Member visits overlay (TL / Manager) ───────────────────────── */}
       {overlayMember && (

@@ -22,7 +22,7 @@ export function PracticeTabs() {
   if (visible.length === 0) return null
 
   return (
-    <nav className="flex items-center gap-6 px-6 bg-white border-b border-gray-100 overflow-x-auto">
+    <nav className="hidden lg:flex items-center gap-6 px-6 bg-white border-b border-gray-100 overflow-x-auto">
       <span className="text-xs font-bold text-gray-400 uppercase tracking-wide py-3 shrink-0">Practice</span>
       {visible.map((t) => {
         const active = pathname.startsWith(t.href)

@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { canAccess } from '@/types/user'
 import { useEffect, useState } from 'react'
+import { useModuleAccess } from '@/hooks/useModuleAccess'
 
 // ── Icon pairs: filled (active) vs outlined (inactive) ───────────────────────
 
@@ -56,6 +57,102 @@ function ProfileIcon({ filled }: { filled: boolean }) {
     <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
       <path d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
     </svg>
+  )
+}
+
+// ── Practice: a + in the middle of the bar; it opens a sheet to pick Shadow Record or Role Play ─────────────
+
+const PRACTICE_OPTIONS = [
+  {
+    href: '/shadow',
+    module: 'shadow' as const,
+    title: 'Shadow Record',
+    hint: 'บันทึกการ Shadow กับพี่เลี้ยง',
+    icon: (
+      <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+        <path d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+      </svg>
+    ),
+  },
+  {
+    href: '/courses/roleplay',
+    module: 'roleplay' as const,
+    title: 'Role Play',
+    hint: 'ฝึกซ้อมการขายและรับการประเมิน',
+    icon: (
+      <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
+      </svg>
+    ),
+  },
+]
+
+function PracticeButton({ active }: { active: boolean }) {
+  const pathname = usePathname()
+  const { user } = useAuth()
+  const { allowedModules } = useModuleAccess(user?.role, user?.department)
+  const [open, setOpen] = useState(false)
+  useEffect(() => { setOpen(false) }, [pathname])
+
+  const options = PRACTICE_OPTIONS.filter((o) => allowedModules.has(o.module))
+  if (options.length === 0) return null
+
+  return (
+    <>
+      <div className="flex-1 flex items-center justify-center">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Practice"
+          aria-haspopup="dialog"
+          className={`size-11 rounded-full flex items-center justify-center shadow-md transition-all duration-150 active:scale-90 ${
+            active ? 'bg-freshket-600 text-white ring-4 ring-freshket-100' : 'bg-freshket-500 text-white hover:bg-freshket-600'
+          }`}
+        >
+          <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
+      </div>
+
+      {open && (
+        <div className="fixed inset-0 z-[60] flex items-end bg-slate-900/40" onClick={() => setOpen(false)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Practice"
+            className="w-full bg-white rounded-t-3xl shadow-2xl animate-sheet-up px-5 pt-3 pb-safe"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto w-10 h-1 rounded-full bg-gray-200 mb-4" />
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-base font-bold text-gray-900">Practice</p>
+              <button type="button" onClick={() => setOpen(false)} aria-label="ปิด"
+                className="size-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 transition-colors">
+                <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="space-y-3 pb-5">
+              {options.map((o) => {
+                const here = pathname.startsWith(o.href)
+                return (
+                  <Link key={o.href} href={o.href} onClick={() => setOpen(false)}
+                    className={`flex items-center gap-4 rounded-2xl border-2 p-4 transition-all duration-150 active:scale-[0.98] ${
+                      here ? 'border-freshket-500 bg-freshket-50' : 'border-gray-100 bg-white hover:border-freshket-200 hover:bg-freshket-50'
+                    }`}>
+                    <span className="size-12 rounded-xl bg-freshket-100 text-freshket-700 flex items-center justify-center shrink-0">{o.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-bold text-gray-900">{o.title}</span>
+                      <span className="block text-xs text-gray-500 mt-0.5">{o.hint}</span>
+                    </span>
+                    <svg className="size-5 text-gray-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg>
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -144,7 +241,9 @@ export function BottomBar() {
   const homeActive    = pathname === '/sale'
   // Mandatory Reading sits under Tools, though its page lives at /courses/mandatory.
   const mandatory     = pathname.startsWith('/courses/mandatory')
-  const courseActive  = (pathname.startsWith('/courses') || pathname.startsWith('/shadow')) && !mandatory
+  // Shadow Record and Role Play belong to the + (Practice) button, not to Courses.
+  const practiceActive = pathname.startsWith('/shadow') || pathname.startsWith('/courses/roleplay')
+  const courseActive  = pathname.startsWith('/courses') && !mandatory && !practiceActive
   const toolActive    = pathname.startsWith('/tools') || mandatory
   const profileActive = pathname === '/profile'
 
@@ -160,6 +259,13 @@ export function BottomBar() {
       label: 'หลักสูตร',
       active: courseActive,
       icon: <CourseIcon filled={courseActive} />,
+    },
+    {
+      // Handled specially in the render below: opens the Practice sheet instead of navigating.
+      href: '#practice',
+      label: 'Practice',
+      active: practiceActive,
+      icon: null,
     },
     {
       href: '/tools',
@@ -188,7 +294,9 @@ export function BottomBar() {
     <nav className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-white/95 backdrop-blur-md border-t border-gray-100 shadow-[0_-4px_24px_rgba(0,0,0,0.06)]">
       <div className="flex items-center justify-around h-[62px] pb-safe px-1">
         {items.map((item) =>
-          item.href === null ? (
+          item.href === '#practice' ? (
+            <PracticeButton key="practice" active={item.active} />
+          ) : item.href === null ? (
             // Notification bell — opens a popover in place instead of navigating.
             <NotificationBellButton key="notifications" variant="nav" />
           ) : (
