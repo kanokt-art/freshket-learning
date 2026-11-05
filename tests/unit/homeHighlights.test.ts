@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { highlightCandidates, pickHighlights, togglePin, AUTO_COUNT } from '@/lib/home/highlights'
+import { highlightCandidates, pickHighlights, togglePin, hasUnseen, tabOf, AUTO_COUNT } from '@/lib/home/highlights'
 
 const day = (n: number) => new Date(Date.UTC(2026, 10, n))
 
@@ -36,6 +36,25 @@ describe('pickHighlights', () => {
     const r = pickHighlights(candidates, [{ key: 'tool:hidden', pinnedAt: '2026-11-01T00:00:00Z' }])
     expect(r.pinned).toBe(false)
     expect(r.items[0].key).toBe('tool:t1')
+  })
+})
+
+describe('hasUnseen (the red dot on a tab)', () => {
+  it('is on for a tab never opened that has something in it, and off for an empty one', () => {
+    expect(hasUnseen(candidates, null)).toBe(true)
+    expect(hasUnseen([], null)).toBe(false)
+  })
+
+  it('goes off once opened, and comes back when something newer arrives', () => {
+    const openedAt = day(6).toISOString()
+    expect(hasUnseen(candidates, openedAt)).toBe(false)
+    const newer = highlightCandidates({ mandatory: [], tools: [], announcements: [], courses: [{ id: 'c2', title: 'New', updatedAt: day(7) }] })
+    expect(hasUnseen([...candidates, ...newer], openedAt)).toBe(true)
+  })
+
+  it('splits courses from everything else', () => {
+    expect(candidates.filter((c) => tabOf(c) === 'course').map((c) => c.key)).toEqual(['course:c1'])
+    expect(candidates.filter((c) => tabOf(c) === 'activity')).toHaveLength(3)
   })
 })
 

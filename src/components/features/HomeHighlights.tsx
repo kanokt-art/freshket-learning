@@ -1,9 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { FeedbackSheetFrame, SheetButton } from '@/components/features/FeedbackSheetFrame'
-import { KIND_LABEL, type HighlightItem, type HighlightKind } from '@/lib/home/highlights'
+import {
+  KIND_LABEL, hasUnseen, pickHighlights, tabOf,
+  type HighlightItem, type HighlightKind, type HighlightPin, type HighlightTab,
+} from '@/lib/home/highlights'
 
 // The "Latest" row on the learner's home, and the super_admin's list for pinning what it shows.
 
@@ -54,25 +57,88 @@ function Card({ item, pinned, onOpen }: { item: HighlightItem; pinned: boolean; 
     : <Link href={item.href} className={cls}>{body}</Link>
 }
 
-/** The learner's row of what is new. A news post opens in a card; everything else goes to its page. */
-export function HomeHighlightsRow({ items, pinnedOnly, bodies }: {
-  items: readonly HighlightItem[]
-  pinnedOnly: boolean
+const TABS: { id: HighlightTab; label: string; empty: string }[] = [
+  { id: 'course', label: 'Latest Course', empty: 'ยังไม่มีหลักสูตรใหม่' },
+  { id: 'activity', label: 'Activity', empty: 'ยังไม่มีความเคลื่อนไหว' },
+]
+
+// When this person last opened each tab, kept in this browser: a red dot shows on a tab until they open it.
+const seenKey = (uid: string, tab: HighlightTab) => `fk_latest_seen_${uid}_${tab}`
+const readSeen = (uid: string, tab: HighlightTab): string | null => {
+  try { return localStorage.getItem(seenKey(uid, tab)) } catch { return null }
+}
+
+/**
+ * The learner's row of what is new, in two tabs — Latest Course and Activity (news, Mandatory, tools).
+ * Each tab shows its pins, or its newest few when nothing in it is pinned. A tab with something newer
+ * than the last time the person opened it carries a red dot until they open it. A news post opens in a
+ * card; everything else goes to its page.
+ */
+export function HomeHighlightsRow({ uid, candidates, pins, bodies }: {
+  uid: string
+  /** Everything this person may see, newest first. */
+  candidates: readonly HighlightItem[]
+  pins: readonly HighlightPin[]
   /** A news post's text, by item key, for the card it opens in. */
   bodies?: ReadonlyMap<string, string>
 }) {
   const [reading, setReading] = useState<HighlightItem | null>(null)
-  if (items.length === 0) return null
+  const [tab, setTab] = useState<HighlightTab>('course')
+  const [seen, setSeen] = useState<Record<HighlightTab, string | null>>({ course: null, activity: null })
+  useEffect(() => { if (uid) setSeen({ course: readSeen(uid, 'course'), activity: readSeen(uid, 'activity') }) }, [uid])
+
+  const byTab = useMemo(() => {
+    const out = {} as Record<HighlightTab, { items: HighlightItem[]; pinned: boolean }>
+    for (const t of TABS) {
+      const inTab = candidates.filter((c) => tabOf(c) === t.id)
+      const pinsInTab = pins.filter((p) => (p.key.startsWith('course:') ? 'course' : 'activity') === t.id)
+      out[t.id] = pickHighlights(inTab, pinsInTab)
+    }
+    return out
+  }, [candidates, pins])
+
+  if (candidates.length === 0) return null
+
+  const open = (t: HighlightTab) => {
+    setTab(t)
+    const now = new Date().toISOString()
+    setSeen((s) => ({ ...s, [t]: now }))
+    try { localStorage.setItem(seenKey(uid, t), now) } catch { /* ignore */ }
+  }
+  const current = byTab[tab]
+
   return (
     <section>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-bold text-gray-900">Latest <span className="ml-2 text-xs font-normal text-gray-400">อัปเดตล่าสุด</span></h2>
+      <div className="flex items-center gap-2 mb-3">
+        <h2 className="text-sm font-bold text-gray-900 mr-2">Latest</h2>
+        {TABS.map((t) => {
+          const dot = hasUnseen(byTab[t.id].items, seen[t.id])
+          const active = tab === t.id
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => open(t.id)}
+              aria-pressed={active}
+              className={`relative inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold border transition-all duration-150 ${
+                active ? 'bg-freshket-100 text-freshket-700 border-freshket-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              {t.label}
+              {dot && <span aria-label="มีอัปเดตใหม่" className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-rose-500 ring-2 ring-white" />}
+            </button>
+          )
+        })}
       </div>
-      <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-5 px-5 scroll-px-5">
-        {items.map((item) => (
-          <Card key={item.key} item={item} pinned={pinnedOnly} onOpen={item.kind === 'announcement' ? () => setReading(item) : undefined} />
-        ))}
-      </div>
+      {current.items.length === 0 ? (
+        <p className="text-xs text-gray-400 py-6 text-center bg-white rounded-2xl border border-gray-100">{TABS.find((t) => t.id === tab)?.empty}</p>
+      ) : (
+        <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-5 px-5 scroll-px-5">
+          {current.items.map((item) => (
+            <Card key={item.key} item={item} pinned={current.pinned} onOpen={item.kind === 'announcement' ? () => setReading(item) : undefined} />
+          ))}
+        </div>
+      )}
       {reading && (
         <FeedbackSheetFrame onClose={() => setReading(null)} footer={<SheetButton onClick={() => setReading(null)}>ปิด</SheetButton>}>
           <div className="text-left">
@@ -105,8 +171,8 @@ export function HomeHighlightsAdmin({ all, pinnedKeys, onToggle }: {
         <h2 className="text-base font-bold text-gray-900">Latest บนหน้าแรกของพนักงาน</h2>
         <p className="text-xs text-gray-500 mt-0.5">
           {pinnedCount > 0
-            ? `ปักหมุดไว้ ${pinnedCount} รายการ: หน้าแรกจะแสดงเฉพาะรายการที่ปักหมุด`
-            : 'ยังไม่ได้ปักหมุด: หน้าแรกจะแสดงรายการใหม่ล่าสุด 6 รายการให้อัตโนมัติ'}
+            ? `ปักหมุดไว้ ${pinnedCount} รายการ: แท็บที่มีรายการปักหมุด (Latest Course / Activity) จะแสดงเฉพาะรายการที่ปักหมุด`
+            : 'ยังไม่ได้ปักหมุด: แต่ละแท็บจะแสดงรายการใหม่ล่าสุด 6 รายการให้อัตโนมัติ'}
         </p>
       </div>
       <table className="w-full text-sm">

@@ -55,7 +55,8 @@ export function highlightCandidates(src: {
     push({ key: `tool:${t.id}`, kind: 'tool', title: t.title, subtitle: t.description, imageUrl: t.imageUrl || undefined, href: '/tools' }, t.createdAt)
   }
   for (const c of src.courses) {
-    push({ key: `course:${c.id}`, kind: 'course', title: c.title, subtitle: c.description, imageUrl: c.thumbnailUrl || undefined, href: `/courses/${c.id}` }, c.createdAt ?? c.updatedAt)
+    // A course counts from its last update, so an updated course shows as new again.
+    push({ key: `course:${c.id}`, kind: 'course', title: c.title, subtitle: c.description, imageUrl: c.thumbnailUrl || undefined, href: `/courses/${c.id}` }, c.updatedAt ?? c.createdAt)
   }
   for (const a of src.announcements) {
     push({ key: `announcement:${a.id}`, kind: 'announcement', title: a.title, subtitle: a.body, imageUrl: a.imageUrl || undefined, href: '/sale' }, a.createdAt)
@@ -75,6 +76,21 @@ export function pickHighlights(candidates: readonly HighlightItem[], pins: reado
     .filter((c): c is HighlightItem => !!c)
   if (pinned.length > 0) return { items: pinned, pinned: true }
   return { items: candidates.slice(0, AUTO_COUNT), pinned: false }
+}
+
+/** The two tabs of the row: new courses, and everything else that happened (news, Mandatory, tools). */
+export type HighlightTab = 'course' | 'activity'
+export const tabOf = (item: HighlightItem): HighlightTab => (item.kind === 'course' ? 'course' : 'activity')
+
+/**
+ * Something in a tab changed since the person last opened it. `seenAt` is when they last opened it
+ * (ISO); never opened counts as unseen when the tab has anything in it.
+ */
+export function hasUnseen(items: readonly HighlightItem[], seenAt: string | null | undefined): boolean {
+  const newest = items.reduce((m, i) => Math.max(m, i.at.getTime()), 0)
+  if (newest === 0) return false
+  const seen = seenAt ? new Date(seenAt).getTime() : 0
+  return !Number.isFinite(seen) || newest > seen
 }
 
 /** The pins after turning one on or off. */

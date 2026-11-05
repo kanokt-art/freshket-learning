@@ -424,7 +424,7 @@ export default function SaleDashboardPage() {
 
           {/* ── Latest: what's new (Mandatory, tools, courses, news), pinned by a super_admin ── */}
           {!isAdmin && (
-            <HomeHighlightsRow items={highlights.items} pinnedOnly={highlights.pinnedOnly} bodies={announcementBodies} />
+            <HomeHighlightsRow uid={user?.uid ?? ''} candidates={highlights.visible} pins={highlights.pins} bodies={announcementBodies} />
           )}
 
           {/* ── For You (sale only) / User Table (admin) ────────────────────── */}

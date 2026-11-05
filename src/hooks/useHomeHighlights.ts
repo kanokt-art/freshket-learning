@@ -73,5 +73,6 @@ export function useHomeHighlights(viewer: UserProfile | null | undefined) {
     await patch('appConfig', HIGHLIGHTS_DOC, { pins: next, updatedAt: new Date() })
   }, [pins])
 
-  return { items: shown.items, pinnedOnly: shown.pinned, all, pinnedKeys, setPinned }
+  /** What the person may see, and the pins: the row picks per tab from these. */
+  return { items: shown.items, pinnedOnly: shown.pinned, visible, pins, all, pinnedKeys, setPinned }
 }
