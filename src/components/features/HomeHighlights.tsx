@@ -156,68 +156,104 @@ export function HomeHighlightsRow({ uid, candidates, pins, bodies }: {
   )
 }
 
-/** The super_admin's list: every published item, newest first, with a Pin / Pinned switch. */
+/**
+ * The super_admin's Spotlight settings: every course, tool, Mandatory and news post — drafts included,
+ * so something just created shows here at once — split by the learner home's two tabs, newest first,
+ * each with a Spotlight / Spotlighted switch. A tab with anything spotlighted shows only those; a tab with
+ * nothing spotlighted shows its newest six by itself. A draft can be spotlighted ahead of time and shows
+ * to learners once it is published.
+ */
 export function HomeHighlightsAdmin({ all, pinnedKeys, onToggle }: {
   all: readonly HighlightItem[]
   pinnedKeys: ReadonlySet<string>
   onToggle: (key: string, on: boolean) => Promise<void>
 }) {
   const [busy, setBusy] = useState<string | null>(null)
-  const [shown, setShown] = useState(12)
-  const pinnedCount = all.filter((i) => pinnedKeys.has(i.key)).length
+  const [shown, setShown] = useState<Record<HighlightTab, number>>({ course: 10, activity: 10 })
+
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b border-gray-100">
-        <h2 className="text-base font-bold text-gray-900">Latest บนหน้าแรกของพนักงาน</h2>
-        <p className="text-xs text-gray-500 mt-0.5">
-          {pinnedCount > 0
-            ? `ปักหมุดไว้ ${pinnedCount} รายการ: แท็บที่มีรายการปักหมุด (Latest Course / Activity) จะแสดงเฉพาะรายการที่ปักหมุด`
-            : 'ยังไม่ได้ปักหมุด: แต่ละแท็บจะแสดงรายการใหม่ล่าสุด 6 รายการให้อัตโนมัติ'}
-        </p>
-      </div>
-      <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-xs text-gray-500">
-          <tr>
-            <th className="text-left font-bold px-5 py-3">Item</th>
-            <th className="text-left font-bold px-3 py-3 hidden sm:table-cell">Type</th>
-            <th className="text-center font-bold px-5 py-3 w-36">Home</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {all.slice(0, shown).map((item) => {
-            const on = pinnedKeys.has(item.key)
-            return (
-              <tr key={item.key}>
-                <td className="px-5 py-3">
-                  <p className="font-bold text-gray-900 line-clamp-1">{item.title}</p>
-                  <p className="text-xs text-gray-400 sm:hidden">{KIND_LABEL[item.kind]}</p>
-                </td>
-                <td className="px-3 py-3 hidden sm:table-cell">
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${KIND_STYLE[item.kind].pill}`}>{KIND_LABEL[item.kind]}</span>
-                </td>
-                <td className="px-5 py-3 text-center">
-                  <button
-                    type="button"
-                    disabled={busy === item.key}
-                    onClick={async () => { setBusy(item.key); try { await onToggle(item.key, !on) } finally { setBusy(null) } }}
-                    className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-bold transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed ${
-                      on ? 'bg-freshket-600 text-white hover:bg-freshket-700' : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    <PinGlyph />
-                    {on ? 'Pinned' : 'Pin'}
-                  </button>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      {all.length > shown && (
-        <button type="button" onClick={() => setShown((n) => n + 12)} className="w-full py-3 text-sm font-bold text-freshket-700 border-t border-gray-100 hover:bg-gray-50 transition-all duration-150">
-          ดูเพิ่ม ({all.length - shown})
-        </button>
-      )}
+    <div className="space-y-6">
+      {TABS.map((t) => {
+        const rows = all.filter((i) => tabOf(i) === t.id)
+        const spotlighted = rows.filter((i) => pinnedKeys.has(i.key)).length
+        return (
+          <section key={t.id}>
+            <div className="flex items-end justify-between gap-3 mb-3">
+              <div>
+                <h2 className="text-base font-bold text-gray-900">{t.label}</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {spotlighted > 0
+                    ? `Spotlight ${spotlighted} รายการ: แท็บนี้บนหน้าแรกของพนักงานแสดงเฉพาะรายการที่ Spotlight`
+                    : 'ยังไม่มี Spotlight: แท็บนี้แสดงรายการใหม่ล่าสุด 6 รายการให้อัตโนมัติ'}
+                </p>
+              </div>
+              <span className="text-xs text-gray-400 shrink-0">{rows.length} รายการ</span>
+            </div>
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              {rows.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-8">{t.empty}</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-xs text-gray-500">
+                    <tr>
+                      <th className="text-left font-bold px-5 py-3">Item</th>
+                      <th className="text-left font-bold px-3 py-3 hidden md:table-cell">Type</th>
+                      <th className="text-left font-bold px-3 py-3 hidden sm:table-cell">Status</th>
+                      <th className="text-center font-bold px-5 py-3 w-40">Spotlight</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {rows.slice(0, shown[t.id]).map((item) => {
+                      const on = pinnedKeys.has(item.key)
+                      return (
+                        <tr key={item.key}>
+                          <td className="px-5 py-3">
+                            <p className="font-bold text-gray-900 line-clamp-1">{item.title}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              {shortDate(item.at)}
+                              <span className="md:hidden"> · {KIND_LABEL[item.kind]}</span>
+                              {!item.published && <span className="sm:hidden"> · Draft</span>}
+                            </p>
+                          </td>
+                          <td className="px-3 py-3 hidden md:table-cell">
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${KIND_STYLE[item.kind].pill}`}>{KIND_LABEL[item.kind]}</span>
+                          </td>
+                          <td className="px-3 py-3 hidden sm:table-cell">
+                            {item.published
+                              ? <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">Published</span>
+                              : <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500" title="แสดงบนหน้าแรกเมื่อเผยแพร่แล้ว">Draft</span>}
+                          </td>
+                          <td className="px-5 py-3 text-center">
+                            <button
+                              type="button"
+                              disabled={busy === item.key}
+                              onClick={async () => { setBusy(item.key); try { await onToggle(item.key, !on) } finally { setBusy(null) } }}
+                              className={`inline-flex items-center justify-center min-w-[7.5rem] px-4 py-2 rounded-full text-sm font-bold transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed ${
+                                on ? 'bg-freshket-700 text-white hover:bg-freshket-600' : 'bg-white text-gray-800 border border-gray-200 hover:bg-gray-50'
+                              }`}
+                            >
+                              {on ? 'Spotlighted' : 'Spotlight'}
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+              {rows.length > shown[t.id] && (
+                <button
+                  type="button"
+                  onClick={() => setShown((s) => ({ ...s, [t.id]: s[t.id] + 10 }))}
+                  className="w-full py-3 text-sm font-bold text-freshket-700 border-t border-gray-100 hover:bg-gray-50 transition-all duration-150"
+                >
+                  ดูเพิ่ม ({rows.length - shown[t.id]})
+                </button>
+              )}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }

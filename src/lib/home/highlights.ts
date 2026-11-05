@@ -13,6 +13,8 @@ export interface HighlightItem {
   imageUrl?: string
   href: string
   at: Date
+  /** Live for learners. A draft can be spotlighted ahead of time; learners see it once it is published. */
+  published: boolean
 }
 
 export interface HighlightPin { key: string; pinnedAt: string }
@@ -38,28 +40,28 @@ const toDate = (w: When): Date | null => {
 
 /** Everything that could be shown, already cut to what this person may see, newest first. */
 export function highlightCandidates(src: {
-  mandatory: readonly { id: string; title: string; weekLabel?: string; publishedAt?: When; createdAt?: When }[]
-  tools: readonly { id: string; title: string; description?: string; imageUrl?: string; createdAt?: When }[]
-  courses: readonly { id: string; title: string; description?: string; thumbnailUrl?: string; createdAt?: When; updatedAt?: When }[]
-  announcements: readonly { id: string; title: string; body?: string; imageUrl?: string; createdAt?: When }[]
+  mandatory: readonly { id: string; title: string; weekLabel?: string; publishedAt?: When; createdAt?: When; isPublished?: boolean }[]
+  tools: readonly { id: string; title: string; description?: string; imageUrl?: string; createdAt?: When; isPublished?: boolean }[]
+  courses: readonly { id: string; title: string; description?: string; thumbnailUrl?: string; createdAt?: When; updatedAt?: When; isPublished?: boolean }[]
+  announcements: readonly { id: string; title: string; body?: string; imageUrl?: string; createdAt?: When; isPublished?: boolean }[]
 }): HighlightItem[] {
   const out: HighlightItem[] = []
-  const push = (item: Omit<HighlightItem, 'at'>, at: When) => {
+  const push = (item: Omit<HighlightItem, 'at' | 'published'>, at: When, isPublished?: boolean) => {
     const d = toDate(at)
-    out.push({ ...item, at: d ?? new Date(0) })
+    out.push({ ...item, at: d ?? new Date(0), published: isPublished !== false })
   }
   for (const m of src.mandatory) {
-    push({ key: `mandatory:${m.id}`, kind: 'mandatory', title: m.title, subtitle: m.weekLabel, href: '/courses/mandatory' }, m.publishedAt ?? m.createdAt)
+    push({ key: `mandatory:${m.id}`, kind: 'mandatory', title: m.title, subtitle: m.weekLabel, href: '/courses/mandatory' }, m.publishedAt ?? m.createdAt, m.isPublished)
   }
   for (const t of src.tools) {
-    push({ key: `tool:${t.id}`, kind: 'tool', title: t.title, subtitle: t.description, imageUrl: t.imageUrl || undefined, href: '/tools' }, t.createdAt)
+    push({ key: `tool:${t.id}`, kind: 'tool', title: t.title, subtitle: t.description, imageUrl: t.imageUrl || undefined, href: '/tools' }, t.createdAt, t.isPublished)
   }
   for (const c of src.courses) {
     // A course counts from its last update, so an updated course shows as new again.
-    push({ key: `course:${c.id}`, kind: 'course', title: c.title, subtitle: c.description, imageUrl: c.thumbnailUrl || undefined, href: `/courses/${c.id}` }, c.updatedAt ?? c.createdAt)
+    push({ key: `course:${c.id}`, kind: 'course', title: c.title, subtitle: c.description, imageUrl: c.thumbnailUrl || undefined, href: `/courses/${c.id}` }, c.updatedAt ?? c.createdAt, c.isPublished)
   }
   for (const a of src.announcements) {
-    push({ key: `announcement:${a.id}`, kind: 'announcement', title: a.title, subtitle: a.body, imageUrl: a.imageUrl || undefined, href: '/sale' }, a.createdAt)
+    push({ key: `announcement:${a.id}`, kind: 'announcement', title: a.title, subtitle: a.body, imageUrl: a.imageUrl || undefined, href: '/sale' }, a.createdAt, a.isPublished)
   }
   return out.sort((a, b) => b.at.getTime() - a.at.getTime())
 }

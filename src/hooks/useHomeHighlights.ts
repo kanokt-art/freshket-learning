@@ -39,13 +39,9 @@ export function useHomeHighlights(viewer: UserProfile | null | undefined) {
   const savedPins = doc.data?.pins
   const pins = useMemo(() => (DEMO_MODE ? demoPins : (localPins ?? savedPins ?? [])), [demoPins, localPins, savedPins])
 
-  // Everything published, for the admin's pin list.
-  const all = useMemo(() => highlightCandidates({
-    mandatory: mandatory.filter((m) => m.isPublished),
-    tools: tools.filter((t) => t.isPublished),
-    courses: courses.filter((c) => c.isPublished),
-    announcements: announcements.filter((a) => a.isPublished),
-  }), [mandatory, tools, courses, announcements])
+  // Everything, drafts included, for the super_admin's Spotlight list: a course, tool or Mandatory shows
+  // there as soon as it is created, marked Draft until it is published.
+  const all = useMemo(() => highlightCandidates({ mandatory, tools, courses, announcements }), [mandatory, tools, courses, announcements])
 
   // What this person may see.
   const visible = useMemo(() => {

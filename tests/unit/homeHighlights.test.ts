@@ -18,6 +18,13 @@ describe('highlightCandidates', () => {
   })
 })
 
+describe('drafts on the Spotlight settings page', () => {
+  it('marks an unpublished item as a draft, so it can be spotlighted before it goes live', () => {
+    const items = highlightCandidates({ mandatory: [], announcements: [], tools: [{ id: 't9', title: 'Draft tool', isPublished: false }], courses: [{ id: 'c9', title: 'Live', isPublished: true }] })
+    expect(Object.fromEntries(items.map((i) => [i.key, i.published]))).toEqual({ 'tool:t9': false, 'course:c9': true })
+  })
+})
+
 describe('pickHighlights', () => {
   it('shows the newest few while nothing is pinned', () => {
     const r = pickHighlights(candidates, [])

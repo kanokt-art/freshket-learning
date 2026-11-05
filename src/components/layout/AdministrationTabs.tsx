@@ -36,7 +36,7 @@ export function AdministrationTabs() {
   const isEmployees = pathname === '/users' || pathname.startsWith('/users/')
   const isTools = pathname === '/tools' || pathname.startsWith('/tools/')
   const isSystem = pathname === '/log' || pathname === '/admin/settings'
-    || pathname === '/admin/announcements'
+    || pathname === '/admin/announcements' || pathname === '/admin/spotlight'
 
   // Switch the Tools ↔ Merchandise sub-views by setting the hash directly when
   // already on /tools — Next's <Link>/pushState doesn't fire `hashchange`, so
@@ -83,6 +83,7 @@ export function AdministrationTabs() {
         ? [
             { href: '/admin/settings', label: 'Module Settings', active: pathname === '/admin/settings' },
             { href: '/admin/announcements', label: 'ข่าวสาร (News Feed)', active: pathname === '/admin/announcements' },
+            { href: '/admin/spotlight', label: 'Spotlight หน้าแรก', active: pathname === '/admin/spotlight' },
             { href: '/log', label: 'Activity Log', active: pathname === '/log' },
           ]
         : []
