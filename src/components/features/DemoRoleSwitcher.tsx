@@ -74,12 +74,100 @@ const HEAD_STYLE = {
   dotClass: 'bg-indigo-500',
 }
 
+const SWITCHER_KEY = 'fk_role_switcher'
+
+// Where the bar sits, if it has been dragged (top-left, px); null = the default spot, bottom centre.
+type Pos = { x: number; y: number } | null
+
+function clampTo(pos: { x: number; y: number }, w: number, h: number): { x: number; y: number } {
+  return {
+    x: Math.min(Math.max(0, pos.x), Math.max(0, window.innerWidth - w)),
+    y: Math.min(Math.max(0, pos.y), Math.max(0, window.innerHeight - h)),
+  }
+}
+
 export function DemoRoleSwitcher() {
   const router = useRouter()
   const { user, demoRole, setDemoUser, realRole } = useAuth()
   const isDemoMode = getDemoMode()
   const [openDropdown, setOpenDropdown] = useState<UserRole | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // The bar can be folded down to a small pill and dragged anywhere; both are remembered.
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null)
+  const [collapsed, setCollapsed] = useState(false)
+  const [pos, setPos] = useState<Pos>(null)
+  // The latest position, for the pointer-up that saves it (the state from the render before it can be a step behind).
+  const posRef = useRef<Pos>(null)
+  const [dragging, setDragging] = useState(false)
+  // True once what was remembered has been read, so the keep-on-screen check measures the bar as it will be shown.
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SWITCHER_KEY)
+      if (!raw) return
+      const v = JSON.parse(raw) as { collapsed?: boolean; pos?: Pos }
+      if (typeof v.collapsed === 'boolean') setCollapsed(v.collapsed)
+      if (v.pos && Number.isFinite(v.pos.x) && Number.isFinite(v.pos.y)) { posRef.current = v.pos; setPos(v.pos) }
+    } catch { /* nothing remembered, or storage blocked */ }
+    setReady(true)
+  }, [])
+  function remember(next: { collapsed: boolean; pos: Pos }) {
+    try { localStorage.setItem(SWITCHER_KEY, JSON.stringify(next)) } catch { /* the bar just opens in its default place next time */ }
+  }
+  // Folding or a smaller window changes the bar's size: keep it on screen. (Measured here, after the render
+  // that changed the size, never inside a state updater, which would measure the bar as it was.)
+  useEffect(() => {
+    if (!ready) return
+    function keepOnScreen() {
+      const el = wrapRef.current
+      const cur = posRef.current
+      if (!el || !cur) return
+      const r = el.getBoundingClientRect()
+      const next = clampTo(cur, r.width, r.height)
+      if (next.x === cur.x && next.y === cur.y) return
+      posRef.current = next
+      setPos(next)
+    }
+    keepOnScreen()
+    window.addEventListener('resize', keepOnScreen)
+    return () => window.removeEventListener('resize', keepOnScreen)
+  }, [collapsed, ready])
+
+  function onGripDown(e: React.PointerEvent<HTMLElement>) {
+    const el = wrapRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    dragRef.current = { dx: e.clientX - r.left, dy: e.clientY - r.top }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setDragging(true)
+    setOpenDropdown(null)
+  }
+  function onGripMove(e: React.PointerEvent<HTMLElement>) {
+    const d = dragRef.current
+    const el = wrapRef.current
+    if (!d || !el) return
+    const r = el.getBoundingClientRect()
+    const next = clampTo({ x: e.clientX - d.dx, y: e.clientY - d.dy }, r.width, r.height)
+    posRef.current = next
+    setPos(next)
+  }
+  function onGripUp(e: React.PointerEvent<HTMLElement>) {
+    if (!dragRef.current) return
+    dragRef.current = null
+    setDragging(false)
+    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* already released */ }
+    remember({ collapsed, pos: posRef.current })
+  }
+  function toggleCollapsed() {
+    const next = !collapsed
+    setCollapsed(next)
+    setOpenDropdown(null)
+    remember({ collapsed: next, pos: posRef.current })
+  }
+  // Near the top of the screen the dropdowns open downward instead of up.
+  const flip = pos !== null && pos.y < 340
 
   // Per-role: track which user is currently "displayed" in each role pill.
   // Initialise to the first user of each role.
@@ -134,11 +222,51 @@ export function DemoRoleSwitcher() {
   }
 
   return (
-    <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+    <div
+      ref={wrapRef}
+      className={`fixed z-50 pointer-events-none ${pos ? '' : 'bottom-5 left-1/2 -translate-x-1/2'}`}
+      style={pos ? { left: pos.x, top: pos.y } : undefined}
+    >
       <div
         ref={containerRef}
-        className="pointer-events-auto flex items-center gap-1 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-2xl shadow-xl px-3 py-2"
+        className={`pointer-events-auto flex items-center gap-1 bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl ${collapsed ? 'rounded-full p-1.5' : 'rounded-2xl px-3 py-2'}`}
       >
+        {/* ── Drag handle + fold button, on the left ─────────────────────── */}
+        <button
+          type="button"
+          onPointerDown={onGripDown}
+          onPointerMove={onGripMove}
+          onPointerUp={onGripUp}
+          onPointerCancel={onGripUp}
+          aria-label="ลากเพื่อย้าย"
+          title="ลากเพื่อย้าย"
+          className={`touch-none flex items-center justify-center px-1 py-1.5 -ml-1 rounded-lg text-gray-300 hover:text-gray-500 ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        >
+          <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="9" cy="6" r="1.5" /><circle cx="15" cy="6" r="1.5" />
+            <circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
+            <circle cx="9" cy="18" r="1.5" /><circle cx="15" cy="18" r="1.5" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? 'ขยายแถบสลับ role' : 'ย่อแถบสลับ role'}
+          title={collapsed ? 'ขยายแถบสลับ role' : 'ย่อแถบสลับ role'}
+          className="flex items-center gap-1.5 size-7 justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors shrink-0"
+        >
+          {collapsed ? (
+            <span className="relative flex items-center justify-center">
+              <span className={`absolute -top-1.5 -right-1.5 size-2 rounded-full ${isDemoMode ? 'bg-amber-400' : 'bg-freshket-500'}`} />
+              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg>
+            </span>
+          ) : (
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><path d="M15 19l-7-7 7-7" /></svg>
+          )}
+        </button>
+
+        {!collapsed && (<>
+        <div className="w-px h-5 bg-gray-200 mx-1" />
         {/* ── Demo mode toggle ─────────────────────────────────────────────── */}
         <button
           type="button"
@@ -234,7 +362,7 @@ export function DemoRoleSwitcher() {
                   {/* User dropdown — opens above the bar */}
                   {isDropOpen && (
                     <div
-                      className="absolute bottom-[calc(100%+10px)] left-1/2 -translate-x-1/2 bg-white rounded-2xl border border-gray-100 shadow-2xl overflow-hidden min-w-52"
+                      className={`absolute ${flip ? 'top-[calc(100%+10px)]' : 'bottom-[calc(100%+10px)]'} left-1/2 -translate-x-1/2 bg-white rounded-2xl border border-gray-100 shadow-2xl overflow-hidden min-w-52`}
                       style={{ animation: 'dropUp 0.14s ease-out' }}
                     >
                       <style>{`@keyframes dropUp { from { opacity:0; transform:translateX(-50%) translateY(8px) } to { opacity:1; transform:translateX(-50%) translateY(0) } }`}</style>
@@ -312,11 +440,12 @@ export function DemoRoleSwitcher() {
             {realRole === 'super_admin' && (
               <>
                 <div className="w-px h-5 bg-gray-200 mx-1" />
-                <LiveImpersonator />
+                <LiveImpersonator flip={flip} />
               </>
             )}
           </>
         )}
+        </>)}
       </div>
     </div>
   )
@@ -326,7 +455,7 @@ export function DemoRoleSwitcher() {
 // Rendered only for real super_admins, so useAllUsers() never subscribes for
 // anyone else. Lets the admin render the app as any real user to verify that the
 // back-end logic (module access per department, team visibility, etc.) lines up.
-function LiveImpersonator() {
+function LiveImpersonator({ flip }: { flip: boolean }) {
   const router = useRouter()
   const { userOverride, setUserOverride } = useAuth()
   const { data: allUsers } = useAllUsers()
@@ -430,7 +559,7 @@ function LiveImpersonator() {
 
             {isOpen && (
               <div
-                className="absolute bottom-[calc(100%+10px)] left-1/2 -translate-x-1/2 bg-white rounded-2xl border border-gray-100 shadow-2xl overflow-hidden w-64"
+                className={`absolute ${flip ? 'top-[calc(100%+10px)]' : 'bottom-[calc(100%+10px)]'} left-1/2 -translate-x-1/2 bg-white rounded-2xl border border-gray-100 shadow-2xl overflow-hidden w-64`}
                 style={{ animation: 'dropUp 0.14s ease-out' }}
               >
                 <style>{`@keyframes dropUp { from { opacity:0; transform:translateX(-50%) translateY(8px) } to { opacity:1; transform:translateX(-50%) translateY(0) } }`}</style>
