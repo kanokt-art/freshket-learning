@@ -12,7 +12,8 @@
  * 1. Open the Google Form → ⋮ (top right) → Apps Script.
  * 2. Paste this whole file, save.
  * 3. Run `exportQuestions` once and approve the permission prompt.
- * 4. Open View → Logs, copy the JSON that was printed.
+ * 4. The JSON is saved as a file in your Google Drive (the link is printed in the log). Open it, Ctrl+A, Ctrl+C.
+ *    (Do not copy from the log: it truncates long output. The extra permission prompt is for creating that file.)
  * 5. In the LMS: แบบทดสอบ → สร้างแบบทดสอบ → "นำเข้าจาก Google Form" → paste → ตรวจสอบ.
  *
  * For a form NOT open in front of you, use `exportQuestionsById` instead and
@@ -55,10 +56,24 @@ function exportQuestionsById() {
 function printExport_(form) {
   var result = buildExport_(form)
 
-  Logger.log('===== คัดลอก JSON ด้านล่างนี้ไปวางในระบบ =====')
-  Logger.log(JSON.stringify(result.payload, null, 2))
-  Logger.log('===== จบ JSON =====')
+  // The execution log cuts long output ("Logging output too large"), and a pretty-printed quiz is long. So the
+  // JSON is compact, and it is also written to a file in Drive — open that file, select all, copy, paste.
+  var json = JSON.stringify(result.payload)
+  var file = DriveApp.createFile(
+    'quiz-export-' + (str_(result.payload.title) || 'form').replace(/[^\w฀-๿ -]+/g, '').slice(0, 60) + '.json',
+    json,
+    MimeType.PLAIN_TEXT
+  )
   Logger.log('สรุป: นำเข้าได้ ' + result.payload.questions.length + ' ข้อ, ข้าม ' + result.skipped.length + ' ข้อ')
+  Logger.log('บันทึกไฟล์ JSON ไว้ใน Google Drive ของคุณแล้ว: ' + file.getUrl())
+  Logger.log('เปิดไฟล์นั้น → Ctrl+A → Ctrl+C แล้วไปวางในระบบ (ไม่ต้องคัดลอกจาก Log)')
+  Logger.log('ขนาด JSON ' + json.length + ' ตัวอักษร — ถ้าอยากคัดลอกจาก Log ให้คัดลอกทุกส่วนที่ขึ้นต้น [JSON n/m] ต่อกันตามลำดับ')
+  // Also in the log, in pieces small enough not to be cut.
+  var CHUNK = 3000
+  var parts = Math.ceil(json.length / CHUNK)
+  for (var p = 0; p < parts; p++) {
+    Logger.log('[JSON ' + (p + 1) + '/' + parts + '] ' + json.slice(p * CHUNK, (p + 1) * CHUNK))
+  }
 
   if (result.skipped.length) {
     Logger.log('ข้อที่ข้าม (ต้องสร้างเองในระบบ):')
