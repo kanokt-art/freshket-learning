@@ -20,6 +20,7 @@ import { MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { RoleplayRadar } from '@/components/features/RoleplayRadar'
 import { RoleplayAssessCard } from '@/components/features/RoleplayAssessCard'
+import { FeedbackReadSheet } from '@/components/features/FeedbackReadSheet'
 import { canAssessRoleplay as canAssessRoleplayOf } from '@/lib/roleplay/assessForm'
 import { announce } from '@/lib/notifications/announce'
 import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
@@ -836,6 +837,8 @@ function EmployeeSidebar({
                   <div className="px-3 py-2.5">
                     <FeedbackBlock
                       courseId={rec.courseId}
+                      courseTitle={rec.courseTitle}
+                      memberName={enName(user)}
                       existing={feedback[rec.courseId]}
                       canEdit={canFeedback}
                       onSave={saveFeedback}
@@ -1197,8 +1200,10 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
 }
 
 // ── Feedback (lead/manager comment + score on a member's course) ────────────────
-function FeedbackBlock({ courseId, existing, canEdit, onSave }: {
+function FeedbackBlock({ courseId, courseTitle, memberName, existing, canEdit, onSave }: {
   courseId: string
+  courseTitle?: string
+  memberName?: string
   existing?: { comment: string; score: number | null; leadName?: string }
   canEdit: boolean
   onSave: (courseId: string, comment: string, score: number | null) => Promise<void>
@@ -1207,6 +1212,8 @@ function FeedbackBlock({ courseId, existing, canEdit, onSave }: {
   const [comment, setComment] = useState(existing?.comment ?? '')
   const [stars, setStars] = useState<number | null>(toStars(existing?.score))
   const [saving, setSaving] = useState(false)
+  // The feedback opened in the same sheet the learner reads it in.
+  const [reading, setReading] = useState(false)
 
   useEffect(() => {
     setComment(existing?.comment ?? '')
@@ -1229,14 +1236,27 @@ function FeedbackBlock({ courseId, existing, canEdit, onSave }: {
       <>
         {existing && (existing.comment || toStars(existing.score) != null) ? (
           <div className="rounded-xl bg-blue-50 border border-blue-100 p-3">
+            {reading && (
+              <FeedbackReadSheet
+                person={memberName ? { name: memberName } : undefined}
+                courseTitle={courseTitle}
+                leadName={existing.leadName}
+                rating={toStars(existing.score)}
+                comment={existing.comment}
+                onClose={() => setReading(false)}
+              />
+            )}
             <div className="flex items-center justify-between gap-2 mb-1">
               <p className="text-xs font-bold text-blue-700">ความเห็นหัวหน้า{existing.leadName ? ` · ${existing.leadName}` : ''}</p>
               {toStars(existing.score) != null && <StarsDisplay value={toStars(existing.score) as number} />}
             </div>
             {existing.comment && <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{existing.comment}</p>}
-            {canEdit && (
-              <button onClick={() => setEditing(true)} className="text-xs font-bold text-blue-600 hover:text-blue-700 mt-1.5">แก้ไข</button>
-            )}
+            <div className="flex items-center gap-3 mt-1.5">
+              <button onClick={() => setReading(true)} className="text-xs font-bold text-blue-600 hover:text-blue-700">อ่านแบบเต็ม</button>
+              {canEdit && (
+                <button onClick={() => setEditing(true)} className="text-xs font-bold text-blue-600 hover:text-blue-700">แก้ไข</button>
+              )}
+            </div>
           </div>
         ) : canEdit ? (
           <button onClick={() => setEditing(true)} className="text-xs font-bold text-freshket-600 hover:text-freshket-700">

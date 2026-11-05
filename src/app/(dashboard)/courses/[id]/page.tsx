@@ -12,6 +12,7 @@ import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
 import { formatPersonName } from '@/lib/users/displayName'
 import { StarsDisplay } from '@/components/common/Stars'
 import { LearnerFeedbackSheet, FeedbackReaderSheet } from '@/components/features/CourseFeedbackSheets'
+import { FeedbackReadSheet } from '@/components/features/FeedbackReadSheet'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { toStars } from '@/lib/feedback/stars'
 import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
@@ -570,57 +571,17 @@ export default function CourseDetailPage() {
               </button>
             )}
             {feedbackOpen && (
-              <>
-              {/* the dimmed page behind the sheet on a phone: tap it to close */}
-              <div className="fixed inset-0 z-40 bg-slate-900/40 sm:hidden" onClick={() => setFeedbackOpen(false)} />
-              <aside className="fixed inset-x-0 bottom-0 max-h-[85vh] rounded-t-3xl sm:rounded-none sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none z-50 w-full sm:w-80 bg-white sm:border-l border-gray-100 shadow-2xl flex flex-col overflow-hidden animate-sheet-up sm:animate-slide-in-right">
-                <div className="sm:hidden flex justify-center pt-2.5 shrink-0"><span className="h-1 w-10 rounded-full bg-gray-200" /></div>
-                <div className="flex items-center gap-2 px-4 sm:px-5 py-4 border-b border-gray-100 shrink-0">
-                  <p className="flex-1 text-sm font-bold text-gray-900">ความเห็นจากหัวหน้า</p>
-                  <button type="button" onClick={() => setFeedbackOpen(false)} aria-label="ปิด"
-                    className="p-1.5 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-all">
-                    <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </div>
-                <div className="flex-1 overflow-y-auto">
-                  {/* Who it is about */}
-                  {user && (
-                    <div className="flex items-center gap-3 px-5 py-4 bg-gray-50 border-b border-gray-100">
-                      <div className="size-11 rounded-full bg-freshket-100 text-freshket-700 shrink-0 overflow-hidden flex items-center justify-center text-sm font-bold">
-                        {user.photoURL
-                          // eslint-disable-next-line @next/next/no-img-element
-                          ? <img src={user.photoURL} alt="" className="size-full object-cover" />
-                          : (user.displayName ?? '?').charAt(0)}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-gray-900 truncate">{formatPersonName(user)}</p>
-                        {(user.position || user.department) && (
-                          <p className="text-xs text-gray-500 truncate">{[user.position, user.department].filter(Boolean).join(' · ')}</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {/* Which course */}
-                  <div className="px-5 py-4 border-b border-gray-100">
-                    <p className="text-xs text-gray-400 mb-0.5">หลักสูตรที่ได้รับความเห็น</p>
-                    <p className="text-sm font-bold text-gray-900">{course.title}</p>
-                  </div>
-                  {/* What the lead wrote */}
-                  <div className="px-5 py-4 space-y-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {leadFeedback.leadName && <p className="text-sm font-bold text-gray-800">{leadFeedback.leadName}</p>}
-                      {leadFeedback.updatedAt && !isNaN(new Date(leadFeedback.updatedAt).getTime()) && (
-                        <span className="text-xs text-gray-400">{new Date(leadFeedback.updatedAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
-                      )}
-                    </div>
-                    {toStars(leadFeedback.score) !== null && <StarsDisplay value={toStars(leadFeedback.score) as number} />}
-                    {leadFeedback.comment?.trim() && (
-                      <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{leadFeedback.comment.trim()}</p>
-                    )}
-                  </div>
-                </div>
-              </aside>
-              </>
+              <FeedbackReadSheet
+                person={user ? { name: formatPersonName(user), photoURL: user.photoURL } : undefined}
+                courseTitle={course.title}
+                leadName={leadFeedback.leadName}
+                dateText={leadFeedback.updatedAt && !isNaN(new Date(leadFeedback.updatedAt).getTime())
+                  ? new Date(leadFeedback.updatedAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
+                  : undefined}
+                rating={toStars(leadFeedback.score)}
+                comment={leadFeedback.comment}
+                onClose={() => setFeedbackOpen(false)}
+              />
             )}
           </>
         )
