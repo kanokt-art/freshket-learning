@@ -18,7 +18,7 @@ import {
   groupByMonth, groupByYear, mandatoryDepartments, monthKey, visibleMonthGroups, mandatoryTitleForWeekLabel,
   type MandatoryItem, type MandatoryDeptAccess,
 } from '@/lib/mandatory'
-import { confirmAction, alertError } from '@/lib/ui/alert'
+import { confirmAction, alertError, alertWarning, alertSuccess } from '@/lib/ui/alert'
 import { save, remove, patch } from '@/lib/data/collection'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
@@ -105,8 +105,13 @@ export default function MandatoryPage() {
   // Targets by department the same way SaleTool visibility works (empty
   // departments = everyone), not by role — Mandatory Reading has no role
   // targeting concept, only a department one.
-  const notifyPublish = useCallback(async (item: MandatoryItem) => {
-    if (DEMO_MODE) return
+  // `resend`: the admin pressed "ส่งไป Slack" on an item already live. Saying no then sends nothing at all
+  // (a first publish still rings the in-app bells when Slack is declined).
+  const notifyPublish = useCallback(async (item: MandatoryItem, opts: { resend?: boolean } = {}) => {
+    if (DEMO_MODE) {
+      if (opts.resend) await alertWarning('Demo Mode', 'โหมด Demo ไม่ส่งไป Slack จริง')
+      return
+    }
     const depts = mandatoryDepartments(item)
     const targets = allUsers.filter(u =>
       u.uid !== user?.uid
@@ -124,6 +129,20 @@ export default function MandatoryPage() {
       recipientUids: targets.map(u => u.uid),
       recipientCount: targets.length,
     })
+    // Tell the admin when Slack was asked and nothing went out, instead of leaving them to wonder.
+    if (result) {
+      const sent = result.dmSent
+      if (!result.posted || (targets.length > 0 && sent === 0)) {
+        const lines: string[] = []
+        if (!result.posted) lines.push('โพสต์ลงช่อง Slack ไม่สำเร็จ: ตรวจใน Vercel ว่ามี SLACK_COURSE_CHANNEL_ID + SLACK_BOT_TOKEN (บอทต้องอยู่ในช่อง) หรือ SLACK_WEBHOOK_URL')
+        if (targets.length > 0 && sent === 0) lines.push('ไม่มี DM ถึงใครเลย: ตรวจว่ามี SLACK_BOT_TOKEN และผู้รับมี Slack ID หรืออีเมลที่ตรงกับ Slack')
+        lines.push(sent > 0 ? `DM ส่งถึง ${sent} คน` : 'ดู Vercel → Logs ค้นคำว่า "Slack" เพื่อดูสาเหตุ')
+        void alertWarning('Slack แจ้งไม่ครบ', lines.join('\n'))
+      } else if (opts.resend) {
+        void alertSuccess('ส่งไป Slack แล้ว', `DM ถึง ${sent} คน และโพสต์ลงช่องแล้ว`)
+      }
+    }
+    if (opts.resend && !result) return
     const reached = new Set(result?.dmUids ?? [])
     targets.filter(u => !reached.has(u.uid)).forEach(u => {
       pushNotification(u.uid, {
@@ -223,6 +242,11 @@ export default function MandatoryPage() {
     await remove('mandatoryItems', id)
   }
 
+  // Send an item that is already live to Slack again (it never went out, or to remind people).
+  async function handleSlackResend(item: MandatoryItem) {
+    await notifyPublish(item, { resend: true })
+  }
+
   async function handleTogglePublish(item: MandatoryItem) {
     const wasPublished = item.isPublished
     await patch('mandatoryItems', item.id, { isPublished: !wasPublished })
@@ -310,6 +334,7 @@ export default function MandatoryPage() {
                         onEdit={() => setEditItem(item)}
                         onDelete={() => handleDelete(item.id)}
                         onTogglePublish={() => handleTogglePublish(item)}
+                        onSlack={() => handleSlackResend(item)}
                       />
                     ))}
                   </div>
@@ -349,7 +374,7 @@ export default function MandatoryPage() {
 // ── MandatoryCard ─────────────────────────────────────────────────────────────
 
 function MandatoryRow({
-  item, isAdmin, onView, onEdit, onDelete, onTogglePublish,
+  item, isAdmin, onView, onEdit, onDelete, onTogglePublish, onSlack,
 }: {
   item: MandatoryItem
   isAdmin: boolean
@@ -357,6 +382,7 @@ function MandatoryRow({
   onEdit: () => void
   onDelete: () => void
   onTogglePublish: () => void
+  onSlack: () => void
 }) {
   return (
     <div className={`flex items-center gap-4 rounded-xl border px-4 py-4 hover:shadow-sm transition-all duration-150 ${
@@ -393,6 +419,17 @@ function MandatoryRow({
       <div className="flex items-center gap-1 shrink-0">
         {isAdmin && (
           <>
+            {item.isPublished && (
+              <button
+                type="button"
+                title="ส่ง Mandatory นี้ไป Slack (โพสต์ลงช่อง + DM ถึงกลุ่มเป้าหมาย)"
+                onClick={onSlack}
+                className="mr-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-50 hover:border-freshket-300 transition-all duration-150"
+              >
+                <svg className="size-3.5 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" /></svg>
+                ส่งไป Slack
+              </button>
+            )}
             <button
               type="button"
               title={item.isPublished ? 'Unpublish' : 'Publish'}

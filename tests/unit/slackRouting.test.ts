@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  postCompletionToSlack, postShadowSubmittedToSlack, postShadowAckedToSlack, postCoursePublishedToSlack,
+  postCompletionToSlack, postShadowSubmittedToSlack, postShadowAckedToSlack, postCoursePublishedToSlack, postMandatoryPublishedToSlack,
 } from '@/lib/notifications/slack'
 import { dmPeople } from '@/lib/notifications/slackDm'
 import type { Store } from '@/lib/server/store'
@@ -95,6 +95,39 @@ describe('course notices', () => {
     vi.stubEnv('SLACK_WEBHOOK_URL', 'https://hooks.slack.com/services/T/B/X')
     await postCoursePublishedToSlack({ courseTitle: 'PVP', recipientCount: 5, isAddition: false })
     expect(calls[0].url).toBe('https://hooks.slack.com/services/T/B/X')
+  })
+})
+
+// A Mandatory Reading used to need the webhook alone: with the bot set up and no (or a revoked) webhook it
+// posted nothing, quietly. It now goes where a course notice goes.
+describe('Mandatory Reading notices', () => {
+  const mandatory = { title: 'ราคาผัก', departments: [], recipientCount: 4, url: 'https://app.example/courses/mandatory' }
+
+  it('go to the course channel through the bot even with no webhook', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', 'xoxb-test')
+    vi.stubEnv('SLACK_COURSE_CHANNEL_ID', 'C08MCUBS8G1')
+    vi.stubEnv('SLACK_WEBHOOK_URL', '')
+    expect(await postMandatoryPublishedToSlack(mandatory)).toBe(true)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe('https://slack.com/api/chat.postMessage')
+    expect(calls[0].body.channel).toBe('C08MCUBS8G1')
+    expect(String(calls[0].body.text)).toContain('ราคาผัก')
+  })
+
+  it('use the webhook as before when the course channel is not configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    vi.stubEnv('SLACK_COURSE_CHANNEL_ID', '')
+    vi.stubEnv('SLACK_WEBHOOK_URL', 'https://hooks.slack.com/services/T/B/X')
+    expect(await postMandatoryPublishedToSlack(mandatory)).toBe(true)
+    expect(calls[0].url).toBe('https://hooks.slack.com/services/T/B/X')
+  })
+
+  it('post nowhere, and say so, when nothing is configured', async () => {
+    vi.stubEnv('SLACK_BOT_TOKEN', '')
+    vi.stubEnv('SLACK_COURSE_CHANNEL_ID', '')
+    vi.stubEnv('SLACK_WEBHOOK_URL', '')
+    expect(await postMandatoryPublishedToSlack(mandatory)).toBe(false)
+    expect(calls).toHaveLength(0)
   })
 })
 

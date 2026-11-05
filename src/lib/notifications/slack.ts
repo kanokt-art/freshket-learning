@@ -350,16 +350,16 @@ export interface SlackMandatoryPublishedEvent {
   url?: string
 }
 
-/** A new Mandatory Reading item went live. One post, same reasoning as above. */
+/**
+ * A new Mandatory Reading item went live. One post, same reasoning as above, to the course channel through
+ * the Slack app when it is set up, and through the webhook otherwise.
+ */
 export async function postMandatoryPublishedToSlack(
   ev: SlackMandatoryPublishedEvent,
 ): Promise<boolean> {
-  const webhook = process.env.SLACK_WEBHOOK_URL?.trim()
-  if (!webhook) return false
-
   const audience = ev.departments.length > 0 ? slackText(ev.departments.join(' · ')) : 'ทุกแผนก'
 
-  return post(webhook, {
+  return postToCourseChannel({
     text: `Mandatory Reading ใหม่: ${slackText(ev.title)}`,
     blocks: [
       {
