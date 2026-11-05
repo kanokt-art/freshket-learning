@@ -1348,7 +1348,7 @@ function LessonBrowserStep({
           ) : !selectedLesson ? (
             <div className="h-full flex items-center justify-center text-gray-400 text-sm">เลือกบทเรียนทางซ้าย</div>
           ) : (
-            <div className="space-y-4 max-w-2xl">
+            <div className="space-y-4 max-w-6xl">
               <h3 className="text-base font-bold text-gray-900">{lessonLabel(selectedLesson.title, selectedLessonIndex)}</h3>
               {selectedLesson.description && <p className="text-xs text-gray-400">{selectedLesson.description}</p>}
 
