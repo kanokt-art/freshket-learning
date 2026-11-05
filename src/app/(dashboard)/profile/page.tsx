@@ -9,6 +9,11 @@ import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
 import { BucketResultCard } from '@/components/features/BucketResultCard'
 import { MbtiBadge } from '@/components/features/MbtiBadge'
 import { getDaysSince } from '@/lib/utils/newJoiner'
+import { formatPersonName } from '@/lib/users/displayName'
+
+// The profile reads like a phone's settings: a big title, the person with their photo, one highlight card
+// (how long they have been with Freshket), then a list of rows. A row opens its own page, sliding in from
+// the right, with a back arrow.
 
 // ── Tenure formatter ──────────────────────────────────────────────────────────
 
@@ -29,35 +34,87 @@ function formatThaiDate(date: Date): string {
   return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
-// ── Role badge ────────────────────────────────────────────────────────────────
+// ── Icons ─────────────────────────────────────────────────────────────────────
 
-const ROLE_BADGE: Record<string, string> = {
-  sale: 'bg-freshket-100 text-freshket-700 border-freshket-200',
-  team_lead: 'bg-blue-100 text-blue-700 border-blue-200',
-  manager: 'bg-purple-100 text-purple-700 border-purple-200',
-  super_admin: 'bg-freshket-600 text-white border-freshket-700',
+const Chevron = () => (
+  <svg className="size-5 text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <path d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+  </svg>
+)
+
+const icon = (d: string) => (
+  <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+    <path d={d} />
+  </svg>
+)
+
+const ICON = {
+  person: 'M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+  sparkle: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z',
+  book: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
+  bell: 'M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0',
+  logout: 'M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9',
 }
 
-// ── Info row ──────────────────────────────────────────────────────────────────
+// ── Building blocks ───────────────────────────────────────────────────────────
 
-function InfoRow({ icon, label, value }: { icon: ReactNode; label: string; value?: string | null }) {
+function Avatar({ photo, initials, size }: { photo?: string | null; initials: string; size: 'md' | 'lg' }) {
+  const cls = size === 'lg' ? 'size-24 text-3xl' : 'size-14 text-xl'
+  return photo ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={photo} alt="" className={`${cls} rounded-full object-cover bg-gray-100`} />
+  ) : (
+    <div className={`${cls} rounded-full bg-freshket-100 text-freshket-700 flex items-center justify-center font-black`}>{initials}</div>
+  )
+}
+
+function MenuRow({ iconPath, label, onClick, href, danger }: { iconPath: string; label: string; onClick?: () => void; href?: string; danger?: boolean }) {
+  const inner = (
+    <>
+      <span className={danger ? 'text-rose-500' : 'text-gray-800'}>{icon(iconPath)}</span>
+      <span className={`flex-1 text-base text-left ${danger ? 'text-rose-600 font-bold' : 'text-gray-800'}`}>{label}</span>
+      {!danger && <Chevron />}
+    </>
+  )
+  const cls = 'w-full flex items-center gap-4 py-4 border-b border-gray-100 last:border-0 hover:bg-gray-50 -mx-2 px-2 rounded-xl transition-all duration-150'
+  return href
+    ? <Link href={href} className={cls}>{inner}</Link>
+    : <button type="button" onClick={onClick} className={cls}>{inner}</button>
+}
+
+function InfoRow({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null
   return (
-    <div className="flex items-center gap-3 py-3 border-b border-gray-50 last:border-0">
-      <div className="size-8 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-400 shrink-0">
-        {icon}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-normal text-gray-400 mb-0.5">{label}</p>
-        <p className="text-sm font-bold text-gray-800 leading-snug truncate">{value}</p>
+    <div className="py-4 border-b border-gray-100 last:border-0">
+      <p className="text-sm text-gray-500">{label}</p>
+      <p className="text-base text-gray-900 mt-0.5 break-words">{value}</p>
+    </div>
+  )
+}
+
+/** A row's own page, sliding in from the right with a back arrow. */
+function SubPage({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
+  return (
+    <div className="flex-1 overflow-y-auto animate-slide-in-right">
+      <div className="max-w-lg mx-auto px-5 pt-4 pb-10">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="กลับ"
+          className="size-10 -ml-2 flex items-center justify-center rounded-full text-gray-700 hover:bg-gray-100 transition-all duration-150"
+        >
+          <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+        </button>
+        <h1 className="text-3xl font-black text-gray-900 mt-3 mb-4">{title}</h1>
+        {children}
       </div>
     </div>
   )
 }
 
-// ── Quick link card ───────────────────────────────────────────────────────────
-
 // ── Page ──────────────────────────────────────────────────────────────────────
+
+type Section = null | 'info' | 'assessments'
 
 export default function ProfilePage() {
   const { user, signOut, isDemoMode } = useAuth()
@@ -65,6 +122,7 @@ export default function ProfilePage() {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false)
+  const [section, setSection] = useState<Section>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   if (!user) return null
@@ -72,6 +130,7 @@ export default function ProfilePage() {
   const daysSince = getDaysSince(user.startDate)
   const currentPhoto = photoPreview ?? user.photoURL
   const initials = (user.nickname ?? user.displayName).charAt(0).toUpperCase()
+  const name = formatPersonName(user)
 
   async function handlePhotoChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -98,205 +157,125 @@ export default function ProfilePage() {
     }
   }
 
+  const fileInput = <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
+
   return (
     <div className="flex flex-col h-full bg-white">
-      <Header title="โปรไฟล์" subtitle="ข้อมูลของฉัน" />
+      <div className="hidden lg:block"><Header title="โปรไฟล์" subtitle="ข้อมูลของฉัน" /></div>
 
-      <div className="flex-1 overflow-y-auto">
+      {section === 'info' ? (
+        <SubPage title="ข้อมูลส่วนตัว" onBack={() => setSection(null)}>
+          <div className="flex flex-col items-center py-4">
+            <div className="relative">
+              <Avatar photo={currentPhoto} initials={initials} size="lg" />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading || isDemoMode}
+                className="absolute bottom-0 right-0 size-9 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center text-gray-600 hover:text-freshket-600 transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed"
+                aria-label="เปลี่ยนรูปโปรไฟล์"
+              >
+                {uploading ? (
+                  <span className="size-4 border-2 border-freshket-500 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+                    <path d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z" />
+                  </svg>
+                )}
+              </button>
+              {fileInput}
+            </div>
+            {uploadError && <p className="text-xs text-rose-500 mt-2">{uploadError}</p>}
+            {isDemoMode && <p className="text-xs text-amber-600 mt-2">Demo Mode: เปลี่ยนรูปได้เฉพาะในระบบจริง</p>}
+          </div>
+          <InfoRow label="ชื่อ" value={name} />
+          <InfoRow label="อีเมล" value={user.email} />
+          <InfoRow label="รหัสพนักงาน" value={user.employeeId} />
+          <InfoRow label="ตำแหน่ง" value={user.position} />
+          <InfoRow label="แผนก" value={user.department} />
+          <InfoRow label="Line Manager" value={user.lineManager} />
+          <InfoRow label="บทบาทในระบบ" value={ROLE_LABELS[user.role]} />
+          {user.startDate && <InfoRow label="วันเริ่มงาน" value={formatThaiDate(user.startDate)} />}
+        </SubPage>
+      ) : section === 'assessments' ? (
+        <SubPage title="ผลประเมินของฉัน" onBack={() => setSection(null)}>
+          <div className="space-y-3">
+            {BUCKET_ASSESSMENT_LIST.map((def) => (
+              <BucketResultCard key={def.id} uid={user.uid} definition={def} />
+            ))}
+          </div>
+        </SubPage>
+      ) : (
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-lg mx-auto px-5 pt-8 pb-10">
+            <h1 className="text-3xl font-black text-gray-900">โปรไฟล์</h1>
 
-        {/* ── Hero ── */}
-        <div className="bg-white border-b border-gray-100 px-6 pb-6 pt-7 flex flex-col items-center gap-3
-                        lg:flex-row lg:items-center lg:gap-5 lg:px-8 lg:py-5">
-
-          {/* Avatar */}
-          <div className="relative shrink-0">
-            {currentPhoto ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={currentPhoto}
-                alt={user.displayName}
-                className="size-24 lg:size-16 rounded-full object-cover ring-4 ring-freshket-100"
-              />
-            ) : (
-              <div className="size-24 lg:size-16 rounded-full bg-freshket-500 flex items-center justify-center text-white text-3xl lg:text-xl font-black ring-4 ring-freshket-100">
-                {initials}
-              </div>
-            )}
+            {/* The person — opens their personal information */}
             <button
               type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-              className="absolute bottom-0 right-0 size-8 rounded-full bg-white border-2 border-gray-200 flex items-center justify-center text-gray-500 hover:border-freshket-300 hover:text-freshket-600 transition-all shadow-sm disabled:opacity-50"
-              title="เปลี่ยนรูปโปรไฟล์"
+              onClick={() => setSection('info')}
+              className="w-full flex items-center gap-4 mt-6 pb-6 border-b border-gray-100 text-left group"
             >
-              {uploading ? (
-                <span className="size-4 border-2 border-freshket-500 border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
-                  <path d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
-                </svg>
-              )}
+              <Avatar photo={currentPhoto} initials={initials} size="md" />
+              <div className="flex-1 min-w-0">
+                <p className="text-lg text-gray-900 truncate">{name}</p>
+                <p className="text-sm text-gray-500 truncate">{user.position || ROLE_LABELS[user.role]}</p>
+              </div>
+              <MbtiBadge uid={user.uid} />
+              <Chevron />
             </button>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
-          </div>
 
-          {uploadError && <p className="text-xs text-rose-500">{uploadError}</p>}
-
-          {/* Name + position */}
-          <div className="text-center lg:text-left lg:flex-1 min-w-0">
-            <h2 className="text-xl font-black text-gray-900 leading-tight">{user.displayName}</h2>
-            {user.nickname && <p className="text-sm font-normal text-gray-400 mt-0.5">({user.nickname})</p>}
-            {user.position && (
-              <p className="text-sm font-normal text-gray-500 mt-1 truncate">{user.position}</p>
+            {/* Highlight card: time with Freshket */}
+            {user.startDate && (
+              <div className="mt-6 rounded-2xl bg-white border border-gray-100 shadow-[0_6px_20px_rgba(0,0,0,0.08)] p-5 flex items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-base font-bold text-gray-900">อยู่กับ Freshket มา {formatTenure(daysSince)}</p>
+                  <p className="text-sm text-gray-500 mt-1 leading-snug">เริ่มงาน {formatThaiDate(user.startDate)}</p>
+                </div>
+                <div className="size-20 shrink-0 rounded-2xl bg-freshket-100 flex flex-col items-center justify-center">
+                  <span className="text-2xl font-black text-freshket-700 tabular-nums leading-none">{daysSince >= 9999 ? '—' : daysSince}</span>
+                  <span className="text-xs font-bold text-freshket-600 mt-1">วัน</span>
+                </div>
+              </div>
             )}
-          </div>
 
-          {/* Badges — MBTI sits beside the role so both read as one cluster */}
-          <div className="flex items-center justify-center gap-2 lg:ml-auto lg:shrink-0">
-            <MbtiBadge uid={user.uid} openable />
-            <span className={`inline-flex items-center text-xs font-bold px-3 py-1 rounded-full border ${ROLE_BADGE[user.role] ?? 'bg-gray-100 text-gray-700 border-gray-200'}`}>
-              {ROLE_LABELS[user.role]}
-            </span>
-          </div>
-        </div>
+            <h2 className="text-2xl font-black text-gray-900 mt-8 mb-1">การตั้งค่า</h2>
+            <div>
+              <MenuRow iconPath={ICON.person} label="ข้อมูลส่วนตัว" onClick={() => setSection('info')} />
+              <MenuRow iconPath={ICON.sparkle} label="ผลประเมินของฉัน" onClick={() => setSection('assessments')} />
+              <MenuRow iconPath={ICON.book} label="หลักสูตรของฉัน" href="/courses" />
+              <MenuRow iconPath={ICON.bell} label="การแจ้งเตือน" href="/notifications" />
+            </div>
 
-        <div className="px-4 sm:px-6 py-5 space-y-3 max-w-lg mx-auto lg:max-w-none lg:mx-0 lg:px-8 lg:py-6">
-
-          <div className="space-y-3">
-          <div>
-            <p className="text-xs font-bold text-gray-500 mb-2 px-1">ข้อมูลพนักงาน</p>
-            <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-
-              {/* Tenure row — inside the card, pastel tinted */}
-              {user.startDate && (
-                <div className="bg-freshket-50 border-b border-freshket-100 px-5 py-4">
-                  <div className="flex items-center gap-4">
-                    <div className="size-10 rounded-xl bg-freshket-200 flex items-center justify-center shrink-0">
-                      <svg className="size-5 text-freshket-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
-                      </svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-freshket-600 mb-0.5">อายุงาน</p>
-                      <p className="text-base font-black text-freshket-700 leading-tight">{formatTenure(daysSince)}</p>
-                      <p className="text-xs font-normal text-freshket-500 mt-0.5">เริ่มงาน {formatThaiDate(user.startDate)}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-2xl font-black text-freshket-200 leading-none tabular">{daysSince}</p>
-                      <p className="text-xs font-bold text-freshket-400">วัน</p>
-                    </div>
+            <div className="mt-6">
+              {!showSignOutConfirm ? (
+                <MenuRow iconPath={ICON.logout} label="ออกจากระบบ" danger onClick={() => setShowSignOutConfirm(true)} />
+              ) : (
+                <div className="bg-rose-50 rounded-2xl border border-rose-200 p-4 space-y-3">
+                  <p className="text-sm font-bold text-rose-700 text-center">ยืนยันออกจากระบบ?</p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowSignOutConfirm(false)}
+                      className="flex-1 py-2.5 rounded-xl border border-gray-200 bg-white text-sm font-bold text-gray-600 hover:bg-gray-50 transition-all duration-150"
+                    >
+                      ยกเลิก
+                    </button>
+                    <button
+                      type="button"
+                      onClick={signOut}
+                      className="flex-1 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-sm font-bold transition-all duration-150"
+                    >
+                      ออกจากระบบ
+                    </button>
                   </div>
                 </div>
               )}
-
-            <div className="px-5 py-1">
-              <InfoRow
-                label="อีเมล"
-                value={user.email}
-                icon={
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
-                  </svg>
-                }
-              />
-              <InfoRow
-                label="รหัสพนักงาน"
-                value={user.employeeId}
-                icon={
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Zm6-10.125a1.875 1.875 0 1 1-3.75 0 1.875 1.875 0 0 1 3.75 0Zm1.294 6.336a6.721 6.721 0 0 1-3.17.789 6.721 6.721 0 0 1-3.168-.789 3.376 3.376 0 0 1 6.338 0Z" />
-                  </svg>
-                }
-              />
-              <InfoRow
-                label="ตำแหน่ง"
-                value={user.position}
-                icon={
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 0 0 .75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 0 0-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0 1 12 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 0 1-.673-.38m0 0A2.18 2.18 0 0 1 3 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 0 1 3.413-.387m7.5 0V5.25A2.25 2.25 0 0 0 13.5 3h-3a2.25 2.25 0 0 0-2.25 2.25v.894m7.5 0a48.667 48.667 0 0 0-7.5 0M12 12.75h.008v.008H12v-.008Z" />
-                  </svg>
-                }
-              />
-              <InfoRow
-                label="แผนก"
-                value={user.department}
-                icon={
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" />
-                  </svg>
-                }
-              />
-              <InfoRow
-                label="Line Manager"
-                value={user.lineManager}
-                icon={
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
-                  </svg>
-                }
-              />
-            </div>{/* end px-5 py-1 */}
-            </div>{/* end bg-white card */}
-          </div>{/* end section wrapper */}
-
-          {/* ── Bucket assessments (MBTI, selling style, …) ── */}
-          {BUCKET_ASSESSMENT_LIST.map((def) => (
-            <BucketResultCard key={def.id} uid={user?.uid} definition={def} />
-          ))}
-
-          {/* ── Demo mode notice ── */}
-          {isDemoMode && (
-            <div className="bg-amber-50 rounded-2xl border border-amber-200 px-4 py-3 flex items-start gap-3">
-              <svg className="size-4 text-amber-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
-              </svg>
-              <div>
-                <p className="text-xs font-bold text-amber-700">Demo Mode</p>
-                <p className="text-xs font-normal text-amber-600 mt-0.5">การอัพโหลดรูปโปรไฟล์ใช้งานได้เฉพาะในระบบจริง</p>
-              </div>
             </div>
-          )}
-
-          {/* ── Sign out ── */}
-          <div className="pb-6 lg:pb-0">
-            {!showSignOutConfirm ? (
-              <button
-                type="button"
-                onClick={() => setShowSignOutConfirm(true)}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-rose-200 text-rose-500 text-sm font-bold hover:bg-rose-50 transition-colors"
-              >
-                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
-                </svg>
-                ออกจากระบบ
-              </button>
-            ) : (
-              <div className="bg-rose-50 rounded-2xl border border-rose-200 p-4 space-y-3">
-                <p className="text-sm font-bold text-rose-700 text-center">ยืนยันออกจากระบบ?</p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowSignOutConfirm(false)}
-                    className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
-                  >
-                    ยกเลิก
-                  </button>
-                  <button
-                    type="button"
-                    onClick={signOut}
-                    className="flex-1 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-sm font-bold transition-colors"
-                  >
-                    ออกจากระบบ
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
-          </div>{/* end left col wrapper */}
-
         </div>
-      </div>
+      )}
     </div>
   )
 }
