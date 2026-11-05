@@ -1,0 +1,135 @@
+'use client'
+
+import { useMemo } from 'react'
+import Link from 'next/link'
+import { createPortal } from 'react-dom'
+import { StarsDisplay } from '@/components/common/Stars'
+import { JourneyList, JourneyStep, stepStates } from '@/components/features/LearningJourneySheet'
+import { useFirestoreList } from '@/hooks/useFirestore'
+import { getDemoMode } from '@/lib/demo/demoMode'
+import { toStars } from '@/lib/feedback/stars'
+import { latestBySlot, type LeadReview, type LeadSlot } from '@/lib/feedback/leadReviews'
+import { MOCK_TAKEAWAYS } from '@/lib/utils/mockData'
+
+// A member's course, read from the side by their Team Lead, Manager or a super_admin: what the member wrote as
+// their Key Take Away, then the Team Lead's feedback, then the Manager's — the same path the member sees. A
+// drawer on the right, over whatever is open, so the list underneath keeps its place.
+
+const DEMO_MODE = getDemoMode()
+
+const dmy = (d?: Date | string) => {
+  if (!d) return ''
+  const t = d instanceof Date ? d : new Date(d)
+  return isNaN(t.getTime()) ? '' : t.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
+}
+
+const SLOT_LABEL: Record<LeadSlot, string> = { team_lead: 'Team Lead', manager: 'Manager' }
+
+export function MemberCourseDrawer({ memberUid, memberName, courseId, courseTitle, onClose }: {
+  memberUid: string
+  memberName: string
+  courseId: string
+  courseTitle: string
+  onClose: () => void
+}) {
+  const live = !DEMO_MODE && !!memberUid && !!courseId
+  const takeawayDocs = useFirestoreList<{ courseId?: string; text?: string }>(
+    'takeaways',
+    [{ type: 'where', field: 'uid', op: '==', value: memberUid }],
+    live,
+  )
+  const reviewDocs = useFirestoreList<LeadReview>(
+    'courseFeedback',
+    [{ type: 'where', field: 'memberUid', op: '==', value: memberUid }, { type: 'where', field: 'courseId', op: '==', value: courseId }],
+    live,
+  )
+
+  const takeaway = useMemo(() => {
+    if (DEMO_MODE) return (MOCK_TAKEAWAYS[`${memberUid}_${courseId}`] ?? '').trim()
+    return (takeawayDocs.data.find((d) => d.courseId === courseId)?.text ?? '').trim()
+  }, [takeawayDocs.data, memberUid, courseId])
+
+  const reviews = useMemo<LeadReview[]>(() => {
+    if (!DEMO_MODE) return reviewDocs.data
+    // Demo mode has no database: one sample Team Lead comment so the drawer can be seen.
+    return [{ leadUid: 'demo-tl', leadRole: 'team_lead', leadName: 'Pataranuch (Tao) Suyavech', score: 4, updatedAt: new Date('2026-11-03T09:00:00'), comment: 'ตั้งใจเรียนดีมาก ลองเอาไปใช้กับลูกค้าจริงดูนะ' }]
+  }, [reviewDocs.data])
+
+  const latest = latestBySlot(reviews)
+  const states = stepStates([!!takeaway, !!latest.team_lead, !!latest.manager])
+  const loading = live && (takeawayDocs.loading || reviewDocs.loading)
+
+  const reviewStep = (slot: LeadSlot, i: number) => {
+    const r = latest[slot]
+    const stars = r ? toStars(r.score) : null
+    return (
+      <JourneyStep
+        key={slot}
+        state={states[i]}
+        title={`Feedback จาก ${SLOT_LABEL[slot]}`}
+        meta={r ? [r.leadName, dmy(r.updatedAt)].filter(Boolean).join(' · ') : `ยังไม่มีความเห็นจาก ${SLOT_LABEL[slot]}`}
+      >
+        {r && (
+          <div className="space-y-1.5">
+            {stars !== null && <StarsDisplay value={stars} />}
+            {r.comment?.trim() && <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{r.comment.trim()}</p>}
+          </div>
+        )}
+      </JourneyStep>
+    )
+  }
+
+  if (typeof document === 'undefined') return null
+  // Portalled to the body so it sits above the window it was opened from, and a click in it does not
+  // close that window (its own backdrop closes only the drawer).
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex justify-end bg-slate-900/40" onClick={(e) => { e.stopPropagation(); onClose() }}>
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label={courseTitle}
+        className="relative w-full sm:max-w-md h-full bg-white shadow-2xl flex flex-col animate-slide-in-right"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="shrink-0 flex items-start gap-3 px-6 py-5 border-b border-gray-100">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-gray-500">{memberName}</p>
+            <h2 className="text-lg font-extrabold text-gray-900 leading-snug mt-0.5">{courseTitle}</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="ปิด"
+            className="size-9 shrink-0 flex items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 transition-all duration-150"
+          >
+            <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          {loading ? (
+            <p className="text-sm text-gray-400 text-center py-10">กำลังโหลด…</p>
+          ) : (
+            <JourneyList>
+              <JourneyStep state={states[0]} title="Key Take Away" meta={takeaway ? 'จากพนักงาน' : 'พนักงานยังไม่ได้เขียน'}>
+                {takeaway && <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{takeaway}</p>}
+              </JourneyStep>
+              {reviewStep('team_lead', 1)}
+              {reviewStep('manager', 2)}
+            </JourneyList>
+          )}
+        </div>
+
+        <div className="shrink-0 px-6 py-4 border-t border-gray-100">
+          <Link
+            href={`/manager?user=${encodeURIComponent(memberUid)}&tab=history`}
+            className="block w-full text-center py-3 rounded-full bg-freshket-600 text-white text-sm font-bold shadow-md hover:bg-freshket-700 transition-all duration-150"
+          >
+            ให้ / แก้ Feedback ในหน้าทีม
+          </Link>
+        </div>
+      </aside>
+    </div>,
+    document.body,
+  )
+}

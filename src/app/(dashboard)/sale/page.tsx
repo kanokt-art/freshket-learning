@@ -10,6 +10,10 @@ import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser, useAnnouncements } from '@/hooks/useFirestore'
 import { useHomeHighlights } from '@/hooks/useHomeHighlights'
 import { useMentorName } from '@/hooks/useMentorName'
+import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
+import { UserQuestionnaireResult } from '@/components/features/QuestionnaireResultCell'
+import { MemberCourseDrawer } from '@/components/features/MemberCourseDrawer'
+import { formatPersonName } from '@/lib/users/displayName'
 import { ShadowPushButton } from '@/components/features/ShadowPushButton'
 import { HomeHighlightsRow } from '@/components/features/HomeHighlights'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
@@ -747,8 +751,9 @@ function UserTable({
   selectedUid?: string
 }) {
   const [search, setSearch] = useState('')
-  const [sortBy, setSortBy] = useState<'empId' | 'name' | 'department' | 'position' | 'startDate' | 'tenure' | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  // Opens on the shortest tenure: the newest start date first.
+  const [sortBy, setSortBy] = useState<'empId' | 'name' | 'department' | 'position' | 'startDate' | 'tenure' | null>('startDate')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   function toggleSort(col: typeof sortBy) {
     if (sortBy === col) {
@@ -910,6 +915,11 @@ function UserSidePanel({
 }) {
   const [tab, setTab] = useState<ProfileTab>('info')
   const [selectedShadow, setSelectedShadow] = useState<ShadowRecord | null>(null)
+  // The course opened from the training list, read on the right: Key Take Away and the leads' feedback.
+  const [openCourse, setOpenCourse] = useState<{ id: string; title: string } | null>(null)
+  const { data: allCourses } = useCourses()
+  // A questionnaire course (MBTI, …) has no score: its result is the person's type.
+  const questionnaireByCourse = useMemo(() => new Map(allCourses.map((c) => [c.id, courseQuestionnaireId(c)] as const)), [allCourses])
   const { data: shadowRecords } = useShadowRecordsByUser(user.uid)
   const { data: roleplayAssessments } = useRoleplayAssessmentsByUser(user.uid)
 
@@ -1100,21 +1110,32 @@ function UserSidePanel({
                     : 'text-gray-400'
                   return (
                     <div key={rec.id} className="grid grid-cols-12 gap-2 px-3 py-3 bg-white border border-gray-100 rounded-xl items-center hover:bg-gray-50 transition-colors">
-                      <div className="col-span-5 min-w-0">
-                        <p className="text-xs font-bold text-gray-800 truncate leading-snug">{rec.courseTitle}</p>
+                      <button
+                        type="button"
+                        onClick={() => setOpenCourse({ id: rec.courseId, title: rec.courseTitle })}
+                        title="อ่าน Key Take Away และ Feedback"
+                        className="col-span-5 min-w-0 text-left group/course"
+                      >
+                        <p className="text-xs font-bold text-gray-800 truncate leading-snug group-hover/course:text-freshket-700 group-hover/course:underline">{rec.courseTitle}</p>
                         <p className="text-xs text-gray-400 mt-0.5">ครั้งที่ {rec.attemptCount}</p>
-                      </div>
+                      </button>
                       <div className="col-span-2 flex justify-center">
                         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${STATUS_BADGE[rec.status]}`}>
                           {STATUS_LABELS[rec.status]}
                         </span>
                       </div>
                       <div className="col-span-2 text-center">
-                        <span className={`text-sm font-black ${scoreColor}`}>
-                          {rec.score != null ? rec.score : '—'}
-                        </span>
-                        {rec.passScore != null && (
-                          <span className="text-xs text-gray-400 block leading-none">/{rec.passScore}</span>
+                        {questionnaireByCourse.get(rec.courseId) ? (
+                          <UserQuestionnaireResult uid={user.uid} definitionId={questionnaireByCourse.get(rec.courseId)!} ownerName={formatPersonName(user)} />
+                        ) : (
+                          <>
+                            <span className={`text-sm font-black ${scoreColor}`}>
+                              {rec.score != null ? rec.score : '—'}
+                            </span>
+                            {rec.passScore != null && (
+                              <span className="text-xs text-gray-400 block leading-none">/{rec.passScore}</span>
+                            )}
+                          </>
                         )}
                       </div>
                       <div className="col-span-3 text-right">
@@ -1126,6 +1147,16 @@ function UserSidePanel({
               </div>
             )}
           </div>
+        )}
+
+        {openCourse && (
+          <MemberCourseDrawer
+            memberUid={user.uid}
+            memberName={formatPersonName(user)}
+            courseId={openCourse.id}
+            courseTitle={openCourse.title}
+            onClose={() => setOpenCourse(null)}
+          />
         )}
 
         {/* Tab: Shadow Visit */}
