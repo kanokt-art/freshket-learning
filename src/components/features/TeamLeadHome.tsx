@@ -1,19 +1,22 @@
 'use client'
 
 import { coursesForTeam, isInCourseTarget } from '@/lib/courses/audience'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers, useAllTrainingRecords, useUserStats, useMyTrainingRecords, useCourses, useAnnouncements, useTeams } from '@/hooks/useFirestore'
 import { relativeTime } from '@/lib/utils/dateFormatter'
-import { isAnnouncementVisibleTo } from '@/types/announcement'
 import { managedMembers } from '@/lib/users/managedMembers'
 import { statsAvgScore, type UserStats } from '@/types/stats'
 import { useTeamActivity } from '@/hooks/useTeamActivity'
 import { TeamActivityCard } from '@/components/features/TeamActivityCard'
+import { HomeHighlightsRow } from '@/components/features/HomeHighlights'
+import { useHomeHighlights } from '@/hooks/useHomeHighlights'
+import { UserTable, UserSidePanel } from '@/components/features/MemberDirectory'
+import type { UserProfile } from '@/types/user'
 
 // Team-lead / manager home — 3-column dashboard:
-//   center → news feed, all courses
+//   center → Latest, team course progress, the team's member table
 //   right  → the courses I still have to take, then what the team has done (take-aways, scores, Shadow Visits)
 export function TeamLeadHome() {
   const router = useRouter()
@@ -86,7 +89,9 @@ export function TeamLeadHome() {
 
   // Only courses aimed at me or at the people I look after, not every course in the company.
   const publishedCourses = useMemo(() => coursesForTeam(courses, user, members), [courses, user, members])
-  const publishedNews = announcements.filter((a) => isAnnouncementVisibleTo(a, user?.role, user?.department))
+  const highlights = useHomeHighlights(user)
+  const announcementBodies = useMemo(() => new Map(announcements.map((a) => [`announcement:${a.id}`, a.body])), [announcements])
+  const [selectedMember, setSelectedMember] = useState<UserProfile | null>(null)
 
   const memberUids = useMemo(() => members.map((m) => m.uid), [members])
   const courseTitles = useMemo(() => new Map(courses.map((c) => [c.id, c.title])), [courses])
@@ -131,49 +136,12 @@ export function TeamLeadHome() {
 
         {/* ── CENTER: News feed (one card, posts split by dividers) ─── */}
         <div className="lg:col-span-9 flex flex-col gap-5">
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            {/* Header */}
-            <div className="px-5 py-3.5 flex items-center justify-between border-b border-gray-100">
-              <h2 className="text-lg font-bold text-gray-900">นิวส์ฟีด</h2>
-              <span className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 border border-gray-200 rounded-lg px-2.5 py-1.5">
-                <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M6 12h12m-9 5.25h6" />
-                </svg>
-                <svg className="size-3 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-              </span>
-            </div>
-
-            {publishedNews.length === 0 ? (
-              <div className="p-10 text-center text-gray-400">
-                <p className="text-sm">ยังไม่มีข่าวสาร</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-100">
-                {publishedNews.map((a) => (
-                  <article key={a.id} className="px-5 py-4">
-                    <div className="flex items-center gap-2.5">
-                      <div className="size-9 rounded-full bg-freshket-100 flex items-center justify-center text-freshket-600 shrink-0">
-                        <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" /></svg>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-gray-900 truncate">{a.authorName ?? 'Freshket'}</p>
-                        <p className="text-xs text-gray-400">{a.title}</p>
-                      </div>
-                    </div>
-                    {a.imageUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={a.imageUrl} alt={a.title} className="w-full max-h-80 object-cover rounded-xl mt-3" />
-                    )}
-                    <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed mt-3">{a.body}</p>
-                  </article>
-                ))}
-              </div>
-            )}
-          </div>
+          <HomeHighlightsRow uid={user?.uid ?? ''} candidates={highlights.visible} pins={highlights.pins} hidden={highlights.hidden} bodies={announcementBodies} />
 
           <TeamCourseProgressCard courses={publishedCourses} progress={teamProgress} onOpen={(id) => router.push(`/courses/${id}?view=report`)} />
+
+          {/* The people I look after, shortest tenure first; every column sorts */}
+          <UserTable users={members} restrict={false} onSelect={setSelectedMember} selectedUid={selectedMember?.uid} />
         </div>
 
         {/* ── RIGHT: continue learning ─────────────────────────── */}
@@ -182,6 +150,15 @@ export function TeamLeadHome() {
           <TeamActivityCard items={activity.items} people={members} loading={activity.loading} />
         </div>
       </div>
+
+      {selectedMember && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+          onClick={() => setSelectedMember(null)}
+        >
+          <UserSidePanel user={selectedMember} onClose={() => setSelectedMember(null)} />
+        </div>
+      )}
     </div>
   )
 }
