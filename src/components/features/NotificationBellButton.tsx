@@ -8,10 +8,9 @@ import { useNotifications } from '@/hooks/useNotifications'
 import { NotificationList } from '@/components/features/NotificationList'
 import type { AppNotification } from '@/types/notification'
 
-// Bell button that opens a small popover in place — no page navigation.
-// Used by both the mobile bottom nav (`variant="nav"`) and the desktop
-// header (`variant="header"`); each renders its own trigger markup but
-// shares the panel, backdrop and list-tap behavior below.
+// Bell button — no page navigation. In the desktop header (`variant="header"`) it opens a small popover in
+// place; in the mobile bottom nav (`variant="nav"`) a full page of notifications slides in from the right.
+// Both share the list-tap behavior below.
 
 function BellGlyph({ filled, className }: { filled: boolean; className?: string }) {
   return filled ? (
@@ -82,11 +81,7 @@ export function NotificationBellButton({ variant }: { variant: 'nav' | 'header' 
       // be clipped to the bar's own box instead of the viewport. Portaling to
       // <body> with a rect-computed position sidesteps that entirely.
       const rect = triggerRef.current.getBoundingClientRect()
-      setPanelStyle(
-        variant === 'nav'
-          ? { position: 'fixed', bottom: window.innerHeight - rect.top + 12, left: 12, right: 12 }
-          : { position: 'fixed', top: rect.bottom + 8, right: window.innerWidth - rect.right, width: 384 },
-      )
+      setPanelStyle({ position: 'fixed', top: rect.bottom + 8, right: window.innerWidth - rect.right, width: 384 })
     }
     setOpen((v) => !v)
   }
@@ -100,9 +95,7 @@ export function NotificationBellButton({ variant }: { variant: 'nav' | 'header' 
   if (!user) return null
 
   const panel = (
-    <div className={`flex flex-col bg-white rounded-2xl border border-gray-100 shadow-2xl overflow-hidden ${
-      variant === 'nav' ? 'max-h-[70vh]' : 'max-h-[75vh]'
-    }`}>
+    <div className="flex flex-col bg-white rounded-2xl border border-gray-100 shadow-2xl overflow-hidden max-h-[75vh]">
       <PanelHeader unreadCount={unreadCount} onMarkAllRead={markAllRead} onClose={() => setOpen(false)} />
       <div className="overflow-y-auto">
         <NotificationList items={items} onTapNotification={handleTap} emptyClassName="py-8" />
@@ -110,15 +103,52 @@ export function NotificationBellButton({ variant }: { variant: 'nav' | 'header' 
     </div>
   )
 
+  // On a phone the bell opens a whole page of notifications, sliding in from the right, with a back arrow.
+  const mobilePage = (
+    <div className="fixed inset-0 z-[70] bg-slate-50 flex flex-col animate-page-in-right" role="dialog" aria-modal="true" aria-label="การแจ้งเตือน">
+      <div className="sticky top-0 bg-white border-b border-gray-100 h-14 px-2 flex items-center gap-1 shrink-0">
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          aria-label="กลับ"
+          className="size-10 flex items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 transition-all duration-150"
+        >
+          <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15.75 19.5 8.25 12l7.5-7.5" />
+          </svg>
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-bold text-gray-900 leading-tight">การแจ้งเตือน</p>
+          <p className="text-xs text-gray-400">{unreadCount > 0 ? `${unreadCount} รายการยังไม่ได้อ่าน` : 'ทั้งหมดอ่านแล้ว'}</p>
+        </div>
+        {unreadCount > 0 && (
+          <button
+            type="button"
+            onClick={markAllRead}
+            className="text-xs font-bold text-freshket-700 px-3 py-2 rounded-xl hover:bg-freshket-50 transition-all duration-150"
+          >
+            อ่านทั้งหมด
+          </button>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto pb-safe">
+        <div className="bg-white">
+          <NotificationList items={items} onTapNotification={handleTap} emptyClassName="py-16" />
+        </div>
+      </div>
+    </div>
+  )
+
   const overlay = open && typeof document !== 'undefined'
     ? createPortal(
+        variant === 'nav' ? mobilePage : (
         <>
           {/* Click-outside-to-close catcher — transparent, matches the Facebook-style non-dimmed pattern */}
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div style={panelStyle} className="z-50">
             {panel}
           </div>
-        </>,
+        </>),
         document.body,
       )
     : null

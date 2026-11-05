@@ -5,8 +5,7 @@ import { NotificationBellButton } from '@/components/features/NotificationBellBu
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { canAccess } from '@/types/user'
-import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
-import { useMemo } from 'react'
+import { useEffect, useState } from 'react'
 
 // ── Icon pairs: filled (active) vs outlined (inactive) ───────────────────────
 
@@ -48,30 +47,6 @@ function ToolIcon({ filled }: { filled: boolean }) {
   )
 }
 
-function SparkleIcon({ filled }: { filled: boolean }) {
-  return filled ? (
-    <svg className="size-6" viewBox="0 0 24 24" fill="currentColor">
-      <path fillRule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.006 5.404.434c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.434 2.082-5.006Z" clipRule="evenodd" />
-    </svg>
-  ) : (
-    <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
-    </svg>
-  )
-}
-
-function AdminIcon({ filled }: { filled: boolean }) {
-  return filled ? (
-    <svg className="size-6" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M4.5 6.375a4.125 4.125 0 1 1 8.25 0 4.125 4.125 0 0 1-8.25 0ZM14.25 8.625a3.375 3.375 0 1 1 6.75 0 3.375 3.375 0 0 1-6.75 0ZM1.5 19.125a7.125 7.125 0 0 1 14.25 0v.003l-.001.119a.75.75 0 0 1-.363.63 13.067 13.067 0 0 1-6.761 1.873c-2.472 0-4.786-.684-6.76-1.873a.75.75 0 0 1-.364-.63l-.001-.122ZM17.25 19.128l-.001.144a2.25 2.25 0 0 1-.233.96 10.088 10.088 0 0 0 5.06-1.01.75.75 0 0 0 .42-.643 4.875 4.875 0 0 0-6.957-4.611 8.586 8.586 0 0 1 1.71 5.157v.003Z" />
-    </svg>
-  ) : (
-    <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
-    </svg>
-  )
-}
-
 function ProfileIcon({ filled }: { filled: boolean }) {
   return filled ? (
     <svg className="size-6" viewBox="0 0 24 24" fill="currentColor">
@@ -86,21 +61,89 @@ function ProfileIcon({ filled }: { filled: boolean }) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+// ── Admin menu: a floating button above the bar (team lead and up) ───────────
+
+function GearIcon() {
+  return (
+    <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.526-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z" />
+      <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  )
+}
+
+function AdminFab({ role }: { role: string }) {
+  const pathname = usePathname()
+  const [open, setOpen] = useState(false)
+  useEffect(() => { setOpen(false) }, [pathname])
+
+  const isSuperAdmin = role === 'super_admin'
+  const links = [
+    { href: '/manager', label: isSuperAdmin ? 'ภาพรวมทีม (ทุกคน)' : 'ภาพรวมทีม' },
+    { href: '/users', label: isSuperAdmin ? 'Administration' : 'จัดการพนักงาน' },
+    ...(isSuperAdmin
+      ? [
+          { href: '/courses', label: 'จัดการหลักสูตร' },
+          { href: '/assessment', label: 'สร้างแบบทดสอบ' },
+          { href: '/admin/guide', label: 'คู่มือ Admin' },
+        ]
+      : []),
+  ]
+  const onAdminPage = links.some((l) => l.href !== '/courses' && pathname.startsWith(l.href))
+
+  return (
+    <div className="lg:hidden">
+      {open && <div className="fixed inset-0 z-40 bg-slate-900/30" onClick={() => setOpen(false)} />}
+      <div className="fixed right-4 bottom-[78px] z-50 flex flex-col items-end gap-3">
+        {open && (
+          <div className="w-56 bg-white rounded-2xl border border-gray-100 shadow-2xl overflow-hidden animate-pop-in">
+            <p className="px-4 pt-3 pb-1.5 text-xs font-bold text-gray-400">เมนูผู้ดูแล</p>
+            {links.map((l) => (
+              <Link
+                key={l.href + l.label}
+                href={l.href}
+                className={`block px-4 py-3 text-sm font-bold transition-all duration-150 ${
+                  pathname === l.href ? 'text-freshket-700 bg-freshket-50' : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                {l.label}
+              </Link>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-label="เมนูผู้ดูแล"
+          aria-expanded={open}
+          className={`size-14 rounded-full shadow-xl flex items-center justify-center transition-all duration-150 active:scale-95 ${
+            open || onAdminPage ? 'bg-blue-600 text-white' : 'bg-white text-blue-600 border border-gray-100'
+          }`}
+        >
+          {open ? (
+            <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M6 18 18 6M6 6l12 12" /></svg>
+          ) : <GearIcon />}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+// Five icons for everyone on a phone: home, courses, tools, notifications, profile. The admin pages
+// (team, staff, course management) sit behind the floating button instead.
 export function BottomBar() {
   const pathname = usePathname()
   const { user } = useAuth()
-  const isNewJoiner = useMemo(() => getDaysSince(user?.startDate) < NEW_JOINER_DAYS, [user?.startDate])
 
   if (!user) return null
 
   const isAdmin = canAccess(user.role, 'team_lead')
-  const isSuperAdmin = user.role === 'super_admin'
 
   const homeActive    = pathname === '/sale'
   const courseActive  = pathname.startsWith('/courses') || pathname.startsWith('/shadow')
-  const toolActive    = pathname.startsWith('/tools') && pathname !== '/tools/new-joiner'
-  const joinerActive  = pathname === '/tools/new-joiner'
-  const adminActive   = pathname.startsWith('/users') || pathname.startsWith('/admin') || pathname.startsWith('/assessment')
+  const toolActive    = pathname.startsWith('/tools')
   const profileActive = pathname === '/profile'
 
   const items = [
@@ -122,22 +165,6 @@ export function BottomBar() {
       active: toolActive,
       icon: <ToolIcon filled={toolActive} />,
     },
-    ...(isNewJoiner || isSuperAdmin
-      ? [{
-          href: '/tools/new-joiner',
-          label: 'คู่มือใหม่',
-          active: joinerActive,
-          icon: <SparkleIcon filled={joinerActive} />,
-        }]
-      : []),
-    ...(isAdmin
-      ? [{
-          href: '/users',
-          label: 'จัดการ',
-          active: adminActive,
-          icon: <AdminIcon filled={adminActive} />,
-        }]
-      : []),
     {
       // Handled specially in the render below — opens a popover instead of navigating.
       href: null,
@@ -154,6 +181,8 @@ export function BottomBar() {
   ]
 
   return (
+    <>
+    {isAdmin && <AdminFab role={user.role} />}
     <nav className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-white/95 backdrop-blur-md border-t border-gray-100 shadow-[0_-4px_24px_rgba(0,0,0,0.06)]">
       <div className="flex items-center justify-around h-[62px] pb-safe px-1">
         {items.map((item) =>
@@ -195,5 +224,6 @@ export function BottomBar() {
         )}
       </div>
     </nav>
+    </>
   )
 }
