@@ -9,6 +9,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser, useAnnouncements } from '@/hooks/useFirestore'
 import { useHomeHighlights } from '@/hooks/useHomeHighlights'
+import { useMentorName } from '@/hooks/useMentorName'
 import { HomeHighlightsRow } from '@/components/features/HomeHighlights'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { useNotifications } from '@/hooks/useNotifications'
@@ -1188,6 +1189,7 @@ const PERSONA_STYLE: Record<string, string> = {
 }
 
 function ShadowCard({ record, onClick }: { record: ShadowRecord; onClick?: () => void }) {
+  const mentorName = useMentorName()
   const dateStr = record.createdAt
     ? new Date(record.createdAt as unknown as string).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
     : '—'
@@ -1211,7 +1213,7 @@ function ShadowCard({ record, onClick }: { record: ShadowRecord; onClick?: () =>
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
             <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${SEGMENT_STYLE[record.segment] ?? 'bg-gray-100 text-gray-600'}`}>{record.segment}</span>
             <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${PERSONA_STYLE[record.persona] ?? 'bg-gray-100 text-gray-600'}`}>{record.persona}</span>
-            <span className="text-xs text-gray-400">Mentor: <span className="font-bold text-gray-600">{record.mentorName}</span></span>
+            <span className="text-xs text-gray-400">Mentor: <span className="font-bold text-gray-600">{mentorName(record)}</span></span>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -1240,6 +1242,7 @@ const EVAL_DETAIL_FIELDS: { key: keyof ShadowRecord; label: string; color: strin
 ]
 
 function ShadowDetailPanel({ record, onBack }: { record: ShadowRecord; onBack: () => void }) {
+  const mentorName = useMentorName()
   const dateStr = record.createdAt
     ? new Date(record.createdAt as unknown as string).toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })
     : '—'
@@ -1270,7 +1273,7 @@ function ShadowDetailPanel({ record, onBack }: { record: ShadowRecord; onBack: (
           <span className={`text-xs font-bold px-3 py-1 rounded-full ${SEGMENT_STYLE[record.segment] ?? 'bg-gray-100 text-gray-600'}`}>{record.segment}</span>
           <span className={`text-xs font-bold px-3 py-1 rounded-full ${PERSONA_STYLE[record.persona] ?? 'bg-gray-100 text-gray-600'}`}>{record.persona}</span>
           <span className="text-xs text-gray-500 ml-1">
-            Mentor: <span className="font-bold text-gray-700">{record.mentorName}</span>
+            Mentor: <span className="font-bold text-gray-700">{mentorName(record)}</span>
             {record.mentorPosition && <span className="text-gray-400"> · {record.mentorPosition}</span>}
           </span>
           {record.ratingScore != null && (

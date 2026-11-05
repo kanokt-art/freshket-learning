@@ -15,6 +15,7 @@ import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
 import { useCourses, useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAllShadowAcknowledgments, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList, useBucketResultsFor, useMyBucketResult } from '@/hooks/useFirestore'
 import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
+import { useMentorName } from '@/hooks/useMentorName'
 import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import { OpenableMbtiPill } from '@/components/features/MbtiBadge'
 import { formatPersonName } from '@/lib/users/displayName'
@@ -561,6 +562,7 @@ function EmployeeSidebar({
   const { data: roleplayAssessments } = useRoleplayAssessmentsByUser(user.uid)
   // Each course's cover, shown beside its title in the learning history.
   const { data: allCourses } = useCourses()
+  const mentorName = useMentorName()
   const coverOf = useMemo(() => new Map(allCourses.map((c) => [c.id, c.thumbnailUrl] as const)), [allCourses])
   // The questionnaire a course is (MBTI, …), if it is one: its history card shows the type, not a score.
   const questionnaireByCourse = useMemo(() => new Map(allCourses.map((c) => [c.id, courseQuestionnaireId(c)] as const)), [allCourses])
@@ -914,7 +916,7 @@ function EmployeeSidebar({
                         {rec.mentorName ? (
                           <>
                             <span className="text-gray-500">Shadow with:</span>{' '}
-                            <span className="font-bold">{rec.mentorName}</span>
+                            <span className="font-bold">{mentorName(rec)}</span>
                             {rec.mentorPosition ? <span className="text-gray-500">{` · ${rec.mentorPosition}`}</span> : null}
                           </>
                         ) : '—'}

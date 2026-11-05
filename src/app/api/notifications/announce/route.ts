@@ -198,6 +198,23 @@ export async function POST(req: NextRequest) {
         break
       }
 
+      // A super_admin sends a visit to Slack by hand. Not once-only: it posts again and rings the bells again,
+      // for a visit that never went out or to nudge a review. The words still come from the stored visit and
+      // the sender's own HR record.
+      case 'shadow_push': {
+        if (!gate.isSuperAdmin) return notAllowed()
+        const recordId = idOf(body.recordId)
+        if (!recordId) return bad('Invalid recordId')
+        const visit = (await store.get('shadowRecords', recordId)) as (Doc & { observerUid?: string; storeName?: string; segment?: string }) | null
+        if (!visit?.observerUid) return bad('Visit not found')
+        const sender = ((await store.get('users', visit.observerUid)) ?? {}) as Partial<UserProfile>
+        posted = await announceNewShadowVisit(store, {
+          recordId, senderUid: visit.observerUid, sender,
+          storeName: visit.storeName, segment: visit.segment, force: { byUid: gate.uid },
+        })
+        break
+      }
+
       case 'shadow_acked': {
         const recordId = idOf(body.recordId)
         if (!recordId) return bad('Invalid recordId')

@@ -7,6 +7,8 @@ import { PracticeTabs } from '@/components/layout/PracticeTabs'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers, useTeams, useAllShadowRecords, useAllShadowAcknowledgments, saveShadowRecord } from '@/hooks/useFirestore'
 import { alertError } from '@/lib/ui/alert'
+import { useMentorName } from '@/hooks/useMentorName'
+import { formatPersonName } from '@/lib/users/displayName'
 import { canAccess, getTeamManagerIds } from '@/types/user'
 import type { UserProfile } from '@/types/user'
 import type { ShadowRecord, ShadowSegment, ShadowPersona, ShadowAcknowledgment } from '@/types/shadow'
@@ -302,6 +304,7 @@ function VisitDetailModal({
   onClose: () => void
   onSaveAck: (recordId: string, rating: number, comment: string) => Promise<void> | void
 }) {
+  const mentorName = useMentorName()
   // A panel on the right (a sheet rising from the bottom on a phone), not a window in the middle: the list
   // stays in view behind it, and it is where a learner reads the feedback their team lead or manager gave
   // on this visit.
@@ -345,7 +348,7 @@ function VisitDetailModal({
             <svg className="size-3.5 text-freshket-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
             </svg>
-            <span><strong className="text-gray-700">{record.mentorName}</strong> · {record.mentorPosition}</span>
+            <span><strong className="text-gray-700">{mentorName(record)}</strong> · {record.mentorPosition}</span>
           </div>
           <div className="flex items-center gap-1">
             <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -405,6 +408,7 @@ function MemberVisitsOverlay({
   onViewDetail: (r: ShadowRecord) => void
   onSaveAck: (recordId: string, rating: number, comment: string) => void
 }) {
+  const mentorName = useMentorName()
   return (
     <div
       className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
@@ -476,7 +480,7 @@ function MemberVisitsOverlay({
                           <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${PERSONA_STYLE[r.persona]}`}>{r.persona}</span>
                         </div>
                         <div className="flex items-center gap-3 text-xs text-gray-400">
-                          <span>Mentor: <span className="font-normal text-gray-600">{r.mentorName}</span></span>
+                          <span>Mentor: <span className="font-normal text-gray-600">{mentorName(r)}</span></span>
                           <span>{r.createdAt.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
                         </div>
                       </div>
@@ -598,6 +602,7 @@ function SaleVisitsTable({
   onView: (r: ShadowRecord) => void
   onCreate: () => void
 }) {
+  const mentorName = useMentorName()
   const [search, setSearch] = useState('')
 
   const filtered = useMemo(() => {
@@ -606,10 +611,11 @@ function SaleVisitsTable({
     return records.filter(r =>
       r.storeName.toLowerCase().includes(q) ||
       r.mentorName.toLowerCase().includes(q) ||
+      mentorName(r).toLowerCase().includes(q) ||
       r.segment.toLowerCase().includes(q) ||
       r.persona.toLowerCase().includes(q),
     )
-  }, [records, search])
+  }, [records, search, mentorName])
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
@@ -714,7 +720,7 @@ function SaleVisitsTable({
                         <div className={`size-7 rounded-full flex items-center justify-center shrink-0 text-white text-xs font-bold ${avatarCls}`}>
                           {initial}
                         </div>
-                        <span className="text-xs text-gray-600 whitespace-nowrap">{r.mentorName}</span>
+                        <span className="text-xs text-gray-600 whitespace-nowrap">{mentorName(r)}</span>
                       </div>
                     </td>
 
@@ -831,7 +837,7 @@ function ShadowFormPanel({
 
   function selectMentor(u: UserProfile) {
     setSelectedMentorUid(u.uid)
-    set('mentorName', u.nickname ?? u.displayName)
+    set('mentorName', formatPersonName(u))
     set('mentorPosition', u.position ?? '')
     setMentorSearch('')
     setMentorOpen(false)

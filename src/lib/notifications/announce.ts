@@ -70,6 +70,14 @@ export type AnnounceEvent =
       assessmentId: string
     }
   | {
+      /**
+       * A super_admin sends a visit to Slack (and rings its bells) by hand, for a visit that never went out
+       * or to nudge a review. Unlike the automatic one it is not once-only. Super_admin only.
+       */
+      kind: 'shadow_push'
+      recordId: string
+    }
+  | {
       kind: 'shadow_acked'
       /** The visit reviewed: the caller must have given a review of it. The server looks up who to tell and what was given. */
       recordId: string

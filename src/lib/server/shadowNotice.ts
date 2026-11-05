@@ -41,13 +41,22 @@ export async function supervisorsOf(store: Pick<Store, 'get'>, person: Partial<U
 /** Ring the bells and post to Slack for one new visit. Returns whether the Slack post went out. */
 export async function announceNewShadowVisit(
   store: Store,
-  v: { recordId: string; senderUid: string; sender: Partial<UserProfile>; storeName?: string; segment?: string },
+  v: {
+    recordId: string; senderUid: string; sender: Partial<UserProfile>; storeName?: string; segment?: string
+    /**
+     * A super_admin pushing it by hand: not once-only (the bells ring again, the group is posted to again),
+     * and posted whatever the sender's department. `byUid` is who pushed it.
+     */
+    force?: { byUid: string }
+  },
 ): Promise<boolean> {
   const parts = [v.storeName ? `ร้าน ${v.storeName}` : null, v.segment || null].filter(Boolean) as string[]
   const visitPath = `/shadow?visit=${encodeURIComponent(v.recordId)}`
   const who = formatPersonName(v.sender) || 'พนักงาน'
+  const once = async (key: string, kind: string) =>
+    v.force ? true : store.claim('slackPosts', key, { kind, refId: v.recordId, postedAt: new Date() })
 
-  if (await store.claim('slackPosts', `shadow_submitted_bell:${v.recordId}`, { kind: 'shadow_submitted_bell', refId: v.recordId, postedAt: new Date() })) {
+  if (await once(`shadow_submitted_bell:${v.recordId}`, 'shadow_submitted_bell')) {
     const now = new Date()
     await Promise.all((await supervisorsOf(store, v.sender, v.senderUid)).map((uid) =>
       store.set(`notifications/${uid}/items`, `shadow_pending_ack_${v.recordId}`, {
@@ -58,14 +67,14 @@ export async function announceNewShadowVisit(
         refPath: visitPath,
         read: false,
         createdAt: now,
-        createdByUid: v.senderUid,
+        createdByUid: v.force?.byUid ?? v.senderUid,
       }, { merge: false }),
     ))
   }
 
-  // Only sales visits go to the channel, once per visit.
-  if (!isSalesDepartment(v.sender.department)) return false
-  if (!(await store.claim('slackPosts', `shadow_submitted:${v.recordId}`, { kind: 'shadow_submitted', refId: v.recordId, postedAt: new Date() }))) return false
+  // Only sales visits go to the channel, once per visit — unless a super_admin sends it themselves.
+  if (!v.force && !isSalesDepartment(v.sender.department)) return false
+  if (!(await once(`shadow_submitted:${v.recordId}`, 'shadow_submitted'))) return false
 
   return postShadowSubmittedToSlack({
     observerName: who,

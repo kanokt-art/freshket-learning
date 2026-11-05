@@ -195,6 +195,35 @@ describe('a Shadow Visit announcement is about the caller\'s own visit, once', (
   })
 })
 
+describe('a super_admin can push a visit to Slack by hand', () => {
+  it('refuses anyone else', async () => {
+    asLead()
+    expect((await call({ kind: 'shadow_push', recordId: 'v2' })).status).toBe(403)
+    asSale()
+    expect((await call({ kind: 'shadow_push', recordId: 'v1' })).status).toBe(403)
+    expect(posts.submitted).not.toHaveBeenCalled()
+    expect(bells).toHaveLength(0)
+  })
+
+  it('posts again and rings the bells again, even for a visit already announced and from outside sales', async () => {
+    docs.teams = [{ id: 't1', teamLeadId: 'lead1' }]
+    docs.users = [{ id: 'someone-else', displayNameEN: 'Real Observer', nickname: 'Rob', department: 'Finance', teamId: 't1' }]
+    asAdmin()
+    await call({ kind: 'shadow_push', recordId: 'v2' })
+    await call({ kind: 'shadow_push', recordId: 'v2' })
+    expect(posts.submitted).toHaveBeenCalledTimes(2)
+    expect(bells.filter((b) => b.path === 'notifications/lead1/items')).toHaveLength(2)
+    expect(bells[0].data.createdByUid).toBe('admin1') // traced to who pushed it
+    expect((posts.submitted.mock.calls[0][0] as { observerName: string }).observerName).toBe('Real (Rob) Observer')
+  })
+
+  it('refuses a visit that does not exist', async () => {
+    asAdmin()
+    expect((await call({ kind: 'shadow_push', recordId: 'nope' })).status).toBe(400)
+    expect(posts.submitted).not.toHaveBeenCalled()
+  })
+})
+
 describe('a review announcement is about a review the caller gave, once', () => {
   it('uses the names and stars from the database, never from the request', async () => {
     asLead()

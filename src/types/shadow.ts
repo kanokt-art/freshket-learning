@@ -21,6 +21,9 @@ export interface ShadowRecord {
   observerEmail: string
   observerName: string
   mentorName: string
+  /** From the Google Form sheet, when the form carried them. */
+  mentorEmail?: string
+  mentorNickname?: string
   mentorPosition: string
   storeName: string
   segment: ShadowSegment
