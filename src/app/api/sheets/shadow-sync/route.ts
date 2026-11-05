@@ -63,12 +63,16 @@ export async function POST(req: NextRequest) {
     const errors: Array<{ row: number; message: string }> = []
     const unknownChoices = new Set<string>()
     const docs = new Map<string, { id: string; data: Record<string, unknown> }>()
-    ;(body.rows as ShadowSheetRow[]).forEach((r, i) => {
+    // The row the form just wrote, which the Apps Script marks on a form submit: always reported (once),
+    // whatever its timestamp reads as, so a just-sent visit never waits on the date being parsed right.
+    const justSubmitted = new Set<string>()
+    ;(body.rows as Array<ShadowSheetRow & { submitted?: unknown }>).forEach((r, i) => {
       const email = typeof r.observerEmail === 'string' ? r.observerEmail.trim().toLowerCase() : ''
       const mapped = toShadowRecord(r ?? {}, people.get(email) ?? null)
       if (!mapped.ok) { errors.push({ row: i + 2, message: mapped.reason }); return }
       mapped.unknownChoices.forEach((c) => unknownChoices.add(c))
       docs.set(mapped.id, { id: mapped.id, data: mapped.data })   // the same visit twice: the later row wins
+      if (r.submitted === true) justSubmitted.add(mapped.id)
     })
 
     const ids = Array.from(docs.keys())
@@ -82,6 +86,7 @@ export async function POST(req: NextRequest) {
     const cutoff = Date.now() - RECENT_MS
     const fresh = ids.filter((id) => {
       if (existing.has(id)) return false
+      if (justSubmitted.has(id)) return true
       const at = docs.get(id)!.data.createdAt
       const t = at instanceof Date ? at.getTime() : new Date(String(at)).getTime()
       return Number.isFinite(t) && t >= cutoff

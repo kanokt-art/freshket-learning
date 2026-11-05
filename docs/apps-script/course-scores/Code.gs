@@ -183,8 +183,12 @@ function isShadowTab_(name) {
   return String(name).trim().toLowerCase() === SHADOW_TAB
 }
 
-/** อ่านแท็บ Shadow → { rows, problem } โดยจับคู่จากหัวคอลัมน์ ไม่ใช่ตำแหน่ง */
-function readShadow_(sheet) {
+/**
+ * อ่านแท็บ Shadow → { rows, problem } โดยจับคู่จากหัวคอลัมน์ ไม่ใช่ตำแหน่ง
+ * submittedRow = เลขแถวในชีตที่ฟอร์มเพิ่งเขียน (จาก onFormSubmit) แถวนั้นจะติด submitted: true
+ * ให้ระบบแจ้งเตือนทันทีเสมอ ไม่ต้องรอแปลงวันที่
+ */
+function readShadow_(sheet, submittedRow) {
   var lastRow = sheet.getLastRow()
   var lastCol = sheet.getLastColumn()
   if (lastRow < 2 || lastCol < 1) return { rows: [], problem: null }
@@ -208,17 +212,18 @@ function readShadow_(sheet) {
     // Sheets อ่าน 04/03 เป็นเดือน/วัน และ 2569 เป็นปี ค.ศ. ทำให้ผิด ส่วนวันที่ > 12 เป็นข้อความอยู่แล้ว
     // ฝั่งระบบเป็นคนแปลง (พ.ศ. → ค.ศ.)
     row.timestamp = String(shown[r][field.timestamp]).trim()
+    if (submittedRow && r + 2 === submittedRow) row.submitted = true
     rows.push(row)
   }
   return { rows: rows, problem: null }
 }
 
-function syncShadow_() {
+function syncShadow_(submittedRow) {
   var sheet = null
   spreadsheet_().getSheets().forEach(function (s) { if (isShadowTab_(s.getName())) sheet = s })
   if (!sheet) return { line: 'ไม่พบแท็บ "Shadow"', failed: 0 }
 
-  var read = readShadow_(sheet)
+  var read = readShadow_(sheet, submittedRow)
   if (read.problem) return { line: 'ผิดพลาด "Shadow" — ' + read.problem, failed: 1 }
   if (!read.rows.length) return { line: '"Shadow" — ยังไม่มีข้อมูล', failed: 0 }
 
@@ -231,7 +236,7 @@ function syncShadow_() {
     var json = null
     try { json = JSON.parse(res.getContentText()) } catch (e) { /* ไม่ใช่ JSON */ }
     if (code < 200 || code >= 300) return { line: 'ผิดพลาด "Shadow" — HTTP ' + code + ': ' + ((json && json.error) || res.getContentText().slice(0, 120)), failed: 1 }
-    var line = '"Shadow" → ' + json.written + ' visit (ใหม่ ' + json.created + ')'
+    var line = '"Shadow" → ' + json.written + ' visit (ใหม่ ' + json.created + (json.announced ? ', แจ้งเตือน ' + json.announced : '') + ')'
     var failed = 0
     if (json.unmatched && json.unmatched.length) line += ', ไม่พบอีเมลผู้สังเกต ' + json.unmatched.length + ' (' + json.unmatched.slice(0, 5).join(', ') + ')'
     if (json.unknownChoices && json.unknownChoices.length) line += ', ค่า Segment/Persona ที่ระบบไม่มีในรายการ: ' + json.unknownChoices.slice(0, 5).join(', ')
@@ -253,7 +258,8 @@ function onFormSubmit(e) {
   var name = e && e.range ? e.range.getSheet().getName() : null
   if (!name) return
   if (isShadowTab_(name)) {
-    var sh = syncShadow_()
+    // ส่งทั้งแท็บ (ส่งซ้ำได้ ผลไม่เปลี่ยน) และบอกว่าแถวไหนเพิ่งถูกส่ง ให้ระบบแจ้ง Team Lead / Manager ทันที
+    var sh = syncShadow_(e.range.getRow())
     Logger.log(sh.line)
     if (sh.failed) throw new Error(sh.line)
     return

@@ -69,6 +69,12 @@ describe('telling people about a visit that came through the Google Form', () =>
     expect(announced).toHaveBeenCalledTimes(1)
   })
 
+  it('always reports the row the form just wrote, even when its timestamp reads as old', async () => {
+    const res = await (await call({ rows: [visit(), visit({ timestamp: '2026-01-01T00:00:00.000Z', submitted: true })] })).json()
+    expect(res.announced).toBe(1)
+    expect(announced).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps old rows quiet: they are history being brought across', async () => {
     const res = await (await call({ rows: [visit()] })).json()
     expect(res.announced).toBe(0)
