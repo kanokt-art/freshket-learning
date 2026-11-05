@@ -7,7 +7,9 @@ import { useRouter } from 'next/navigation'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { useAuth } from '@/hooks/useAuth'
 import { PHASE1_DEPARTMENTS } from '@/lib/modules'
-import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser } from '@/hooks/useFirestore'
+import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser, useAnnouncements } from '@/hooks/useFirestore'
+import { useHomeHighlights } from '@/hooks/useHomeHighlights'
+import { HomeHighlightsRow } from '@/components/features/HomeHighlights'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { useNotifications } from '@/hooks/useNotifications'
 import { sidebarNotices } from '@/lib/notifications/sidebarNotices'
@@ -73,6 +75,10 @@ export default function SaleDashboardPage() {
   // a full-collection read paid by every learner on the app's landing page.
   const isAdmin = user?.role ? canAccess(user.role, 'team_lead') : false
   const { data: allUsers } = useAllUsers(isAdmin)
+  // "Latest": what's new for this learner, as a super_admin pinned it (or the newest few).
+  const highlights = useHomeHighlights(user)
+  const { data: announcements } = useAnnouncements()
+  const announcementBodies = useMemo(() => new Map(announcements.map((a) => [`announcement:${a.id}`, a.body])), [announcements])
 
   const statsByUid = useMemo(() => {
     const m = new Map<string, UserStats>()
@@ -270,7 +276,7 @@ export default function SaleDashboardPage() {
           </div>
 
           {/* Stat cards */}
-          <div className={`grid grid-cols-2 gap-3 ${isAdmin ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+          <div className={`grid grid-cols-2 gap-3 ${isAdmin ? 'sm:grid-cols-4' : ''}`}>
             {isAdmin ? (<>
               <MiniStat value={allUsers.filter(u => !u.employmentStatus || u.employmentStatus === 'Active').length} label="พนักงานทั้งหมด"
                 iconBg="bg-blue-100"
@@ -292,10 +298,6 @@ export default function SaleDashboardPage() {
               <MiniStat value={completedCount} label="Courses Completed"
                 iconBg="bg-blue-100"
                 icon={<svg className="size-4 text-blue-500" viewBox="0 0 24 24" fill="currentColor"><path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" /></svg>}
-              />
-              <MiniStat value={completedCount} label="Certificates Earned"
-                iconBg="bg-amber-100"
-                icon={<svg className="size-4 text-amber-500" viewBox="0 0 24 24" fill="currentColor"><path fillRule="evenodd" d="M5.166 2.621v.858c-1.035.148-2.059.33-3.071.543a.75.75 0 00-.584.859 6.753 6.753 0 006.138 5.6 6.73 6.73 0 002.743 1.346A6.707 6.707 0 019.279 15H8.54c-1.036 0-1.875.84-1.875 1.875V19.5h-.75a2.25 2.25 0 000 4.5h9a2.25 2.25 0 000-4.5h-.75v-2.625c0-1.036-.84-1.875-1.875-1.875h-.739a6.706 6.706 0 01-1.112-3.173 6.73 6.73 0 002.743-1.347 6.753 6.753 0 006.139-5.6.75.75 0 00-.585-.858 47.077 47.077 0 00-3.07-.543V2.62a.75.75 0 00-.658-.744 49.798 49.798 0 00-6.093-.377.75.75 0 00-.657.744zm0 2.629c0 1.196.312 2.32.857 3.294A5.266 5.266 0 013.16 5.337a45.6 45.6 0 012.006-.343v.256zm13.5 0v-.256c.674.1 1.343.214 2.006.343a5.265 5.265 0 01-2.863 3.207 6.72 6.72 0 00.857-3.294z" clipRule="evenodd" /></svg>}
               />
               <MiniStat
                 value={pendingCourseCount > 0
@@ -420,6 +422,11 @@ export default function SaleDashboardPage() {
             </section>
           )}
 
+          {/* ── Latest: what's new (Mandatory, tools, courses, news), pinned by a super_admin ── */}
+          {!isAdmin && (
+            <HomeHighlightsRow items={highlights.items} pinnedOnly={highlights.pinnedOnly} bodies={announcementBodies} />
+          )}
+
           {/* ── For You (sale only) / User Table (admin) ────────────────────── */}
           {isAdmin ? (
             <UserTable
@@ -439,15 +446,17 @@ export default function SaleDashboardPage() {
                     <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
                   </button>
                 </div>
-                <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {/* One row that scrolls sideways, on a phone and on a computer. */}
+                <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-2 -mx-5 px-5 scroll-px-5">
                   {listedForYou.map((course) => (
-                    <LearnerCourseGridCard
-                      key={course.id}
-                      course={course}
-                      record={recordByCourse[course.id]}
-                      onClick={() => router.push(`/courses/${course.id}`)}
-                      onDismiss={() => void dismissCourse(course.id)}
-                    />
+                    <div key={course.id} className="snap-start shrink-0 w-56 sm:w-60">
+                      <LearnerCourseGridCard
+                        course={course}
+                        record={recordByCourse[course.id]}
+                        onClick={() => router.push(`/courses/${course.id}`)}
+                        onDismiss={() => void dismissCourse(course.id)}
+                      />
+                    </div>
                   ))}
                 </div>
               </section>

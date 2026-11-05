@@ -9,6 +9,8 @@ import { Header } from '@/components/layout/Header'
 import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 import { ANNOUNCEMENT_BANNER, type Announcement } from '@/types/announcement'
 import { ROLE_LABELS, type UserRole } from '@/types/user'
+import { useHomeHighlights } from '@/hooks/useHomeHighlights'
+import { HomeHighlightsAdmin } from '@/components/features/HomeHighlights'
 
 const TARGETABLE_ROLES: UserRole[] = ['sale', 'team_lead', 'manager']
 
@@ -48,6 +50,8 @@ export default function AnnouncementsAdminPage() {
   const [confirmDelete, setConfirmDelete] = useState<Announcement | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const isDemo = getDemoMode()
+  // What the learners' home shows under "Latest", and the pin switches for it.
+  const highlights = useHomeHighlights(user)
 
   if (user && user.role !== 'super_admin') {
     return (
@@ -112,6 +116,7 @@ export default function AnnouncementsAdminPage() {
 
       <div className="flex-1 overflow-auto p-6">
         <div className="w-full space-y-4">
+          <HomeHighlightsAdmin all={highlights.all} pinnedKeys={highlights.pinnedKeys} onToggle={highlights.setPinned} />
           {actionError && (
             <div className="bg-rose-50 border border-rose-200 rounded-2xl px-4 py-3 flex items-center gap-2 text-rose-600 text-sm">
               <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
