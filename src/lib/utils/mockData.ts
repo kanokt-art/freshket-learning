@@ -814,7 +814,7 @@ export const MOCK_TRAINING_RECORDS: MockRecord[] = [
   record('mock-tl-01', C[1].id, C[1].title, 'completed', 94, 55),
   record('mock-tl-01', C[2].id, C[2].title, 'completed', 98, 50),
   record('mock-tl-01', C[4].id, C[4].title, 'completed', 100, 45),
-  record('mock-tl-01', C[5].id, C[5].title, 'completed', 91, 40),
+  record('mock-tl-01', C[5].id, C[5].title, 'in_progress'),
 
   record('mock-tl-02', C[0].id, C[0].title, 'completed', 88, 55),
   record('mock-tl-02', C[2].id, C[2].title, 'completed', 85, 48),

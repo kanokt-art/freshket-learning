@@ -9,10 +9,12 @@ import { relativeTime } from '@/lib/utils/dateFormatter'
 import { isAnnouncementVisibleTo } from '@/types/announcement'
 import { managedMembers } from '@/lib/users/managedMembers'
 import { statsAvgScore, type UserStats } from '@/types/stats'
+import { useTeamActivity } from '@/hooks/useTeamActivity'
+import { TeamActivityCard } from '@/components/features/TeamActivityCard'
 
 // Team-lead / manager home — 3-column dashboard:
-//   center → news feed (announcements)
-//   right  → continue-learning
+//   center → what the team has done (take-aways, scores, Shadow Visits), then the news feed
+//   right  → the courses I still have to take
 export function TeamLeadHome() {
   const router = useRouter()
   const { user } = useAuth()
@@ -86,6 +88,10 @@ export function TeamLeadHome() {
   const publishedCourses = useMemo(() => coursesForTeam(courses, user, members), [courses, user, members])
   const publishedNews = announcements.filter((a) => isAnnouncementVisibleTo(a, user?.role, user?.department))
 
+  const memberUids = useMemo(() => members.map((m) => m.uid), [members])
+  const courseTitles = useMemo(() => new Map(courses.map((c) => [c.id, c.title])), [courses])
+  const activity = useTeamActivity(memberUids, user?.uid ?? '', courseTitles)
+
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50 flex flex-col">
       {/* Top bar — profile moved here (top-right, white label) */}
@@ -114,6 +120,8 @@ export function TeamLeadHome() {
 
         {/* ── CENTER: News feed (one card, posts split by dividers) ─── */}
         <div className="lg:col-span-9 flex flex-col gap-5">
+          <TeamActivityCard items={activity.items} people={members} loading={activity.loading} />
+
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             {/* Header */}
             <div className="px-5 py-3.5 flex items-center justify-between border-b border-gray-100">
@@ -264,7 +272,10 @@ function ContinueLearningCard({ items, onOpen, greeting }: {
 }) {
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-      <h3 className="text-sm font-bold text-gray-900 mb-3">เรียนรู้ต่อ</h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-bold text-gray-900">หลักสูตรที่ต้องเรียน</h3>
+        {items.length > 0 && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">{items.length}</span>}
+      </div>
       {items.length === 0 ? (
         <div className="py-6 text-center">
           <div className="size-12 rounded-2xl bg-freshket-50 flex items-center justify-center mx-auto mb-3">
@@ -277,7 +288,7 @@ function ContinueLearningCard({ items, onOpen, greeting }: {
         </div>
       ) : (
         <div className="space-y-3">
-          {items.slice(0, 3).map(({ course, status }) => course && (
+          {items.map(({ course, status }) => course && (
             <button key={course.id} type="button" onClick={() => onOpen(course.id)}
               className="w-full flex items-center gap-3 rounded-xl border border-gray-100 p-2.5 text-left hover:bg-gray-50 hover:border-gray-200 transition-colors">
               <div className="size-12 rounded-lg bg-gradient-to-br from-freshket-200 to-emerald-100 shrink-0 overflow-hidden flex items-center justify-center">
@@ -288,7 +299,9 @@ function ContinueLearningCard({ items, onOpen, greeting }: {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold text-gray-800 truncate">{course.title}</p>
-                <p className="text-xs text-freshket-600 font-bold mt-1">{status === 'in_progress' ? 'เรียนต่อ →' : 'เริ่มเรียน →'}</p>
+                <p className={`text-xs font-bold mt-1 ${status === 'failed' ? 'text-rose-600' : 'text-freshket-600'}`}>
+                  {status === 'in_progress' ? 'กำลังเรียน · เรียนต่อ →' : status === 'failed' ? 'ยังไม่ผ่าน · ทำใหม่ →' : 'ยังไม่เริ่ม · เริ่มเรียน →'}
+                </p>
               </div>
             </button>
           ))}
