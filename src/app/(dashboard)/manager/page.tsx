@@ -21,6 +21,7 @@ import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResu
 import { OpenableMbtiPill } from '@/components/features/MbtiBadge'
 import { formatPersonName } from '@/lib/users/displayName'
 import { MBTI_DEFINITION } from '@/lib/bucketAssessments'
+import { getMbtiProfile } from '@/lib/bucketAssessments/mbtiProfiles'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { RoleplayRadar } from '@/components/features/RoleplayRadar'
 import { RoleplayAssessCard } from '@/components/features/RoleplayAssessCard'
@@ -193,11 +194,6 @@ export default function ManagerPage() {
     return Math.round((records.filter(r => r.status === 'completed').length / records.length) * 100)
   }, [records])
   const inProgressCount = useMemo(() => records.filter(r => r.status === 'in_progress').length, [records])
-  const atRiskCount = useMemo(() => {
-    const s = new Set<string>()
-    records.forEach(r => { if (r.status === 'failed' || (r.score !== undefined && r.score < 60)) s.add(r.userId) })
-    return s.size
-  }, [records])
 
   // Filtered employee list
   const filteredUsers = useMemo(() => {
@@ -213,6 +209,13 @@ export default function ManagerPage() {
       return matchDept && matchTeam && matchSearch
     })
   }, [users, activeDept, effectiveTeam, userSearch, showTeamColumn, teamMap])
+
+  // How many of the people listed have each MBTI type, most common first. Follows the filters above.
+  const mbtiCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    filteredUsers.forEach(u => { const c = mbtiByUid[u.uid]; if (c) m.set(c, (m.get(c) ?? 0) + 1) })
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  }, [filteredUsers, mbtiByUid])
 
   // Sorted view of the filtered members — driven by the clickable column headers.
   const sortedUsers = useMemo(() => {
@@ -317,10 +320,7 @@ export default function ManagerPage() {
             bg="bg-amber-50" iconBg="bg-amber-100" iconColor="text-amber-500"
             icon={<svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>}
           />
-          <StatCard label="ต้องเร่งพัฒนา" value={atRiskCount} unit="คน"
-            bg="bg-rose-50" iconBg="bg-rose-100" iconColor="text-rose-500"
-            icon={<svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>}
-          />
+          <MbtiSummaryCard counts={mbtiCounts} listed={filteredUsers.length} />
         </div>
 
         {/* ── Filters ─────────────────────────────────────────────────── */}
@@ -1240,6 +1240,34 @@ function ScoreBox({ label, value, change }: { label: string; value?: number; cha
 }
 
 // ── Stat Card ─────────────────────────────────────────────────────────────────
+// How many people have each MBTI type. Five rows show; the rest scroll.
+function MbtiSummaryCard({ counts, listed }: { counts: [string, number][]; listed: number }) {
+  const taken = counts.reduce((n, [, c]) => n + c, 0)
+  return (
+    <div className="bg-purple-50 rounded-2xl p-5 flex flex-col gap-2 border border-white/80">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold text-gray-700">MBTI ของทีม</p>
+        <span className="text-xs text-gray-500">{taken}/{listed} คน</span>
+      </div>
+      {counts.length === 0 ? (
+        <p className="text-xs text-gray-400 py-4 text-center">ยังไม่มีใครทำแบบทดสอบ</p>
+      ) : (
+        <ul className="max-h-[8.5rem] overflow-y-auto -mr-2 pr-2 space-y-1">
+          {counts.map(([code, n]) => (
+            <li key={code} className="flex items-center justify-between h-6 text-xs">
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="font-bold text-purple-700 w-10 shrink-0">{code}</span>
+                <span className="text-gray-500 truncate">{getMbtiProfile(code)?.nickname ?? ''}</span>
+              </span>
+              <span className="font-bold text-gray-900 shrink-0">{n} คน</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 function StatCard({
   label, value, unit, bg, iconBg, iconColor, icon,
 }: {

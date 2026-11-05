@@ -9,7 +9,7 @@ import { useAllUsers, useTeams, useAllShadowRecords, useAllShadowAcknowledgments
 import { alertError } from '@/lib/ui/alert'
 import { useMentorName } from '@/hooks/useMentorName'
 import { formatPersonName } from '@/lib/users/displayName'
-import { canAccess, getTeamManagerIds } from '@/types/user'
+import { canAccess } from '@/types/user'
 import type { UserProfile } from '@/types/user'
 import type { ShadowRecord, ShadowSegment, ShadowPersona, ShadowAcknowledgment } from '@/types/shadow'
 import { announce } from '@/lib/notifications/announce'
@@ -18,6 +18,10 @@ import { getDemoMode } from '@/lib/demo/demoMode'
 import { ShadowReviews } from '@/components/features/ShadowReviews'
 import { groupByRecord, primaryReview, averageRating, type ReviewDoc } from '@/lib/shadow/reviews'
 import { submitShadowReview } from '@/lib/shadow/submitReview'
+import { memberStages, stageState, type StageState } from '@/lib/shadow/stages'
+import { managedMembers } from '@/lib/users/managedMembers'
+import { teamChoices, effectiveTeamChoice, matchesTeam, NO_TEAM } from '@/lib/users/teamFilter'
+import { StartDateCell } from '@/components/common/EmployeeCells'
 
 const DEMO_MODE = getDemoMode()
 
@@ -1233,6 +1237,65 @@ const DEMO_ACKS = new Map<string, ShadowAcknowledgment>([
   ['sh-07', { reviewerUid: 'mock-tl-02', reviewerName: 'ทีมลีด Sale B', rating: 5, comment: 'ดีมาก ทักษะการฟังและ Diagnose ชัดเจน การ Acknowledge ก่อน Solve เป็น Professional มาก', reviewedAt: new Date('2026-03-18T09:30:00') }],
 ])
 
+type MemberSortField = 'name' | 'team' | 'startDate' | 'visits' | 'rating' | 'stage'
+
+function MemberTh({ label, field, sort, onSort, center }: {
+  label: string
+  field: MemberSortField
+  sort: { field: MemberSortField; dir: 'asc' | 'desc' }
+  onSort: (f: MemberSortField) => void
+  center?: boolean
+}) {
+  const active = sort.field === field
+  return (
+    <th className={`px-4 py-3 text-xs font-bold text-gray-500 whitespace-nowrap ${center ? 'text-center' : 'text-left'}`}>
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-gray-700 ${active ? 'text-gray-900' : ''}`}
+      >
+        {label}
+        <svg
+          className={`size-3 transition-transform ${active ? 'opacity-100' : 'opacity-30'} ${active && sort.dir === 'desc' ? 'rotate-180' : ''}`}
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+        </svg>
+      </button>
+    </th>
+  )
+}
+
+const STAGE_DOT: Record<StageState, string> = {
+  all: 'bg-freshket-500',
+  some: 'bg-amber-400',
+  none: 'bg-gray-200',
+}
+
+// Member → Team Lead → Manager: a dot per stage. Green when all of the member's visits have reached it,
+// amber when some have, grey when none have.
+function StageDots({ stages }: { stages?: { visits: number; teamLead: number; manager: number } }) {
+  const visits = stages?.visits ?? 0
+  const steps = [
+    { label: 'Member', done: visits },
+    { label: 'Team Lead', done: stages?.teamLead ?? 0 },
+    { label: 'Manager', done: stages?.manager ?? 0 },
+  ]
+  return (
+    <div className="flex items-center justify-center" role="img" aria-label={steps.map(x => `${x.label} ${x.done}/${visits}`).join(', ')}>
+      {steps.map((step, i) => (
+        <div key={step.label} className="flex items-center">
+          {i > 0 && <span className="w-4 h-px bg-gray-200" />}
+          <span
+            title={`${step.label}: ${step.done}/${visits}`}
+            className={`size-3 rounded-full ${STAGE_DOT[stageState(step.done, visits)]}`}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function ShadowPage() {
   const { user } = useAuth()
   // NOTE: allUsers deliberately stays UNGATED here. A plain `sale` learner needs
@@ -1300,42 +1363,21 @@ export default function ShadowPage() {
   const visitParam = useSearchParams().get('visit')
   const openedFromLink = useRef<string | null>(null)
   const [memberSearch, setMemberSearch] = useState('')
-  const [memberSortAsc, setMemberSortAsc] = useState(true)
+  // Newest joiners first (shortest tenure on top) until another column is picked.
+  const [memberSort, setMemberSort] = useState<{ field: MemberSortField; dir: 'asc' | 'desc' }>({ field: 'startDate', dir: 'desc' })
+  const [memberTeam, setMemberTeam] = useState('all')
+  const sortMembersBy = (field: MemberSortField) =>
+    setMemberSort(cur => cur.field === field ? { field, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' })
 
   const { allowedModules, loading: moduleLoading } = useModuleAccess(user?.role, user?.department)
 
   const isLead = canAccess(user?.role ?? 'sale', 'team_lead')
 
-  // Compute team members visible to this user
-  const teamMembers = useMemo<UserProfile[]>(() => {
-    if (!user || !isLead) return []
-    if (user.role === 'team_lead') {
-      return allUsers.filter(u => u.managerId === user.uid)
-    }
-    // manager / super_admin: team leads + sale users in managed teams
-    const myTeamIds = new Set(teams.filter(t => getTeamManagerIds(t).includes(user.uid)).map(t => t.id))
-    return allUsers.filter(u =>
-      u.managerId === user.uid ||
-      (u.teamId !== undefined && myTeamIds.has(u.teamId) && u.role === 'sale')
-    )
-  }, [user, allUsers, teams, isLead])
-
-  // Filtered + sorted member list for the panel
-  const displayedMembers = useMemo<UserProfile[]>(() => {
-    const q = memberSearch.toLowerCase()
-    const filtered = q
-      ? teamMembers.filter(u =>
-          (u.employeeId ?? '').toLowerCase().includes(q) ||
-          u.displayName.toLowerCase().includes(q) ||
-          (u.nickname ?? '').toLowerCase().includes(q)
-        )
-      : teamMembers
-    return [...filtered].sort((a, b) => {
-      const ea = a.employeeId ?? ''
-      const eb = b.employeeId ?? ''
-      return memberSortAsc ? ea.localeCompare(eb) : eb.localeCompare(ea)
-    })
-  }, [teamMembers, memberSearch, memberSortAsc])
+  // The people this lead or manager looks after: the same set as the team page.
+  const teamMembers = useMemo<UserProfile[]>(
+    () => (user && isLead ? managedMembers(user, allUsers, teams) : []),
+    [user, allUsers, teams, isLead],
+  )
 
   // Per-member shadow stats
   const memberStats = useMemo(() => {
@@ -1369,6 +1411,53 @@ export default function ShadowPage() {
     teams.forEach(t => m.set(t.id, t.name))
     return m
   }, [teams])
+  const teamNames = useMemo(() => Object.fromEntries(teamNameMap), [teamNameMap])
+  const teamOptions = useMemo(() => teamChoices(teamMembers, 'all', teamNames), [teamMembers, teamNames])
+  const effectiveTeam = effectiveTeamChoice(memberTeam, teamOptions)
+
+  // Each member's stage in the chain: member → team lead → manager.
+  const stagesByMember = useMemo(() => {
+    const ids = new Map<string, string[]>()
+    for (const r of records) ids.set(r.observerUid, [...(ids.get(r.observerUid) ?? []), r.id])
+    const out = new Map<string, ReturnType<typeof memberStages>>()
+    ids.forEach((list, uid) => out.set(uid, memberStages(list, reviewsByRecord)))
+    return out
+  }, [records, reviewsByRecord])
+
+  // Filtered + sorted member list for the panel
+  const displayedMembers = useMemo<UserProfile[]>(() => {
+    const q = memberSearch.toLowerCase().trim()
+    const filtered = teamMembers.filter(u =>
+      matchesTeam(u, effectiveTeam, teamNames) &&
+      (!q ||
+        (u.employeeId ?? '').toLowerCase().includes(q) ||
+        u.displayName.toLowerCase().includes(q) ||
+        (u.displayNameEN ?? '').toLowerCase().includes(q) ||
+        (u.nickname ?? '').toLowerCase().includes(q)),
+    )
+    const dir = memberSort.dir === 'asc' ? 1 : -1
+    const time = (u: UserProfile) => {
+      const d = u.startDate instanceof Date ? u.startDate : u.startDate ? new Date(u.startDate as unknown as string) : null
+      return d && !isNaN(d.getTime()) ? d.getTime() : 0
+    }
+    const val = (u: UserProfile): string | number => {
+      switch (memberSort.field) {
+        case 'name':      return formatPersonName(u).toLowerCase()
+        case 'team':      return (u.teamId ? teamNameMap.get(u.teamId) ?? '' : '').toLowerCase()
+        case 'startDate': return time(u)
+        case 'visits':    return memberStats.get(u.uid)?.count ?? 0
+        case 'rating':    return memberStats.get(u.uid)?.avgRating ?? 0
+        case 'stage': {
+          const st = stagesByMember.get(u.uid)
+          return st ? (st.manager > 0 ? 3 : st.teamLead > 0 ? 2 : 1) : 0
+        }
+      }
+    }
+    return [...filtered].sort((a, b) => {
+      const av = val(a), bv = val(b)
+      return av < bv ? -dir : av > bv ? dir : 0
+    })
+  }, [teamMembers, memberSearch, effectiveTeam, teamNames, memberSort, teamNameMap, memberStats, stagesByMember])
 
   // My own records (sale view)
   const myRecords = useMemo(() =>
@@ -1522,20 +1611,22 @@ export default function ShadowPage() {
               <div className="flex items-center gap-2">
                 <span className="text-sm font-bold text-gray-900">สมาชิกทีม</span>
                 <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">
-                  {teamMembers.length} คน
+                  {displayedMembers.length} คน
                 </span>
               </div>
               <div className="ml-auto flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMemberSortAsc(v => !v)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 text-xs font-bold text-gray-600 transition-colors"
-                >
-                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5h18M6 12h12M10.5 16.5h3" />
-                  </svg>
-                  {memberSortAsc ? '↑' : '↓'}
-                </button>
+                {teamOptions.teams.length > 0 && (
+                  <select
+                    value={effectiveTeam}
+                    onChange={e => setMemberTeam(e.target.value)}
+                    aria-label="กรองตามทีม"
+                    className="px-2.5 py-1.5 rounded-xl border border-gray-200 bg-white text-xs text-gray-700 outline-none focus:border-freshket-400 focus:ring-2 focus:ring-freshket-100"
+                  >
+                    <option value="all">ทุกทีม</option>
+                    {teamOptions.teams.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    {teamOptions.hasUnplaced && <option value={NO_TEAM}>ยังไม่มีทีม</option>}
+                  </select>
+                )}
                 <div className="relative">
                   <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
@@ -1555,12 +1646,13 @@ export default function ShadowPage() {
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-gray-100">
-                    {['พนักงาน', 'รหัส', 'ทีม', 'Visits', '⭐ Rating', '✓ Acked'].map((h, i) => (
-                      <th key={i} className={`px-4 py-2.5 text-xs font-bold text-gray-400 whitespace-nowrap ${i === 0 ? 'text-left' : 'text-center'}`}>
-                        {h}
-                      </th>
-                    ))}
+                  <tr className="border-b border-gray-100 bg-gray-50/60">
+                    <MemberTh label="Employee" field="name" sort={memberSort} onSort={sortMembersBy} />
+                    <MemberTh label="Team" field="team" sort={memberSort} onSort={sortMembersBy} />
+                    <MemberTh label="Start Date" field="startDate" sort={memberSort} onSort={sortMembersBy} />
+                    <MemberTh label="Visits" field="visits" sort={memberSort} onSort={sortMembersBy} center />
+                    <MemberTh label="Avg Rating" field="rating" sort={memberSort} onSort={sortMembersBy} center />
+                    <MemberTh label="Acked" field="stage" sort={memberSort} onSort={sortMembersBy} center />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -1571,8 +1663,8 @@ export default function ShadowPage() {
                   ) : (
                     displayedMembers.map(u => {
                       const stats = memberStats.get(u.uid)
+                      const stages = stagesByMember.get(u.uid)
                       const teamName = u.teamId ? (teamNameMap.get(u.teamId) ?? '') : ''
-                      const memberAcked = records.filter(r => r.observerUid === u.uid && acknowledgments.has(r.id)).length
                       return (
                         <tr
                           key={u.uid}
@@ -1585,16 +1677,16 @@ export default function ShadowPage() {
                                 {(u.nickname ?? u.displayName).charAt(0)}
                               </div>
                               <div className="min-w-0">
-                                <p className="text-sm font-bold text-gray-900 leading-tight group-hover:text-freshket-700 transition-colors">{u.displayName}</p>
-                                {u.nickname && <p className="text-xs text-gray-400">({u.nickname})</p>}
+                                <p className="text-sm font-bold text-gray-900 leading-tight group-hover:text-freshket-700 transition-colors">{formatPersonName(u)}</p>
+                                <p className="text-xs text-gray-400 font-mono">{u.employeeId ?? '—'}</p>
                               </div>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className="text-xs font-mono text-gray-500">{u.employeeId ?? '—'}</span>
-                          </td>
-                          <td className="px-4 py-3 text-center">
+                          <td className="px-4 py-3">
                             <span className="text-xs text-gray-500">{teamName || '—'}</span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-gray-600">
+                            <StartDateCell startDate={u.startDate} />
                           </td>
                           <td className="px-4 py-3 text-center">
                             {stats ? (
@@ -1615,12 +1707,8 @@ export default function ShadowPage() {
                               <span className="text-xs text-gray-300">—</span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-center">
-                            {memberAcked > 0 ? (
-                              <span className="text-xs font-bold text-freshket-600">{memberAcked}</span>
-                            ) : (
-                              <span className="text-xs text-gray-300">0</span>
-                            )}
+                          <td className="px-4 py-3">
+                            <StageDots stages={stages} />
                           </td>
                         </tr>
                       )
