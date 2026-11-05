@@ -11,7 +11,6 @@ import { canAccess, getTeamManagerIds } from '@/types/user'
 import type { UserProfile } from '@/types/user'
 import type { ShadowRecord, ShadowSegment, ShadowPersona, ShadowAcknowledgment } from '@/types/shadow'
 import { announce } from '@/lib/notifications/announce'
-import { pushNotification } from '@/lib/notifications/push'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { ShadowReviews } from '@/components/features/ShadowReviews'
@@ -1423,18 +1422,8 @@ export default function ShadowPage() {
     setLocalCreated(prev => [rec, ...prev])
     setShowForm(false)
 
-    // The bell aims at the sale's own manager. With no manager it rings nobody's: it is not
-    // broadcast to every lead (that was dozens of pings for one visit) — the trainer ×
-    // team-lead group post below is how an unassigned sale's visit is seen.
-    if (user?.managerId) {
-      pushNotification(user.managerId, {
-        type: 'shadow_pending_ack',
-        title: `${user.displayName} ส่ง Shadow Visit ใหม่`,
-        body: `ร้าน ${data.storeName} · ${data.segment} · รอการ Acknowledge`,
-        refId: rec.id,
-        refPath: '/shadow',
-      })
-    }
+    // The server rings the bell for everyone who looks after the sender (their manager on file and their
+    // team's lead(s) and manager) and posts to the trainer × team-lead group for sales visits.
     void announce({
       kind: 'shadow_submitted',
       recordId: rec.id,

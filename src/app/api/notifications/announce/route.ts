@@ -12,7 +12,8 @@ import { leadReviewId } from '@/lib/feedback/leadReviews'
 import { saleTrainers } from '@/lib/server/saleTrainers'
 import { notifyTrainers } from '@/lib/server/trainerNotice'
 import { ROLEPLAY_TOPICS } from '@/types/roleplay'
-import type { UserProfile } from '@/types/user'
+import { getTeamLeadIds, type UserProfile } from '@/types/user'
+import { teamLeadsOf } from '@/lib/server/teamLeads'
 import {
   postCoursePublishedToSlack,
   postMandatoryPublishedToSlack,
@@ -79,6 +80,44 @@ function appUrl(path: string): string | undefined {
 }
 
 type Doc = Record<string, unknown>
+
+type Store = ReturnType<typeof getStore>
+
+/**
+ * A learner's private Slack DM about one event, sent at most once — but only marked as sent when it
+ * really went out. The channel post's once-only claim used to cover the DM too, so a DM that failed the
+ * first time (no Slack id yet, a lookup Slack refused, a missing scope) was never tried again, however
+ * often the lead saved. Now a later save tries again until one gets through.
+ */
+async function dmOnce(store: Store, key: string, uid: string, dm: Parameters<typeof dmPeople>[2]): Promise<number> {
+  try {
+    if (await store.get('slackPosts', key)) return 0
+    const sent = await dmPeople(store, [uid], dm)
+    if (sent > 0) await store.claim('slackPosts', key, { kind: 'dm', refId: key, postedAt: new Date() })
+    return sent
+  } catch (e) {
+    console.error('dm failed', key, e)
+    return 0
+  }
+}
+
+/**
+ * Who looks after a learner: their own manager on file, and their team's lead(s) and manager as team
+ * management has them. The learner themself is left out.
+ */
+async function supervisorsOf(store: Store, person: Partial<UserProfile> & { uid?: string }, selfUid: string): Promise<string[]> {
+  const ids = new Set<string>()
+  if (person.managerId) ids.add(person.managerId)
+  if (person.teamId) {
+    const team = (await store.get('teams', person.teamId)) as (Doc & { managerId?: string }) | null
+    if (team) {
+      for (const id of getTeamLeadIds(team as never)) ids.add(id)
+      if (typeof team.managerId === 'string' && team.managerId) ids.add(team.managerId)
+    }
+  }
+  ids.delete(selfUid)
+  return Array.from(ids).filter((id) => ID_RE.test(id))
+}
 
 export async function POST(req: NextRequest) {
   let body: Body
@@ -167,6 +206,28 @@ export async function POST(req: NextRequest) {
 
         // Name, position and department come from the sender's own HR record.
         const sender = gate.person as Partial<UserProfile>
+        const parts = [visit.storeName ? `ร้าน ${visit.storeName}` : null, visit.segment || null].filter(Boolean)
+        const visitPath = `/shadow?visit=${encodeURIComponent(recordId)}`
+
+        // The bell rings for everyone who looks after the sender — their manager on file and their team's
+        // lead(s) and manager — in every department, once per visit. (It used to ring only the managerId
+        // on the profile, from the browser: a team lead never heard, and nobody did when it was empty.)
+        if (await store.claim('slackPosts', `shadow_submitted_bell:${recordId}`, { kind: 'shadow_submitted_bell', refId: recordId, postedAt: new Date() })) {
+          const who = formatPersonName(sender) || 'พนักงาน'
+          const now = new Date()
+          await Promise.all((await supervisorsOf(store, sender, gate.uid)).map((uid) =>
+            store.set(`notifications/${uid}/items`, `shadow_pending_ack_${recordId}`, {
+              type: 'shadow_pending_ack',
+              title: `${who} ส่ง Shadow Visit ใหม่`,
+              body: [...parts, 'รอการประเมิน'].join(' · '),
+              refId: recordId,
+              refPath: visitPath,
+              read: false,
+              createdAt: now,
+              createdByUid: gate.uid,
+            }, { merge: false }),
+          ))
+        }
 
         // Only sales visits go to the channel.
         if (!isSalesDepartment(sender.department)) {
@@ -179,13 +240,14 @@ export async function POST(req: NextRequest) {
         })
         if (!first) return NextResponse.json({ ok: true, posted: false })
 
-        const parts = [visit.storeName ? `ร้าน ${visit.storeName}` : null, visit.segment || null].filter(Boolean)
         posted = await postShadowSubmittedToSlack({
           observerName: formatPersonName(sender),
           position: sender.position,
           department: sender.department,
           visitSummary: slackText([...parts, 'รอการประเมิน'].join(' · ')),
-          shadowUrl: appUrl('/shadow'),
+          shadowUrl: appUrl(visitPath),
+          // The sender's Team Lead(s) are tagged, as on a course completion.
+          teamLeads: await teamLeadsOf(store, { teamId: sender.teamId, uid: gate.uid }),
         })
         break
       }
@@ -203,21 +265,13 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ ok: true, posted: false })
         }
 
-        // Once per review: an edit, a retry or a replay announces nothing more.
-        const first = await store.claim('slackPosts', `shadow_acked:${rid}`, {
-          kind: 'shadow_acked', refId: rid, postedAt: new Date(),
-        })
-        if (!first) return NextResponse.json({ ok: true, posted: false })
-
         const reviewer = formatPersonName(gate.person as Partial<UserProfile>) || 'Mentor'
-        const observerDoc = (await store.get('users', visit.observerUid)) as Partial<UserProfile> | null
-        const observer = observerDoc ? formatPersonName(observerDoc) : 'พนักงาน'
         const rating = typeof review.rating === 'number' && review.rating >= 1 && review.rating <= 5 ? review.rating : undefined
 
-        // The person whose visit it was gets the score privately.
+        // The person whose visit it was gets the score privately — retried on a later save until it gets through.
         const stars = rating !== undefined ? `${rating}/5 ดาว` : ''
         const link = appUrl(`/shadow?visit=${encodeURIComponent(recordId)}`)
-        dmSent = await dmPeople(store, [visit.observerUid], {
+        dmSent = await dmOnce(store, `dm:shadow_acked:${rid}`, visit.observerUid, {
           text: `${slackText(reviewer)} ประเมิน Shadow Visit ของคุณ${stars ? ` — ${stars}` : ''}`,
           blocks: [
             { type: 'section', text: { type: 'mrkdwn', text: `⭐ *${slackText(reviewer)}* ประเมิน Shadow Visit ของคุณ${visit.storeName ? `\nร้าน ${slackText(visit.storeName)}` : ''}${stars ? `\nได้รับ *${stars}*` : ''}` } },
@@ -226,6 +280,14 @@ export async function POST(req: NextRequest) {
           ],
         })
 
+        // Once per review: an edit, a retry or a replay announces nothing more in the group.
+        const first = await store.claim('slackPosts', `shadow_acked:${rid}`, {
+          kind: 'shadow_acked', refId: rid, postedAt: new Date(),
+        })
+        if (!first) return NextResponse.json({ ok: true, posted: false, dmSent })
+
+        const observerDoc = (await store.get('users', visit.observerUid)) as Partial<UserProfile> | null
+        const observer = observerDoc ? formatPersonName(observerDoc) : 'พนักงาน'
         posted = await postShadowAckedToSlack({
           reviewerName: reviewer,
           observerName: observer,
@@ -263,18 +325,14 @@ export async function POST(req: NextRequest) {
         const comment = typeof fb.comment === 'string' ? fb.comment.trim() : ''
         if (stars === null && !comment) return NextResponse.json({ ok: true, posted: false })
 
-        const first = await store.claim('slackPosts', `course_feedback:${memberUid}_${courseId}:${gate.uid}`, {
-          kind: 'course_feedback', refId: `${memberUid}_${courseId}`, postedAt: new Date(),
-        })
-        if (!first) return NextResponse.json({ ok: true, posted: false })
-
         const course = (await store.get('courses', courseId)) as (Doc & { title?: string }) | null
         const title = typeof course?.title === 'string' ? course.title : 'หลักสูตร'
         const reviewer = formatPersonName(gate.person as Partial<UserProfile>) || 'Mentor'
         const link = appUrl(`/courses/${courseId}?feedback=1`)
         const starLine = stars !== null ? `${stars}/5 ดาว` : ''
 
-        dmSent = await dmPeople(store, [memberUid], {
+        // The member's DM: once per lead and course, retried on a later save until it gets through.
+        dmSent = await dmOnce(store, `dm:course_feedback:${memberUid}_${courseId}:${gate.uid}`, memberUid, {
           text: `${slackText(reviewer)} ให้ความเห็นในหลักสูตร ${slackText(title)}${starLine ? ` — ${starLine}` : ''}`,
           blocks: [
             { type: 'section', text: { type: 'mrkdwn', text: `${stars !== null ? '⭐' : '💬'} *${slackText(reviewer)}* ให้ความเห็นในหลักสูตรของคุณ\n*${slackText(title)}*${starLine ? `\nได้รับ *${starLine}*` : ''}` } },
@@ -282,6 +340,13 @@ export async function POST(req: NextRequest) {
             ...(link ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูหลักสูตร' }, url: link }] }] : []),
           ],
         })
+
+        // The rest (bell, group post, trainer notice) once per lead and course: an edit tells nobody again.
+        const first = await store.claim('slackPosts', `course_feedback:${memberUid}_${courseId}:${gate.uid}`, {
+          kind: 'course_feedback', refId: `${memberUid}_${courseId}`, postedAt: new Date(),
+        })
+        if (!first) return NextResponse.json({ ok: true, posted: false, dmSent })
+
         // The in-app signal too (the learner's home shows it on its sidebar), whether or not the DM went out.
         {
           await store.set(`notifications/${memberUid}/items`, `course_feedback_received_${memberUid}_${courseId}_${gate.uid}`, {
@@ -331,11 +396,6 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ ok: true, posted: false })
         }
 
-        const first = await store.claim('slackPosts', `roleplay_assessed:${assessmentId}`, {
-          kind: 'roleplay_assessed', refId: assessmentId, postedAt: new Date(),
-        })
-        if (!first) return NextResponse.json({ ok: true, posted: false })
-
         const ratings = new Map((Array.isArray(a.topics) ? a.topics : []).map((t) => [t.key, t.rating] as const))
         const groups = new Map<string, number[]>()
         for (const t of ROLEPLAY_TOPICS) {
@@ -352,7 +412,7 @@ export async function POST(req: NextRequest) {
         const link = appUrl('/courses/roleplay')
         const note = typeof a.overallNote === 'string' ? a.overallNote.trim() : ''
 
-        dmSent = await dmPeople(store, [a.subjectUid], {
+        dmSent = await dmOnce(store, `dm:roleplay_assessed:${assessmentId}`, a.subjectUid, {
           text: `${slackText(assessor)} ประเมิน Role Play ของคุณ${overall ? ` — เฉลี่ย ${overall}/10` : ''}`,
           blocks: [
             { type: 'section', text: { type: 'mrkdwn', text: `🎯 *${slackText(assessor)}* ประเมิน Role Play ของคุณ\n${kindLabel}${overall ? ` · คะแนนเฉลี่ย *${overall}/10*` : ''}` } },
@@ -361,6 +421,12 @@ export async function POST(req: NextRequest) {
             ...(link ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดูผลประเมิน' }, url: link }] }] : []),
           ],
         })
+
+        // The rest once per assessment.
+        const first = await store.claim('slackPosts', `roleplay_assessed:${assessmentId}`, {
+          kind: 'roleplay_assessed', refId: assessmentId, postedAt: new Date(),
+        })
+        if (!first) return NextResponse.json({ ok: true, posted: false, dmSent })
         {
           await store.set(`notifications/${a.subjectUid}/items`, `roleplay_assessed_${assessmentId}`, {
             type: 'roleplay_assessed',

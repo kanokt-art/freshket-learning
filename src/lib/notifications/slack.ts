@@ -250,6 +250,8 @@ export interface SlackShadowSubmittedEvent {
    */
   visitSummary: string
   shadowUrl?: string
+  /** The sender's Team Lead(s), tagged so the one who should review sees it. */
+  teamLeads?: SlackTeamLead[]
 }
 
 /**
@@ -259,9 +261,10 @@ export interface SlackShadowSubmittedEvent {
  */
 export async function postShadowSubmittedToSlack(ev: SlackShadowSubmittedEvent): Promise<boolean> {
   const meta = slackText([ev.position, ev.department].filter(Boolean).join(' · '))
+  const leadLine = teamLeadLine(ev.teamLeads)
 
   return postToTeam({
-    text: `${slackText(ev.observerName)} ส่ง Shadow Visit ใหม่ — รอการประเมิน`,
+    text: `${slackText(ev.observerName)} ส่ง Shadow Visit ใหม่ — รอการประเมิน${leadLine ? ` · ${leadLine}` : ''}`,
     blocks: [
       {
         type: 'section',
@@ -273,6 +276,7 @@ export async function postShadowSubmittedToSlack(ev: SlackShadowSubmittedEvent):
       ...(meta
         ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: meta }] }]
         : []),
+      ...(leadLine ? [{ type: 'section', text: { type: 'mrkdwn', text: leadLine } }] : []),
       ...(ev.shadowUrl
         ? [{
             type: 'actions',

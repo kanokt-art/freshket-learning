@@ -12,7 +12,9 @@ let bells: Array<{ path: string; id: string; data: Record<string, unknown> }> = 
 const fakeStore = {
   // the trainer: person 'trainer1', found by the configured company email
   findUsers: async ({ email }: { email: string }) => (email === 'trainer@freshket.co' ? [{ id: 'trainer1', email }] : []),
-  get: async (path: string, id: string) => (docs[path] ?? []).find((d) => d.id === id) ?? null,
+  // A claimed once-only key reads back as a document, the way the slackPosts row does.
+  get: async (path: string, id: string) =>
+    (path === 'slackPosts' && claimed.has(`${path}/${id}`) ? { id } : null) ?? (docs[path] ?? []).find((d) => d.id === id) ?? null,
   getMany: async (path: string, ids: string[]) => (docs[path] ?? []).filter((d) => ids.includes(d.id)),
   claim: async (path: string, id: string) => {
     const k = `${path}/${id}`
@@ -44,6 +46,7 @@ const dm = vi.fn(async (..._a: unknown[]) => 1)
 vi.mock('@/lib/notifications/slackDm', () => ({
   dmPeople: (...a: unknown[]) => dm(...a),
   dmPeopleIds: async () => [],
+  findSlackIdByEmail: async () => ({ reason: 'not_found' }),
 }))
 
 import { POST } from '@/app/api/notifications/announce/route'

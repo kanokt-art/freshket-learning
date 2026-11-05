@@ -9,8 +9,12 @@ type Doc = Record<string, unknown> & { id: string }
 let docs: Record<string, Doc[]> = {}
 const claimed = new Set<string>()
 
+let bells: Array<{ path: string; id: string; data: Record<string, unknown> }> = []
+
 const fakeStore = {
-  get: async (path: string, id: string) => (docs[path] ?? []).find((d) => d.id === id) ?? null,
+  // A claimed once-only key reads back as a document, the way the slackPosts row does.
+  get: async (path: string, id: string) =>
+    (path === 'slackPosts' && claimed.has(`${path}/${id}`) ? { id } : null) ?? (docs[path] ?? []).find((d) => d.id === id) ?? null,
   getMany: async (path: string, ids: string[]) => (docs[path] ?? []).filter((d) => ids.includes(d.id)),
   claim: async (path: string, id: string) => {
     const k = `${path}/${id}`
@@ -18,6 +22,7 @@ const fakeStore = {
     claimed.add(k)
     return true
   },
+  set: async (path: string, id: string, data: Record<string, unknown>) => { bells.push({ path, id, data }) },
 }
 vi.mock('@/lib/server/store', () => ({ getStore: () => fakeStore }))
 
@@ -43,6 +48,7 @@ const dm = vi.fn(async (..._a: unknown[]) => 1)
 vi.mock('@/lib/notifications/slackDm', () => ({
   dmPeople: (...a: unknown[]) => dm(...a),
   dmPeopleIds: async () => [],
+  findSlackIdByEmail: async () => ({ reason: 'not_found' }),
 }))
 
 import { POST } from '@/app/api/notifications/announce/route'
@@ -60,8 +66,10 @@ const asLead = () => { caller = { uid: 'lead1', role: 'team_lead', isSuperAdmin:
 
 beforeEach(() => {
   claimed.clear()
+  bells = []
   Object.values(posts).forEach((f) => f.mockClear())
   dm.mockClear()
+  dm.mockResolvedValue(1)
   docs = {
     courses: [{ id: 'c1', title: 'PVP (Private Price Process)', description: 'ขั้นตอนตั้งราคาพิเศษ', isPublished: true }, { id: 'draft', title: 'Draft', isPublished: false }],
     mandatoryItems: [{ id: 'm1', title: 'ราคาผัก', isPublished: true, weekLabel: 'Week 44', departmentAccess: [{ department: 'Sales Management' }] }],
@@ -165,6 +173,26 @@ describe('a Shadow Visit announcement is about the caller\'s own visit, once', (
     await call({ kind: 'shadow_submitted', recordId: 'v1' })
     expect(posts.submitted).toHaveBeenCalledTimes(1)
   })
+
+  // The bell used to ring only the managerId on the sender's profile, from the browser: the team lead
+  // never heard of a visit, and nobody did when managerId was empty.
+  it('rings the bell for the sender\'s manager on file and their team\'s lead and manager, once', async () => {
+    caller = { uid: 'sale1', role: 'sale', isSuperAdmin: false, person: { id: 'sale1', displayNameEN: 'Somchai Jaidee', department: 'Sales Management', managerId: 'mgrA', teamId: 't1' } }
+    docs.teams = [{ id: 't1', teamLeadId: 'lead1', managerId: 'mgrB' }]
+    await call({ kind: 'shadow_submitted', recordId: 'v1' })
+    await call({ kind: 'shadow_submitted', recordId: 'v1' })
+    const rung = bells.filter((b) => b.data.type === 'shadow_pending_ack').map((b) => b.path).sort()
+    expect(rung).toEqual(['notifications/lead1/items', 'notifications/mgrA/items', 'notifications/mgrB/items'])
+    expect(bells[0].data.refPath).toBe('/shadow?visit=v1')
+  })
+
+  it('rings the team\'s lead even when the sender has no manager on file, in any department', async () => {
+    caller = { uid: 'sale1', role: 'sale', isSuperAdmin: false, person: { id: 'sale1', displayNameEN: 'Somchai Jaidee', department: 'Finance', teamId: 't1' } }
+    docs.teams = [{ id: 't1', teamLeadId: 'lead1' }]
+    await call({ kind: 'shadow_submitted', recordId: 'v1' })
+    expect(bells.map((b) => b.path)).toEqual(['notifications/lead1/items'])
+    expect(posts.submitted).not.toHaveBeenCalled() // the channel is for sales visits only
+  })
 })
 
 describe('a review announcement is about a review the caller gave, once', () => {
@@ -200,5 +228,15 @@ describe('a review announcement is about a review the caller gave, once', () => 
     await call({ kind: 'shadow_acked', recordId: 'v2' })
     expect(posts.acked).toHaveBeenCalledTimes(1)
     expect(dm).toHaveBeenCalledTimes(1)
+  })
+
+  it('tries the DM again on a later save when the first one did not get through', async () => {
+    asLead()
+    dm.mockResolvedValueOnce(0) // no Slack id yet, or Slack refused
+    await call({ kind: 'shadow_acked', recordId: 'v2' })
+    await call({ kind: 'shadow_acked', recordId: 'v2' })
+    await call({ kind: 'shadow_acked', recordId: 'v2' })
+    expect(dm).toHaveBeenCalledTimes(2) // failed, then sent; not a third time
+    expect(posts.acked).toHaveBeenCalledTimes(1) // the group post stays once
   })
 })
