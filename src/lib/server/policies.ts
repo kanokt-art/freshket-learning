@@ -141,8 +141,18 @@ const superWrites: Pick<Policy, 'create' | 'update' | 'delete'> = {
 /** Fields the server owns on a training record: a score must come from grading, not from the learner. */
 const SERVER_OWNED_RECORD_FIELDS = ['score', 'passScore', 'attemptCount', 'dismissedAt']
 
+/**
+ * HR fields the effective role is read from: roleWithHeadFloor (users/departmentHead.ts) makes an active
+ * person in a target department at grade 11+ a manager. Writing them is granting a role, so only a
+ * super_admin (and the HR import, which runs as one) may change them.
+ */
+const ROLE_SOURCE_USER_FIELDS = ['rank', 'position', 'department', 'employmentStatus']
+
 /** Fields only a super_admin may change on a user. */
-const SELF_PROTECTED_USER_FIELDS = ['role', 'teamId', 'managerId', 'visibleTeamIds', 'slackUserId']
+const SELF_PROTECTED_USER_FIELDS = ['role', 'teamId', 'managerId', 'visibleTeamIds', 'slackUserId', ...ROLE_SOURCE_USER_FIELDS]
+
+/** A self-created row carries none of the fields a role is read from. */
+const noRoleSource = (w: WriteRequest) => ROLE_SOURCE_USER_FIELDS.every((f) => w.incoming?.[f] === undefined || w.incoming?.[f] === null || w.incoming?.[f] === '')
 
 /** A Slack member id is stored as an id, never free text: it decides who a DM goes to. */
 const slackIdOk = (w: WriteRequest) => {
@@ -159,10 +169,11 @@ const POLICIES: Record<string, Policy> = {
   users: {
     read: staffRead,
     create: (w) => slackIdOk(w) && (isSuper(w.actor) ||
-      (w.id === w.actor.uid && w.incoming?.role === 'sale' && w.incoming?.uid === w.id && w.incoming?.slackUserId === undefined)),
+      (w.id === w.actor.uid && w.incoming?.role === 'sale' && w.incoming?.uid === w.id && w.incoming?.slackUserId === undefined && noRoleSource(w))),
     update: (w) => slackIdOk(w) && (isSuper(w.actor) ||
-      // slackUserId decides who a Slack DM goes to, so only a super_admin sets it.
-      (isManagerUp(w.actor) && !w.changed.includes('role') && !w.changed.includes('slackUserId')) ||
+      // slackUserId decides who a Slack DM goes to, so only a super_admin sets it. A manager may not touch
+      // the HR fields a role is read from either: that would make someone a manager without a super_admin.
+      (isManagerUp(w.actor) && !touches(w.changed, ['role', 'slackUserId', ...ROLE_SOURCE_USER_FIELDS])) ||
       (w.id === w.actor.uid && !touches(w.changed, SELF_PROTECTED_USER_FIELDS))),
     delete: (w) => isSuper(w.actor),
   },

@@ -218,6 +218,39 @@ describe('users', () => {
     it('a team_lead cannot change a role or a team', () => {
       expect(write({ actor: LEAD, collection: 'users', id: 'them', existing: them, data: { teamId: 't2' } })).toBe(false)
     })
+
+    // The role a server gate uses is lifted to manager from rank / position / department / employment
+    // status (a department head). Writing those is granting a role, so only a super_admin may.
+    describe('the HR fields a role is read from', () => {
+      const lift = { rank: 'JG11', department: 'Sales Management', employmentStatus: 'Active' }
+
+      it('a sale cannot set them on their own row to become a manager', () => {
+        expect(write({ actor: me, collection: 'users', id: 'me', existing: mine, data: { rank: 'JG11' } })).toBe(false)
+        expect(write({ actor: me, collection: 'users', id: 'me', existing: mine, data: { department: 'Sales Management' } })).toBe(false)
+        expect(write({ actor: me, collection: 'users', id: 'me', existing: mine, data: { position: 'Head of Sales' } })).toBe(false)
+        expect(write({ actor: me, collection: 'users', id: 'me', existing: mine, data: { employmentStatus: 'Active' } })).toBe(false)
+      })
+
+      it('a manager cannot set them on anyone to make them a manager', () => {
+        expect(write({ actor: MGR, collection: 'users', id: 'them', existing: them, data: lift })).toBe(false)
+        expect(write({ actor: MGR, collection: 'users', id: 'them', existing: them, data: { rank: 'JG11' } })).toBe(false)
+      })
+
+      it('a super_admin can', () => {
+        expect(write({ actor: ADMIN, collection: 'users', id: 'them', existing: them, data: lift })).toBe(true)
+      })
+
+      it('a self-created row cannot carry them', () => {
+        const self = { uid: 'new', role: 'sale' }
+        expect(write({ actor: actor('sale', 'new'), collection: 'users', id: 'new', data: self })).toBe(true)
+        expect(write({ actor: actor('sale', 'new'), collection: 'users', id: 'new', data: { ...self, rank: 'JG11' } })).toBe(false)
+      })
+
+      it('re-sending them unchanged is not changing them', () => {
+        const withHr = doc('them', { ...them, ...lift })
+        expect(write({ actor: MGR, collection: 'users', id: 'them', existing: withHr, data: { ...lift, teamId: 't2' } })).toBe(true)
+      })
+    })
   })
 
   it('a manager may reassign org structure', () => {
