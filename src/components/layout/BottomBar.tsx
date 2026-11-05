@@ -142,8 +142,10 @@ export function BottomBar() {
   const isAdmin = canAccess(user.role, 'team_lead')
 
   const homeActive    = pathname === '/sale'
-  const courseActive  = pathname.startsWith('/courses') || pathname.startsWith('/shadow')
-  const toolActive    = pathname.startsWith('/tools')
+  // Mandatory Reading sits under Tools, though its page lives at /courses/mandatory.
+  const mandatory     = pathname.startsWith('/courses/mandatory')
+  const courseActive  = (pathname.startsWith('/courses') || pathname.startsWith('/shadow')) && !mandatory
+  const toolActive    = pathname.startsWith('/tools') || mandatory
   const profileActive = pathname === '/profile'
 
   const items = [

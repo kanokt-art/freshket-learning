@@ -55,7 +55,8 @@ export function FreshketToolTabs() {
     { href: '/tools', label: 'Tools', active: onTools && !isMerch && !isQA, show: true, onClick: (e) => switchHash(e, '') },
     { href: '/tools/cuisine-guide', label: 'Cuisine Guide', active: pathname === '/tools/cuisine-guide', show: true },
     { href: '/tools#qa', label: 'Q&A', active: isQA, show: true, onClick: (e) => switchHash(e, 'qa') },
-    { href: '/tools/mandatory', label: 'Merchandise Mandatory', active: pathname === '/tools/mandatory', show: true },
+    // A learner's Mandatory Reading: the page that shows only what their department may read.
+    { href: '/courses/mandatory', label: 'Merchandise Mandatory', active: pathname === '/tools/mandatory' || pathname.startsWith('/courses/mandatory'), show: true },
     { href: '/tools/new-joiner', label: 'New Joiner Hub', badge: 'NEW', active: pathname.startsWith('/tools/new-joiner'), show: isNewJoiner },
     // Moved to the end per request — was the second tab.
     { href: '/tools#merch', label: 'Merchandise Contact', active: isMerch, show: true, onClick: (e) => switchHash(e, 'merch') },

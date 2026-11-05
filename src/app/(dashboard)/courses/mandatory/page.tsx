@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react'
 import { Header } from '@/components/layout/Header'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
-import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
+import { FreshketToolTabs } from '@/components/layout/FreshketToolTabs'
 import { MandatorySlideViewer } from '@/components/features/MandatorySlideViewer'
 import { SlidePreviewArea } from '@/components/features/MandatoryPreview'
 import { MandatoryArchiveRail, MandatoryMonthFilter, MandatoryMonthHeader } from '@/components/features/MandatoryArchive'
@@ -13,7 +13,7 @@ import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { useMandatoryItems } from '@/hooks/useFirestore'
 
 // Learner-facing Mandatory Reading — a read-only list of published weekly
-// Product Knowledge slides, reached from the My Course tab bar. Admins author
+// Product Knowledge slides, reached from the Tools tab bar. Admins author
 // these under Freshket Tools → Mandatory; here users just read them.
 export default function MyMandatoryPage() {
   const { user } = useAuth()
@@ -44,7 +44,7 @@ export default function MyMandatoryPage() {
     <div className="flex flex-col h-full bg-white">
       <Header title="Mandatory Reading" subtitle={`คู่มือ Product Knowledge รายสัปดาห์ · ${items.length} ฉบับ`} />
       {isSuperAdmin && <CourseManagementTabs />}
-      <MyCourseTabs />
+      <FreshketToolTabs />
 
       <div className="flex-1 overflow-auto">
         {moduleLoading ? (

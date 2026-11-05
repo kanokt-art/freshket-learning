@@ -33,6 +33,8 @@ interface NavItem {
   icon: React.ReactNode
   children?: SubNavItem[]
   matchPaths?: string[]
+  /** Paths under href that belong to another item (e.g. Mandatory Reading at /courses/mandatory is a Tool). */
+  excludePaths?: string[]
   noLink?: boolean
   noActive?: boolean
   moduleId?: ModuleId        // hide when module not allowed for user's department
@@ -84,6 +86,7 @@ const NAV_ITEMS: NavItem[] = [
     maxRole: 'manager',
     group: 'main',
     matchPaths: ['/courses/roleplay', '/shadow'],
+    excludePaths: ['/courses/mandatory'],
     // No top-level moduleId — parent is shown when ANY child is visible
     icon: (
       <svg className="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
@@ -123,7 +126,7 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Tools',
     requiredRole: 'sale',
     group: 'main',
-    matchPaths: ['/tools/new-joiner'],
+    matchPaths: ['/tools/new-joiner', '/courses/mandatory'],
     // No top-level moduleId — parent shown when any child is visible
     icon: (
       // Wrench + screwdriver — the sale team's toolkit
@@ -442,7 +445,8 @@ function NavLink({
   collapsed: boolean
 }) {
   const active =
-    !item.noActive && (
+    !item.noActive &&
+    !(item.excludePaths ?? []).some((p) => pathname === p || pathname.startsWith(p + '/')) && (
       pathname === item.href ||
       pathname.startsWith(item.href + '/') ||
       (item.matchPaths ?? []).some((p) => pathname === p || pathname.startsWith(p + '/'))
