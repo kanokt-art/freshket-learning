@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
-import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
+import { PracticeTabs } from '@/components/layout/PracticeTabs'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers, useTeams, useAllShadowRecords, useAllShadowAcknowledgments, saveShadowRecord } from '@/hooks/useFirestore'
 import { alertError } from '@/lib/ui/alert'
@@ -1504,7 +1504,7 @@ export default function ShadowPage() {
           </button>
         }
       />
-      <MyCourseTabs />
+      <PracticeTabs />
 
       <div className="flex-1 overflow-auto p-6 space-y-4 animate-float-up">
 

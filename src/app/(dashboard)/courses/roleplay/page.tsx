@@ -15,7 +15,7 @@ import { isActiveEmployee } from '@/lib/users/active'
 import { DEMO_MODE } from '@/lib/demo/demoMode'
 import { Header } from '@/components/layout/Header'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
-import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
+import { PracticeTabs } from '@/components/layout/PracticeTabs'
 import { RoleplayResultsImport } from '@/components/features/RoleplayResultsImport'
 import {
   ROLEPLAY_TOPICS,
@@ -1537,7 +1537,7 @@ export default function RoleplayPage() {
     return (
       <div className="flex flex-col h-full bg-white">
         <Header title="Role Play" subtitle="ผลการประเมิน Roleplay ของฉัน" />
-        <MyCourseTabs />
+        <PracticeTabs />
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
           {/* ── Round selector ── */}
@@ -1868,7 +1868,7 @@ export default function RoleplayPage() {
         }
       />
       {isSuperAdmin && <CourseManagementTabs />}
-      <MyCourseTabs />
+      <PracticeTabs />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Summary stats */}

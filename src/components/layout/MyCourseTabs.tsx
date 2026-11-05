@@ -7,8 +7,9 @@ import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import type { ModuleId } from '@/lib/modules'
 
-// Regular-user sub-nav for the "My Course" area: Course, then "Practice" — one tab that opens a small
-// menu of the hands-on training (Shadow Visit, Role Play). Mandatory reading lives under Tools.
+// Regular-user sub-nav for the "My Course" area: Course, and on a phone "Practice" — one tab that opens a
+// small menu of the hands-on training (Shadow Visit, Role Play), which has its own sidebar item on a
+// computer. Mandatory reading lives under Tools.
 // Self-gating: renders nothing for super_admin (they get CourseManagementTabs instead) and hides what the
 // user's department can't access. When only one practice page is open to them it shows as a plain tab.
 const PRACTICE: { href: string; label: string; module: ModuleId; match: string }[] = [
@@ -49,12 +50,13 @@ export function MyCourseTabs() {
     <nav className="flex items-center gap-6 px-6 bg-white border-b border-gray-100">
       {showCourse && <Link href="/courses" className={tabClass(courseActive)}>Course</Link>}
 
+      {/* Practice has its own item in the left sidebar on a computer; a phone has no sidebar, so here it stays. */}
       {practice.length === 1 && (
-        <Link href={practice[0].href} className={tabClass(!!current)}>{practice[0].label}</Link>
+        <Link href={practice[0].href} className={`lg:hidden ${tabClass(!!current)}`}>{practice[0].label}</Link>
       )}
 
       {practice.length > 1 && (
-        <div ref={menuRef} className="relative">
+        <div ref={menuRef} className="relative lg:hidden">
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}

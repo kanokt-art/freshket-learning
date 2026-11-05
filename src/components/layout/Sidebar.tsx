@@ -85,8 +85,8 @@ const NAV_ITEMS: NavItem[] = [
     requiredRole: 'sale',
     maxRole: 'manager',
     group: 'main',
-    matchPaths: ['/courses/roleplay', '/shadow'],
-    excludePaths: ['/courses/mandatory'],
+    // Practice (Shadow Visit, Role Play) has its own item below; Mandatory Reading sits under Tools.
+    excludePaths: ['/courses/mandatory', '/courses/roleplay'],
     // No top-level moduleId — parent is shown when ANY child is visible
     icon: (
       <svg className="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
@@ -117,6 +117,25 @@ const NAV_ITEMS: NavItem[] = [
           </svg>
         ),
       },
+    ],
+  },
+  {
+    // The hands-on training, out of My Course: Shadow Visit and Role Play, switched between by the
+    // PracticeTabs bar on their pages. Shown when the department has either.
+    href: '/shadow',
+    label: 'Practice',
+    requiredRole: 'sale',
+    maxRole: 'manager',
+    group: 'main',
+    matchPaths: ['/courses/roleplay'],
+    icon: (
+      <svg className="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v1.5M3 21v-6m0 0 2.77-.693a9 9 0 0 1 6.208.682l.108.054a9 9 0 0 0 6.086.71l3.114-.732a48.524 48.524 0 0 1-.005-10.499l-3.11.732a9 9 0 0 1-6.085-.711l-.108-.054a9 9 0 0 0-6.208-.682L3 4.5M3 15V4.5" />
+      </svg>
+    ),
+    children: [
+      { href: '/shadow', label: 'Shadow Visit', requiredRole: 'sale', moduleId: 'shadow', icon: null },
+      { href: '/courses/roleplay', label: 'Role Play', requiredRole: 'sale', moduleId: 'roleplay', icon: null },
     ],
   },
   {
@@ -274,6 +293,8 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
     }
     return true
   })
+    // Practice opens Shadow Visit, or Role Play for a department without Shadow Visit.
+    .map((item) => (item.label === 'Practice' && !isModuleAllowed('shadow') ? { ...item, href: '/courses/roleplay', matchPaths: ['/shadow'] } : item))
 
   const mainItems   = visibleItems.filter((i) => i.group === 'main')
   const manageItems = visibleItems.filter((i) => i.group === 'manage')
