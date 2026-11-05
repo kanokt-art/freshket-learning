@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/server/store'
 import { requireStaff } from '@/lib/server/auth'
 import { sanitizeQuestion } from '@/lib/assessment/grade'
+import { failedRetakeBlocked } from '@/lib/server/retakeOnFail'
 import type { Assessment, Question } from '@/types/assessment'
 
 // Serves a quiz to a learner WITHOUT its answer key.
@@ -64,6 +65,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       where: [{ field: 'uid', op: '==', value: gate.uid }, { field: 'assessmentId', op: '==', value: id }],
     })
     const rawLimit = Number(data.timeLimitMinutes ?? 0)
+    const stepParam = req.nextUrl.searchParams.get('step')
+    const step = stepParam === 'pre' || stepParam === 'post' ? stepParam : undefined
 
     return NextResponse.json({
       id: doc.id,
@@ -72,6 +75,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       passingScore: typeof data.passingScore === 'number' ? data.passingScore : 70,
       timeLimitMinutes: Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 600) : 0,
       allowRetake: course ? course.allowRetake === true : undefined,
+      allowRetakeOnFail: data.allowRetakeOnFail !== false,
+      // Already failed it, and the quiz does not allow another go: the intro says so instead of starting.
+      retakeBlocked: failedRetakeBlocked(data.allowRetakeOnFail, attempts, step),
       attemptsSoFar: attempts.filter((a) => !(a as { timedOut?: unknown }).timedOut).length,
       antiCheatEnabled: data.antiCheatEnabled === true,
       questions: questions

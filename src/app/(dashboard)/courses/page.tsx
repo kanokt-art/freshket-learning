@@ -3862,6 +3862,12 @@ function QuizStripPreview({ lesson, role, assessments }: {
               </div>
               {!assessment.googleFormUrl && (
                 <div className="rounded-xl border border-gray-100 bg-white p-3.5">
+                  <p className="text-xs text-gray-400 mb-1">ทำซ้ำเมื่อสอบไม่ผ่าน</p>
+                  <p className="text-sm font-bold text-gray-800">{assessment.allowRetakeOnFail === false ? 'ไม่อนุญาต' : 'อนุญาต'}</p>
+                </div>
+              )}
+              {!assessment.googleFormUrl && (
+                <div className="rounded-xl border border-gray-100 bg-white p-3.5">
                   <p className="text-xs text-gray-400 mb-1">เกณฑ์ผ่าน</p>
                   <p className="text-sm font-bold text-gray-800">{assessment.passingScore}%</p>
                 </div>

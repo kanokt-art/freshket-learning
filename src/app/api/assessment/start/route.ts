@@ -3,6 +3,7 @@ import { getStore } from '@/lib/server/store'
 import { requireStaff } from '@/lib/server/auth'
 import { newId } from '@/lib/server/dataApi'
 import { retakeRefusal } from '@/lib/server/retakeGuard'
+import { retakeOnFailBlocked, retakeOnFailRefusal } from '@/lib/server/retakeOnFail'
 import type { Assessment } from '@/types/assessment'
 
 // Opens a timed attempt session.
@@ -33,11 +34,15 @@ export async function POST(req: NextRequest) {
 
   const assessmentId = body.assessmentId
   const courseId = body.courseId
+  const step = body.step
   if (typeof assessmentId !== 'string' || !ID_RE.test(assessmentId)) {
     return NextResponse.json({ error: 'Invalid assessmentId' }, { status: 400 })
   }
   if (courseId !== undefined && (typeof courseId !== 'string' || !ID_RE.test(courseId))) {
     return NextResponse.json({ error: 'Invalid courseId' }, { status: 400 })
+  }
+  if (step !== undefined && step !== 'pre' && step !== 'post') {
+    return NextResponse.json({ error: 'Invalid step' }, { status: 400 })
   }
 
   try {
@@ -55,6 +60,9 @@ export async function POST(req: NextRequest) {
     if (assessmentData.isPublished !== true) {
       return NextResponse.json({ error: 'แบบทดสอบนี้ยังไม่เผยแพร่' }, { status: 403 })
     }
+
+    // A quiz that does not allow a retake after failing shuts out someone who already failed it.
+    if (await retakeOnFailBlocked(store, gate.uid, assessmentId, assessmentData, step)) return retakeOnFailRefusal()
 
     // Guard against a nonsense stored value (negative, NaN, absurdly large).
     const rawLimit = Number(assessmentData.timeLimitMinutes ?? 0)

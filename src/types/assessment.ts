@@ -60,6 +60,8 @@ export interface Assessment {
   passingScore: number
   timeLimitMinutes?: number
   antiCheatEnabled?: boolean
+  /** May a learner who failed sit it again? On unless this is exactly false. */
+  allowRetakeOnFail?: boolean
   answerViewMode?: QuizAnswerViewMode
   createdAt: Date
   updatedAt: Date

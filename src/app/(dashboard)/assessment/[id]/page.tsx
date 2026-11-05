@@ -36,6 +36,10 @@ interface TakeAssessment {
   allowRetake?: boolean
   /** How many times this learner has already sat it. */
   attemptsSoFar?: number
+  /** May someone who failed sit it again (on unless the admin turned it off). */
+  allowRetakeOnFail?: boolean
+  /** Failed it already, with no retake allowed: it cannot be started. */
+  retakeBlocked?: boolean
 }
 
 // Mirrors courses/[id]/page.tsx's toFormEmbedUrl — converts an ALREADY-RESOLVED
@@ -90,6 +94,7 @@ export default function TakeAssessmentPage() {
   const isPreview = search.get('preview') === '1' && user?.role === 'super_admin'
   // The course the quiz was opened from, so the intro can say how retakes work there.
   const courseIdParam = search.get('courseId')
+  const stepParam = search.get('step')
   const [previewSource, setPreviewSource] = useState<Assessment | null>(null)
 
   // Loaded from the API, not Firestore: the route strips every answer key before
@@ -218,7 +223,7 @@ export default function TakeAssessmentPage() {
     }
 
     setLoading(true)
-    authedFetch(`/api/assessment/${encodeURIComponent(id)}/take${courseIdParam ? `?courseId=${encodeURIComponent(courseIdParam)}` : ''}`)
+    authedFetch(`/api/assessment/${encodeURIComponent(id)}/take?${new URLSearchParams({ ...(courseIdParam ? { courseId: courseIdParam } : {}), ...(stepParam ? { step: stepParam } : {}) })}`)
       .then(async (res) => {
         const json = await res.json().catch(() => null)
         if (cancelled) return
@@ -232,7 +237,7 @@ export default function TakeAssessmentPage() {
       .catch(() => { if (!cancelled) setLoadError('เชื่อมต่อ server ไม่ได้') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [id, user, isPreview, courseIdParam])
+  }, [id, user, isPreview, courseIdParam, stepParam])
 
   // Read course context written by course detail page before navigation
   useEffect(() => {
@@ -320,7 +325,7 @@ export default function TakeAssessmentPage() {
     authedFetch('/api/assessment/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assessmentId: id, ...(returnCtx ? { courseId: returnCtx.courseId } : {}) }),
+      body: JSON.stringify({ assessmentId: id, ...(returnCtx ? { courseId: returnCtx.courseId } : {}), ...(returnCtx?.step ? { step: returnCtx.step } : {}) }),
     })
       .then(async (res) => {
         if (!res.ok || cancelled) return
@@ -572,6 +577,8 @@ export default function TakeAssessmentPage() {
         briefing={quizBriefing(questions, assessment.passingScore, assessment.timeLimitMinutes)}
         attemptsSoFar={isPreview ? 0 : assessment.attemptsSoFar ?? 0}
         allowRetake={assessment.allowRetake}
+        allowRetakeOnFail={assessment.allowRetakeOnFail !== false}
+        blocked={!isPreview && assessment.retakeBlocked === true}
         antiCheat={antiCheatEnabled}
         isPreview={isPreview}
         onStart={handleBegin}
@@ -745,12 +752,14 @@ export default function TakeAssessmentPage() {
 // ── Anti-Cheat gate & warning ─────────────────────────────────────────────────
 // Shown before the quiz starts, and before the clock does: how long there is, how many questions, what it takes
 // to pass, and how retakes work. Every attempt is kept (score, time) and the admin can read them.
-function QuizIntro({ title, description, briefing, attemptsSoFar, allowRetake, antiCheat, isPreview, onStart, onBack }: {
+function QuizIntro({ title, description, briefing, attemptsSoFar, allowRetake, allowRetakeOnFail, blocked, antiCheat, isPreview, onStart, onBack }: {
   title: string
   description: string
   briefing: QuizBriefing
   attemptsSoFar: number
   allowRetake?: boolean
+  allowRetakeOnFail: boolean
+  blocked: boolean
   antiCheat: boolean
   isPreview: boolean
   onStart: () => void
@@ -785,9 +794,11 @@ function QuizIntro({ title, description, briefing, attemptsSoFar, allowRetake, a
             <li>แบบทดสอบนี้ไม่จำกัดเวลา</li>
           )}
           <li>
-            {allowRetake
-              ? 'หากไม่ผ่านสามารถทำได้อีกครั้ง และหลักสูตรนี้ทำซ้ำได้แม้เรียนจบแล้ว'
-              : 'หากไม่ผ่านสามารถทำได้อีกครั้ง จนกว่าจะผ่าน (เมื่อผ่านและเรียนจบแล้วจะทำซ้ำไม่ได้)'}
+            {!allowRetakeOnFail
+              ? <span className="font-bold text-rose-600">แบบทดสอบนี้ทำได้ครั้งเดียว หากไม่ผ่านจะทำซ้ำไม่ได้ (ติดต่อ Admin หากต้องการทำใหม่)</span>
+              : allowRetake
+                ? 'หากไม่ผ่านสามารถทำได้อีกครั้ง และหลักสูตรนี้ทำซ้ำได้แม้เรียนจบแล้ว'
+                : 'หากไม่ผ่านสามารถทำได้อีกครั้ง จนกว่าจะผ่าน (เมื่อผ่านและเรียนจบแล้วจะทำซ้ำไม่ได้)'}
           </li>
           <li>คะแนนจะถูกบันทึกทุกครั้งที่ทำ Admin ดูได้ว่าทำไปกี่ครั้ง ได้กี่คะแนน และใช้เวลาเท่าไร</li>
           {antiCheat && (
@@ -809,8 +820,14 @@ function QuizIntro({ title, description, briefing, attemptsSoFar, allowRetake, a
           </p>
         )}
 
-        <button onClick={onStart}
-          className="w-full mt-6 px-5 py-3 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all duration-150">
+        {blocked && (
+          <p className="mt-4 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+            คุณทำแบบทดสอบนี้ไม่ผ่านแล้ว และแบบทดสอบนี้ไม่เปิดให้ทำซ้ำ — ติดต่อ Admin หากต้องการทำใหม่
+          </p>
+        )}
+
+        <button onClick={onStart} disabled={blocked}
+          className="w-full mt-6 px-5 py-3 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-freshket-500">
           {antiCheat ? 'เข้าสู่โหมดเต็มจอและเริ่มทำแบบทดสอบ' : timeLimitMinutes ? 'เริ่มทำแบบทดสอบและจับเวลา' : 'เริ่มทำแบบทดสอบ'}
         </button>
       </div>

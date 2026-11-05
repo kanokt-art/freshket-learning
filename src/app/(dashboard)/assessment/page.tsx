@@ -467,6 +467,8 @@ function AssessmentEditor({
   const [description, setDescription] = useState(initial?.description ?? '')
   const [passingScore, setPassingScore] = useState(String(initial?.passingScore ?? 70))
   const [isPublished, setIsPublished] = useState(initial?.isPublished ?? false)
+  // On unless the admin turns it off: a learner who fails may sit it again.
+  const [allowRetakeOnFail, setAllowRetakeOnFail] = useState(initial?.allowRetakeOnFail !== false)
   const [questions, setQuestions] = useState<Question[]>(initial?.questions ?? [])
   const [googleFormUrl, setGoogleFormUrl] = useState(initial?.googleFormUrl ?? '')
   const [saving, setSaving] = useState(false)
@@ -547,6 +549,7 @@ function AssessmentEditor({
         googleFormUrl: mode === 'google_form' ? googleFormUrl.trim() : '',
         isPublished,
         passingScore: Number(passingScore) || 70,
+        allowRetakeOnFail,
         createdBy: userId,
       }
       if (DEMO_MODE) {
@@ -568,7 +571,7 @@ function AssessmentEditor({
     } finally {
       setSaving(false)
     }
-  }, [title, description, passingScore, isPublished, questions, googleFormUrl, mode, userId, initial, onSave])
+  }, [title, description, passingScore, allowRetakeOnFail, isPublished, questions, googleFormUrl, mode, userId, initial, onSave])
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -621,6 +624,23 @@ function AssessmentEditor({
               </div>
             </div>
           </div>
+
+          {/* Retake after failing — on by default; off means one go, a failed learner cannot sit it again */}
+          {mode === 'builder' && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-gray-700">อนุญาตให้ทำซ้ำเมื่อสอบไม่ผ่าน</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {allowRetakeOnFail ? 'ผู้เรียนที่ไม่ผ่านทำใหม่ได้ และบันทึกคะแนนทุกครั้ง' : 'ปิดอยู่: ผู้เรียนที่ไม่ผ่านจะทำซ้ำไม่ได้ (ต้องให้ Admin ล้างประวัติ)'}
+                </p>
+              </div>
+              <button type="button" role="switch" aria-checked={allowRetakeOnFail} aria-label="อนุญาตให้ทำซ้ำเมื่อสอบไม่ผ่าน"
+                onClick={() => setAllowRetakeOnFail((v) => !v)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 shrink-0 ${allowRetakeOnFail ? 'bg-freshket-500' : 'bg-gray-200'}`}>
+                <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${allowRetakeOnFail ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+          )}
 
           {/* Mode toggle */}
           <div>

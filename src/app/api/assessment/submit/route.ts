@@ -11,6 +11,7 @@ import { quizNotice, type QuizNotice } from '@/lib/notifications/quizNotice'
 import { teamLeadsOf } from '@/lib/server/teamLeads'
 import { saleTrainers } from '@/lib/server/saleTrainers'
 import { retakeRefusal } from '@/lib/server/retakeGuard'
+import { retakeOnFailBlocked, retakeOnFailRefusal } from '@/lib/server/retakeOnFail'
 import type { Assessment, Question } from '@/types/assessment'
 import type { Course } from '@/types/course'
 import type { UserProfile } from '@/types/user'
@@ -273,6 +274,9 @@ export async function POST(req: NextRequest) {
     if (assessment.isPublished !== true) {
       return NextResponse.json({ error: 'แบบทดสอบนี้ยังไม่เผยแพร่' }, { status: 403 })
     }
+
+    // Not even a direct submit gets round it: a failed try with retakes off ends the quiz for that learner.
+    if (await retakeOnFailBlocked(store, uid, assessmentId, assessment, step)) return retakeOnFailRefusal()
 
     const questions = (assessment.questions ?? []) as Question[]
     const passingScore = typeof assessment.passingScore === 'number' ? assessment.passingScore : 70

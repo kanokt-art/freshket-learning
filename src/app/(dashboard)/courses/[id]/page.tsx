@@ -1199,7 +1199,7 @@ function LessonBrowserStep({
       courseId: course.id,
       ...(step ? { step, lessonId: quizCompletionKey(lesson, step) } : {}),
     }))
-    router.push(`/assessment/${lesson.assessmentId}?courseId=${encodeURIComponent(course.id)}`)
+    router.push(`/assessment/${lesson.assessmentId}?courseId=${encodeURIComponent(course.id)}${step ? `&step=${step}` : ''}`)
   }
 
   const media = selectedLesson?.type === 'video' && selectedLesson.videoUrl ? toEmbedUrl(selectedLesson.videoUrl) : null
