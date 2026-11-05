@@ -65,16 +65,19 @@ export function useTeamActivity(memberUids: readonly string[], viewerUid: string
   const reviews = useAllShadowAcknowledgments(live)
   const demoRecords = useAllTrainingRecords(DEMO_MODE)
 
+  const memberRecords: ActivityRecord[] = DEMO_MODE ? demoRecords.data : records.data
+
   const items: TeamActivity[] = useMemo(() => buildTeamActivity({
     memberUids: uids,
-    records: DEMO_MODE ? demoRecords.data : records.data,
+    records: memberRecords,
     takeaways: DEMO_MODE ? DEMO_TAKEAWAYS : takeaways.data,
     shadows: DEMO_MODE ? DEMO_SHADOWS : shadows.data,
     reviews: DEMO_MODE ? DEMO_REVIEWS : reviews.data,
     viewerUid,
     courseTitles,
-  }), [uids, demoRecords.data, records.data, takeaways.data, shadows.data, reviews.data, viewerUid, courseTitles])
+  }), [uids, memberRecords, takeaways.data, shadows.data, reviews.data, viewerUid, courseTitles])
 
   const loading = live && (records.loading || takeaways.loading || shadows.loading)
-  return { items, loading }
+  /** The members' training records too: how far the team is on each course. */
+  return { items, loading, records: memberRecords }
 }

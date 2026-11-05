@@ -21,8 +21,6 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'shadow', label: 'Shadow' },
 ]
 
-const PAGE = 5
-
 const scoreTone = (s: number) =>
   s >= 80 ? 'bg-freshket-100 text-freshket-700' : s >= 60 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-600'
 
@@ -109,7 +107,6 @@ export function TeamActivityCard({ items, people, loading }: {
   loading?: boolean
 }) {
   const [filter, setFilter] = useState<Filter>('all')
-  const [shown, setShown] = useState(PAGE)
   const byUid = useMemo(() => new Map(people.map((p) => [p.uid, p])), [people])
 
   const counts = useMemo(() => {
@@ -127,7 +124,7 @@ export function TeamActivityCard({ items, people, loading }: {
         {waiting > 0 && (
           <button
             type="button"
-            onClick={() => { setFilter('shadow'); setShown(PAGE) }}
+            onClick={() => setFilter('shadow')}
             className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-all duration-150"
           >
             <span className="size-1.5 rounded-full bg-amber-500" />
@@ -139,7 +136,7 @@ export function TeamActivityCard({ items, people, loading }: {
             <button
               key={f.id}
               type="button"
-              onClick={() => { setFilter(f.id); setShown(PAGE) }}
+              onClick={() => setFilter(f.id)}
               aria-pressed={filter === f.id}
               className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full border transition-all duration-150 ${
                 filter === f.id
@@ -162,20 +159,10 @@ export function TeamActivityCard({ items, people, loading }: {
           <p className="text-xs text-gray-400 mt-1">เมื่อสมาชิกในทีมเขียน Key Take Away ทำแบบทดสอบ หรือส่ง Shadow Visit จะขึ้นที่นี่</p>
         </div>
       ) : (
-        <>
-          <div className="divide-y divide-gray-100">
-            {list.slice(0, shown).map((item) => <Row key={item.id} item={item} person={byUid.get(item.uid)} />)}
-          </div>
-          {list.length > shown && (
-            <button
-              type="button"
-              onClick={() => setShown((n) => n + 10)}
-              className="w-full py-3 text-sm font-bold text-freshket-700 border-t border-gray-100 hover:bg-gray-50 transition-all duration-150"
-            >
-              ดูเพิ่ม ({list.length - shown})
-            </button>
-          )}
-        </>
+        // Every item, scrolled within the card so the sidebar keeps its height.
+        <div className="divide-y divide-gray-100 max-h-[28rem] overflow-y-auto overscroll-contain">
+          {list.map((item) => <Row key={item.id} item={item} person={byUid.get(item.uid)} />)}
+        </div>
       )}
     </div>
   )

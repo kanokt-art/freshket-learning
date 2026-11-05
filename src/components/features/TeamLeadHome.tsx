@@ -92,6 +92,17 @@ export function TeamLeadHome() {
   const courseTitles = useMemo(() => new Map(courses.map((c) => [c.id, c.title])), [courses])
   const activity = useTeamActivity(memberUids, user?.uid ?? '', courseTitles)
 
+  // Per course: how many of the people it is for (among my team) have finished it.
+  const teamProgress = useMemo(() => {
+    const finished = new Set(activity.records.filter((r) => r.status === 'completed').map((r) => `${r.userId}_${r.courseId}`))
+    const m = new Map<string, { done: number; total: number }>()
+    for (const c of publishedCourses) {
+      const audience = members.filter((u) => isInCourseTarget(c, u))
+      m.set(c.id, { done: audience.filter((u) => finished.has(`${u.uid}_${c.id}`)).length, total: audience.length })
+    }
+    return m
+  }, [activity.records, publishedCourses, members])
+
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50 flex flex-col">
       {/* Top bar — profile moved here (top-right, white label) */}
@@ -162,7 +173,7 @@ export function TeamLeadHome() {
             )}
           </div>
 
-          <AllCoursesCard courses={publishedCourses} onOpen={(id) => router.push(`/courses/${id}?view=report`)} />
+          <TeamCourseProgressCard courses={publishedCourses} progress={teamProgress} onOpen={(id) => router.push(`/courses/${id}?view=report`)} />
         </div>
 
         {/* ── RIGHT: continue learning ─────────────────────────── */}
@@ -175,36 +186,58 @@ export function TeamLeadHome() {
   )
 }
 
-// ── All available courses ─────────────────────────────────────────────────────
-function AllCoursesCard({ courses, onOpen }: {
+// ── Team progress per course: a row of course cards to scroll sideways ─────────
+// Each card says how many of the team the course is for have finished it; a tap opens the course's
+// report, where the lead sees who is where.
+function TeamCourseProgressCard({ courses, progress, onOpen }: {
   courses: { id: string; title: string; description?: string; thumbnailUrl?: string; category?: string }[]
+  progress: ReadonlyMap<string, { done: number; total: number }>
   onOpen: (id: string) => void
 }) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col lg:flex-1">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-bold text-gray-900">หลักสูตรทั้งหมด</h3>
-        <span className="text-xs text-gray-400">{courses.length} หลักสูตร</span>
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm py-5">
+      <div className="px-5 flex items-start justify-between gap-3 mb-4">
+        <div className="min-w-0">
+          <h3 className="text-sm font-bold text-gray-900">ติดตามการเรียนของทีม</h3>
+          <p className="text-xs text-gray-400 mt-0.5">แตะหลักสูตรเพื่อดูว่าน้องในทีมเรียนถึงไหนแล้ว</p>
+        </div>
+        <span className="text-xs text-gray-400 shrink-0">{courses.length} หลักสูตร</span>
       </div>
       {courses.length === 0 ? (
         <p className="text-xs text-gray-400 py-6 text-center">ยังไม่มีหลักสูตรที่เผยแพร่</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 content-start">
-          {courses.map((c) => (
-            <button key={c.id} type="button" onClick={() => onOpen(c.id)}
-              className="flex items-center gap-3 rounded-xl border border-gray-100 p-2.5 text-left hover:bg-gray-50 hover:border-gray-200 transition-colors">
-              <div className="size-12 rounded-lg bg-gradient-to-br from-freshket-200 to-emerald-100 shrink-0 overflow-hidden flex items-center justify-center">
-                {c.thumbnailUrl
-                  // eslint-disable-next-line @next/next/no-img-element
-                  ? <img src={c.thumbnailUrl} alt={c.title} className="size-full object-cover" />
-                  : <svg className="size-6 text-freshket-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold text-gray-800 truncate">{c.title}</p>
-                {c.description && <p className="text-xs text-gray-400 line-clamp-2 mt-0.5">{c.description}</p>}
-              </div>
-            </button>
-          ))}
+        <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory px-5 pb-2 scroll-px-5">
+          {courses.map((c) => {
+            const p = progress.get(c.id) ?? { done: 0, total: 0 }
+            const pct = p.total ? Math.round((p.done / p.total) * 100) : 0
+            return (
+              <button key={c.id} type="button" onClick={() => onOpen(c.id)}
+                className="snap-start shrink-0 w-56 rounded-2xl border border-gray-100 overflow-hidden text-left hover:border-gray-200 hover:shadow-sm transition-all duration-150">
+                <div className="h-28 bg-gradient-to-br from-freshket-200 to-emerald-100 flex items-center justify-center">
+                  {c.thumbnailUrl
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={c.thumbnailUrl} alt="" className="size-full object-cover" />
+                    : <svg className="size-8 text-freshket-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>}
+                </div>
+                <div className="p-3">
+                  <p className="text-sm font-bold text-gray-800 line-clamp-2 min-h-[2.5rem] leading-snug">{c.title}</p>
+                  {p.total > 0 ? (
+                    <>
+                      <div className="flex items-center justify-between text-xs mt-2">
+                        <span className="text-gray-500">เรียนจบแล้ว</span>
+                        <span className="font-bold text-gray-800 tabular-nums">{p.done}/{p.total} คน</span>
+                      </div>
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden mt-1.5">
+                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: '#00ce7c' }} />
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-gray-400 mt-2">ไม่มีน้องในทีมที่ต้องเรียน</p>
+                  )}
+                </div>
+              </button>
+            )
+          })}
         </div>
       )}
     </div>
