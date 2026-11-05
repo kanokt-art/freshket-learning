@@ -13,7 +13,7 @@ import { Header } from '@/components/layout/Header'
 import { save } from '@/lib/data/collection'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
-import { useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAllShadowAcknowledgments, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList, useBucketResultsFor } from '@/hooks/useFirestore'
+import { useCourses, useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAllShadowAcknowledgments, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList, useBucketResultsFor } from '@/hooks/useFirestore'
 import { OpenableMbtiPill } from '@/components/features/MbtiBadge'
 import { formatPersonName } from '@/lib/users/displayName'
 import { MBTI_DEFINITION } from '@/lib/bucketAssessments'
@@ -556,6 +556,9 @@ function EmployeeSidebar({
   // pre → latest post and the improvement between them.
   const { data: assessmentScores } = useAssessmentScoresByUser(user.uid)
   const { data: roleplayAssessments } = useRoleplayAssessmentsByUser(user.uid)
+  // Each course's cover, shown beside its title in the learning history.
+  const { data: allCourses } = useCourses()
+  const coverOf = useMemo(() => new Map(allCourses.map((c) => [c.id, c.thumbnailUrl] as const)), [allCourses])
   // Latest Post + latest Pre (max 2 polygons) for the radar.
   const radarAssessments = useMemo(() => {
     const post = roleplayAssessments.find(a => a.type === 'post')
@@ -791,17 +794,30 @@ function EmployeeSidebar({
               <p className="text-xs text-gray-400 text-center py-12">ยังไม่มีประวัติการเรียน</p>
             ) : userRecords.map(rec => (
               <div key={rec.id} className="border border-gray-100 rounded-xl p-4">
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <p className="font-bold text-sm text-gray-800 leading-snug flex-1">{rec.courseTitle}</p>
+                <div className="flex items-start gap-3 mb-2.5">
+                  <CourseCover url={coverOf.get(rec.courseId)} />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm text-gray-800 leading-snug">{rec.courseTitle}</p>
+                    {/* วันที่เรียน (dd/mm/yyyy) */}
+                    <div className="flex items-center gap-3 text-xs text-gray-400 mt-0.5">
+                      <span>วันที่เรียน {ddmmyyyy(rec.completedAt ?? rec.startedAt)}</span>
+                      {rec.attemptCount > 1 && <span>· {rec.attemptCount} ครั้ง</span>}
+                    </div>
+                  </div>
+                  {/* Pre / Post as numbers only */}
+                  {(rec.preTestScore != null || rec.postTestScore != null) && (
+                    <div className="flex items-stretch gap-2 shrink-0">
+                      <ScoreBox label="Pre-Test" value={rec.preTestScore} />
+                      <ScoreBox
+                        label="Post-Test"
+                        value={rec.postTestScore}
+                        change={rec.preTestScore != null && rec.postTestScore != null ? rec.postTestScore - rec.preTestScore : undefined}
+                      />
+                    </div>
+                  )}
                   <span className={`shrink-0 text-xs font-bold px-2.5 py-0.5 rounded-full ${STATUS_PASTEL[rec.status]}`}>
                     {STATUS_LABELS[rec.status]}
                   </span>
-                </div>
-
-                {/* วันที่เรียน (dd/mm/yyyy) */}
-                <div className="flex items-center gap-3 text-xs text-gray-400 mb-2.5">
-                  <span>วันที่เรียน {ddmmyyyy(rec.completedAt ?? rec.startedAt)}</span>
-                  {rec.attemptCount > 1 && <span>· {rec.attemptCount} ครั้ง</span>}
                 </div>
 
                 {rec.score != null && (
@@ -815,10 +831,6 @@ function EmployeeSidebar({
                     </div>
                     {rec.passScore != null && <p className="text-xs text-gray-400 mt-1">เกณฑ์ผ่าน: {rec.passScore}</p>}
                   </div>
-                )}
-
-                {(rec.preTestScore != null || rec.postTestScore != null) && (
-                  <PrePostRow pre={rec.preTestScore} post={rec.postTestScore} />
                 )}
 
                 {/* Reflect knowledge (จากพนักงาน) + หัวหน้าคอมเมนต์ข้างล่าง */}
@@ -1120,17 +1132,6 @@ function ReflectionModal({ courseTitle, text, onClose }: {
 }
 
 // ── Info Row ───────────────────────────────────────────────────────────────────
-// Pre/post pair for one course, from the lesson quizzes the admin tagged with
-// CourseLesson.quizRole. The delta is the point of the row: a post-test that
-// barely moved (or went backwards) is the case a manager should coach on.
-function PrePostRow({ pre, post }: { pre?: number; post?: number }) {
-  return (
-    <div className="mb-2.5">
-      <PrePostBars pre={pre} post={post} />
-    </div>
-  )
-}
-
 /**
  * Before and after as two horizontal bars on the same 0–100 scale, so the gain (or the
  * drop) is read by comparing lengths, with the change written beside them.
@@ -1288,6 +1289,37 @@ function FeedbackBlock({ courseId, courseTitle, memberName, existing, canEdit, o
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── A course's cover beside its title (an image, or a soft tile when the course has none) ──
+function CourseCover({ url }: { url?: string }) {
+  const isImg = !!url && (url.startsWith('http') || url.startsWith('/'))
+  if (isImg) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={url} alt="" className="size-12 rounded-xl object-cover border border-gray-100 shrink-0" />
+  }
+  return (
+    <span className="size-12 rounded-xl shrink-0 flex items-center justify-center bg-freshket-50 text-freshket-500" style={url ? { background: url } : undefined}>
+      <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+      </svg>
+    </span>
+  )
+}
+
+// ── A pre- or post-test score as a number in a small box; the post box adds the change from the pre ──
+function ScoreBox({ label, value, change }: { label: string; value?: number; change?: number }) {
+  return (
+    <div className="min-w-[4.75rem] rounded-xl border border-gray-100 bg-gray-50 px-3 py-1.5 text-center">
+      <p className="text-xs text-gray-400 leading-tight">{label}</p>
+      <p className={`text-base font-bold tabular-nums leading-tight ${value != null ? scoreTextColor(value) : 'text-gray-300'}`}>{value ?? '—'}</p>
+      {change !== undefined && (
+        <p className={`text-xs font-bold tabular-nums leading-tight ${change > 0 ? 'text-freshket-600' : change < 0 ? 'text-rose-600' : 'text-gray-400'}`}>
+          {change > 0 ? `+${change}` : change}
+        </p>
+      )}
     </div>
   )
 }
