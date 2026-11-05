@@ -28,7 +28,7 @@ import { authedFetch } from '@/lib/api/authedFetch'
 import { patch } from '@/lib/data/collection'
 import { parseSlackMemberId } from '@/lib/slack/memberId'
 import { alertError, alertSuccess, confirmAction } from '@/lib/ui/alert'
-import { announce } from '@/lib/notifications/announce'
+import { ShadowPushButton } from '@/components/features/ShadowPushButton'
 import { useMentorName } from '@/hooks/useMentorName'
 import { ImportAssessmentModal } from '@/components/features/ImportAssessmentModal'
 import { OrgBoard, isRosterRole, PHASE1_DEPARTMENTS } from '@/components/features/OrgBoard'
@@ -1105,10 +1105,12 @@ function ShadowListCard({ record, onClick }: { record: ShadowRecord; onClick: ()
     ? new Date(record.createdAt as unknown as string).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
     : '—'
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      className="w-full text-left bg-white border border-gray-100 rounded-2xl p-4 hover:border-freshket-200 hover:shadow-sm transition-all group"
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
+      className="w-full cursor-pointer text-left bg-white border border-gray-100 rounded-2xl p-4 hover:border-freshket-200 hover:shadow-sm transition-all group"
     >
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
@@ -1124,6 +1126,7 @@ function ShadowListCard({ record, onClick }: { record: ShadowRecord; onClick: ()
                   ))}
                 </div>
               )}
+              <ShadowPushButton record={record} size="sm" />
               <svg className="size-4 text-gray-300 group-hover:text-freshket-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
               </svg>
@@ -1145,34 +1148,13 @@ function ShadowListCard({ record, onClick }: { record: ShadowRecord; onClick: ()
           )}
         </div>
       </div>
-    </button>
+    </div>
   )
 }
 
 // ── Shadow detail panel (push navigation inside panel) ────────────────────────
 function UserShadowDetailPanel({ record, onBack }: { record: ShadowRecord; onBack: () => void }) {
   const mentorName = useMentorName()
-  const [pushing, setPushing] = useState(false)
-
-  // Send this visit to Slack (the trainer × team-lead group, tagging the sender's Team Lead) and ring the bell
-  // for the sender's manager and team leads again — for a visit that never went out, or to nudge a review.
-  async function pushToSlack() {
-    const ok = await confirmAction({
-      title: 'ส่ง Shadow Visit นี้ไป Slack?',
-      text: 'โพสต์ลงกลุ่ม Trainer × Team Lead (แท็ก Team Lead ของผู้ส่ง) และส่งกระดิ่งถึง Manager / Team Lead ของผู้ส่งอีกครั้ง ถ้าเคยส่งแล้วจะส่งซ้ำ',
-      confirmText: 'ส่ง',
-    })
-    if (!ok) return
-    setPushing(true)
-    try {
-      const res = await announce({ kind: 'shadow_push', recordId: record.id })
-      if (res.posted) await alertSuccess('ส่งไป Slack แล้ว', 'กระดิ่งของ Manager / Team Lead ถูกส่งซ้ำด้วย')
-      else await alertError('ส่งไป Slack ไม่สำเร็จ', 'ตรวจว่า Vercel มี SLACK_WEBHOOK_URL (หรือ SLACK_BOT_TOKEN + SLACK_TRAINER_CHANNEL_ID) และ Visit นี้บันทึกในระบบแล้ว กระดิ่งอาจถูกส่งไปแล้ว')
-    } finally {
-      setPushing(false)
-    }
-  }
-
   const dateStr = record.createdAt
     ? new Date(record.createdAt as unknown as string).toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })
     : '—'
@@ -1191,15 +1173,7 @@ function UserShadowDetailPanel({ record, onBack }: { record: ShadowRecord; onBac
         </button>
         <span className="text-gray-300">/</span>
         <p className="text-xs font-bold text-gray-700 flex-1 truncate">{record.storeName}</p>
-        <button
-          type="button"
-          onClick={pushToSlack}
-          disabled={pushing}
-          className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-50 hover:border-freshket-300 transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          <svg className="size-3.5 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" /></svg>
-          {pushing ? 'กำลังส่ง…' : 'Push ไป Slack'}
-        </button>
+        <ShadowPushButton record={record} />
       </div>
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {/* Badges */}

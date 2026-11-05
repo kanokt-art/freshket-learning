@@ -10,6 +10,7 @@ import { PHASE1_DEPARTMENTS } from '@/lib/modules'
 import { useMyTrainingRecords, useCourses, useAllTrainingRecords, useUserStats, useUserTrainingRecords, useAllUsers, useShadowRecordsByUser, useRoleplayAssessmentsByUser, useAnnouncements } from '@/hooks/useFirestore'
 import { useHomeHighlights } from '@/hooks/useHomeHighlights'
 import { useMentorName } from '@/hooks/useMentorName'
+import { ShadowPushButton } from '@/components/features/ShadowPushButton'
 import { HomeHighlightsRow } from '@/components/features/HomeHighlights'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { useNotifications } from '@/hooks/useNotifications'
@@ -1194,10 +1195,12 @@ function ShadowCard({ record, onClick }: { record: ShadowRecord; onClick?: () =>
     ? new Date(record.createdAt as unknown as string).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
     : '—'
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      className="w-full text-left bg-white border border-gray-100 rounded-2xl p-4 hover:border-freshket-200 hover:bg-freshket-50/30 hover:shadow-sm transition-all group"
+      onKeyDown={(e) => { if (onClick && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick() } }}
+      className="w-full cursor-pointer text-left bg-white border border-gray-100 rounded-2xl p-4 hover:border-freshket-200 hover:bg-freshket-50/30 hover:shadow-sm transition-all group"
     >
       <div className="flex items-center gap-3">
         <div className="size-10 rounded-xl bg-slate-100 flex items-center justify-center shrink-0 group-hover:bg-freshket-100 transition-colors">
@@ -1220,12 +1223,13 @@ function ShadowCard({ record, onClick }: { record: ShadowRecord; onClick?: () =>
           {record.ratingScore != null && (
             <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">{record.ratingScore}/5</span>
           )}
+          <ShadowPushButton record={record} size="sm" />
           <svg className="size-4 text-gray-300 group-hover:text-freshket-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
           </svg>
         </div>
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -1263,6 +1267,7 @@ function ShadowDetailPanel({ record, onBack }: { record: ShadowRecord; onBack: (
         <span className="text-gray-300">/</span>
         <p className="text-xs font-bold text-gray-700 flex-1 truncate">{record.storeName}</p>
         <span className="text-xs text-gray-400 shrink-0">{dateStr}</span>
+        <ShadowPushButton record={record} />
       </div>
 
       {/* Scrollable detail content */}
