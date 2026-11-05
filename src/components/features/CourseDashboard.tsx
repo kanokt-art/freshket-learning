@@ -8,10 +8,12 @@ import {
   RANGES, rowsInRange, rangeStart, trendOf, departmentStats, statusCounts, prePostAverages,
   type DashRow, type RangeId, type Grain,
 } from '@/lib/courses/dashboardData'
-import type { AttemptAnalytics } from '@/lib/assessment/analytics'
+import type { AttemptAnalytics, QuestionBreakdown, OptionStat } from '@/lib/assessment/analytics'
+import { buildDemoAnalytics } from '@/lib/assessment/demoAnalytics'
 
 // A course's dashboard: who joined and when, how they scored before and after, who passed, which departments they
-// come from, and — for a quiz built in the app — the questions missed most and how long people take. Read-only;
+// come from, and — for a quiz built in the app — how each question went (right / wrong, and which choice people
+// picked) and how long people take. Read-only;
 // the numbers come from the same learners and records as "สรุปผลการเรียน". Quiz attempts are read through the
 // server (api/assessment/analytics), because only the server may read them.
 
@@ -50,6 +52,7 @@ function duration(ms: number): string {
 
 export function CourseDashboard({ courseId, rows }: { courseId: string; rows: DashRow[] }) {
   const [range, setRange] = useState<RangeId>('90d')
+  const [questionSort, setQuestionSort] = useState<'order' | 'wrong'>('order')
   const scoped = useMemo(() => rowsInRange(rows, range), [rows, range])
   const trend = useMemo(() => trendOf(scoped, range), [scoped, range])
   const status = useMemo(() => statusCounts(scoped), [scoped])
@@ -60,7 +63,8 @@ export function CourseDashboard({ courseId, rows }: { courseId: string; rows: Da
   const [quiz, setQuiz] = useState<AttemptAnalytics | null>(null)
   const [quizLoading, setQuizLoading] = useState(false)
   useEffect(() => {
-    if (DEMO_MODE || !courseId) return
+    if (DEMO_MODE) { setQuiz(buildDemoAnalytics()); return }
+    if (!courseId) return
     let cancelled = false
     setQuizLoading(true)
     const since = rangeStart(range)
@@ -185,39 +189,164 @@ export function CourseDashboard({ courseId, rows }: { courseId: string; rows: Da
         )}
       </Card>
 
-      {/* Missed questions: only a quiz built in the app leaves answers to read */}
-      <Card title="ข้อที่ตอบผิดบ่อย"
-        subtitle={hasQuiz ? (quiz!.questionBasis === 'post' ? 'จากแบบทดสอบหลังเรียน · เฉพาะข้อที่ระบบตรวจเอง' : 'จากแบบทดสอบทุกครั้ง · เฉพาะข้อที่ระบบตรวจเอง') : 'ใช้ได้กับแบบทดสอบที่สร้างในระบบเท่านั้น'}>
+      {/* Question by question: right or wrong, and which choice people picked. Only a quiz built in the app
+          leaves answers to read. */}
+      <Card title="ผลรายข้อ"
+        subtitle={hasQuiz
+          ? `${quiz!.questionBasis === 'post' ? 'จากแบบทดสอบหลังเรียน' : 'จากแบบทดสอบทุกครั้ง'} · เฉพาะข้อที่ระบบตรวจเอง · เอาเมาส์ชี้ที่ช่องเพื่อดูตัวเลือก${DEMO_MODE ? ' · ข้อมูลตัวอย่าง (โหมดเดโม)' : ''}`
+          : 'ใช้ได้กับแบบทดสอบที่สร้างในระบบเท่านั้น'}
+        aside={hasQuiz && quiz!.questions.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <ul className="flex items-center gap-4">
+              <li className="flex items-center gap-1.5 text-xs text-gray-600"><span className="size-2.5 rounded-sm" style={{ background: C.good }} />ตอบถูก</li>
+              <li className="flex items-center gap-1.5 text-xs text-gray-600"><span className="size-2.5 rounded-sm" style={{ background: C.orange }} />ตอบผิด</li>
+            </ul>
+            <fieldset className="flex items-center gap-0.5 p-0.5 bg-gray-100 rounded-lg">
+              <legend className="sr-only">เรียงข้อ</legend>
+              {([['order', 'ตามลำดับข้อ'], ['wrong', 'ผิดมากสุด']] as const).map(([id, label]) => (
+                <label key={id} className={`px-3 py-1 rounded-md text-xs font-bold cursor-pointer select-none transition-all ${questionSort === id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  <input type="radio" name="q-sort" value={id} checked={questionSort === id} onChange={() => setQuestionSort(id)} className="sr-only" />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
+          </div>
+        ) : undefined}>
         <div className={quizLoading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
           {!hasQuiz ? (
-            <Empty text={DEMO_MODE ? 'โหมดเดโมไม่มีข้อมูลการทำแบบทดสอบ' : 'ยังไม่มีการทำแบบทดสอบที่สร้างในระบบ (Google Form ดูข้อที่ผิดจากในระบบไม่ได้)'} />
-          ) : quiz!.mostMissed.length === 0 ? (
-            <Empty text="ยังไม่มีข้อที่ตอบผิด" />
+            <Empty text="ยังไม่มีการทำแบบทดสอบที่สร้างในระบบ (Google Form ดูผลรายข้อจากในระบบไม่ได้)" />
+          ) : quiz!.questions.length === 0 ? (
+            <Empty text="ยังไม่มีข้อที่ระบบตรวจเองให้แสดง" />
           ) : (
-            <ol className="space-y-3">
-              {quiz!.mostMissed.map((q, i) => (
-                <li key={`${q.assessmentId}:${q.questionId}`} title={`ผิด ${q.wrong} จาก ${q.answered} ครั้ง`}>
-                  <div className="flex items-start gap-3">
-                    <span className="text-xs font-bold text-gray-400 w-5 pt-0.5">{i + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-800 leading-snug line-clamp-2">{q.text}</p>
-                      <div className="flex items-center gap-3 mt-1.5">
-                        <span className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden"><span className="block h-full rounded-full" style={{ width: `${q.wrongRate}%`, background: C.orange }} /></span>
-                        <span className="text-xs text-gray-500 shrink-0 w-40 text-right"><span className="font-bold text-gray-800">{q.wrongRate}%</span> · ผิด {q.wrong} จาก {q.answered}</span>
-                      </div>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ol>
+            <QuestionBreakdownList questions={quiz!.questions} sort={questionSort} />
           )}
         </div>
+        {hasQuiz && quiz!.questions.length > 0 && (
+          <TableView caption="ตารางผลรายข้อ" head={['ข้อ', 'ตัวเลือก', 'คำตอบที่เลือก', 'คน', '%', 'เฉลย']}
+            body={quiz!.questions.flatMap((q) => q.options.length > 0
+              ? q.options.map((o) => [String(q.number), o.letter, o.text, String(o.count), `${o.pct}%`, o.isCorrect ? 'ถูก' : ''])
+              : [[String(q.number || '—'), '—', q.text, String(q.answered), `ถูก ${q.correctRate}%`, '']])} />
+        )}
       </Card>
     </div>
   )
 }
 
 // ── Pieces ────────────────────────────────────────────────────────────────────
+
+// One row per question, in quiz order (or worst first): how many got it right and wrong, and a bar that splits the
+// answers by choice — A, B, C, D — with the right one in green. The choice's own words appear on hover or focus.
+const NO_ANSWER_COLOR = '#c3c2b7'
+
+type Hover = { key: string; id: string } | null
+
+function QuestionBreakdownList({ questions, sort }: { questions: QuestionBreakdown[]; sort: 'order' | 'wrong' }) {
+  const [hover, setHover] = useState<Hover>(null)
+  const list = sort === 'order'
+    ? questions
+    : [...questions].sort((a, b) => b.wrongRate - a.wrongRate || b.wrong - a.wrong || a.number - b.number)
+  const quizzes = new Set(questions.map((q) => q.assessmentId))
+  const showTitles = sort === 'order' && quizzes.size > 1
+
+  return (
+    <ol className="space-y-6">
+      {list.map((q, i) => {
+        const key = `${q.assessmentId}:${q.questionId}`
+        return (
+          <li key={key}>
+            {showTitles && (i === 0 || list[i - 1].assessmentId !== q.assessmentId) && (
+              <p className="text-xs font-bold text-gray-500 mb-3">{q.assessmentTitle}</p>
+            )}
+            <div className="flex items-start gap-3">
+              <span className="shrink-0 size-7 rounded-full bg-freshket-100 text-freshket-700 text-xs font-bold flex items-center justify-center">{q.number || '–'}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                  <p className="text-sm text-gray-800 leading-snug min-w-0 flex-1">{q.text}</p>
+                  <p className="shrink-0 flex items-center gap-3 text-xs text-gray-600">
+                    <span className="flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: C.good }} />ถูก <b className="text-gray-900">{q.correctRate}%</b></span>
+                    <span className="flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: C.orange }} />ผิด <b className="text-gray-900">{q.wrongRate}%</b></span>
+                    <span className="text-gray-400">({nf.format(q.answered)} คน)</span>
+                  </p>
+                </div>
+                <ChoiceBar q={q} qKey={key} hover={hover} setHover={setHover} />
+              </div>
+            </div>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+function ChoiceBar({ q, qKey, hover, setHover }: { q: QuestionBreakdown; qKey: string; hover: Hover; setHover: (h: Hover) => void }) {
+  // A matching question has no single pick, so its bar is just right / wrong.
+  const segments: Array<{ id: string; letter: string; text: string; correct: boolean | null; count: number; pct: number; color: string }> =
+    q.options.length > 0
+      ? [
+          ...q.options.map((o: OptionStat) => ({ id: o.id, letter: o.letter, text: o.text, correct: o.isCorrect, count: o.count, pct: o.pct, color: o.isCorrect ? C.good : C.orange })),
+          ...(q.noAnswer > 0 ? [{ id: '_none', letter: '—', text: 'ไม่ได้เลือกคำตอบ', correct: null, count: q.noAnswer, pct: Math.round((q.noAnswer / q.answered) * 100), color: NO_ANSWER_COLOR }] : []),
+        ]
+      : [
+          { id: '_right', letter: '✓', text: 'ตอบถูก', correct: true, count: q.correct, pct: q.correctRate, color: C.good },
+          { id: '_wrong', letter: '✗', text: 'ตอบผิด', correct: false, count: q.wrong, pct: q.wrongRate, color: C.orange },
+        ]
+
+  // Where each segment starts, to hang the tooltip over it (clamped so it stays on screen).
+  let acc = 0
+  const starts = segments.map((s) => { const at = acc; acc += (s.count / Math.max(1, q.answered)) * 100; return at })
+  const active = hover?.key === qKey ? segments.findIndex((s) => s.id === hover.id) : -1
+  const tip = active >= 0 ? segments[active] : null
+  const centre = tip ? Math.min(82, Math.max(18, starts[active] + (tip.count / Math.max(1, q.answered)) * 50)) : 0
+  const on = (id: string) => () => setHover({ key: qKey, id })
+  const off = () => setHover(null)
+
+  return (
+    <div className="relative mt-2.5">
+      {tip && (
+        <div role="tooltip" className="absolute bottom-full mb-2 z-10 -translate-x-1/2 w-64 max-w-[80vw] rounded-xl border border-gray-100 bg-white shadow-lg px-3 py-2 pointer-events-none"
+          style={{ left: `${centre}%` }}>
+          <p className="text-xs text-gray-500 flex items-center gap-1.5">
+            <span className="size-2.5 rounded-sm shrink-0" style={{ background: tip.color }} />
+            {q.options.length > 0 && tip.letter !== '—' ? `ตัวเลือก ${tip.letter}` : tip.text}
+            {tip.correct === true && q.options.length > 0 && <b className="text-gray-900">· เฉลย</b>}
+          </p>
+          {q.options.length > 0 && tip.letter !== '—' && <p className="text-sm text-gray-900 leading-snug mt-1">{tip.text}</p>}
+          <p className="text-xs text-gray-500 mt-1"><b className="text-gray-900">{tip.pct}%</b> · {nf.format(tip.count)} คน</p>
+        </div>
+      )}
+
+      <div className="flex gap-0.5 h-7" role="group" aria-label={`ข้อ ${q.number} แยกตามตัวเลือก`}>
+        {segments.filter((sg) => sg.count > 0).map((sg) => {
+          const width = (sg.count / Math.max(1, q.answered)) * 100
+          const dim = hover?.key === qKey && hover.id !== sg.id
+          return (
+            <button key={sg.id} type="button" onMouseEnter={on(sg.id)} onMouseLeave={off} onFocus={on(sg.id)} onBlur={off}
+              aria-label={`ข้อ ${q.number} ${q.options.length > 0 ? `ตัวเลือก ${sg.letter}: ` : ''}${sg.text} — ${sg.pct}% (${sg.count} คน)${sg.correct === true && q.options.length > 0 ? ' เฉลย' : ''}`}
+              className="h-full rounded flex items-center pl-2 text-xs font-bold text-white overflow-hidden whitespace-nowrap transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-gray-900"
+              style={{ width: `${width}%`, background: sg.color, opacity: dim ? 0.45 : 1, color: sg.color === NO_ANSWER_COLOR ? '#0b0b0b' : '#fff' }}>
+              {width >= 14 ? `${sg.letter} ${sg.pct}%` : ''}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* The same split as a row of letters, so a choice too narrow to label (or picked by nobody) is still there */}
+      {q.options.length > 0 && (
+        <ul className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
+          {segments.filter((sg) => sg.id !== '_none').map((sg) => (
+            <li key={sg.id}>
+              <button type="button" onMouseEnter={on(sg.id)} onMouseLeave={off} onFocus={on(sg.id)} onBlur={off}
+                className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:underline">
+                <span className="size-2 rounded-sm" style={{ background: sg.color }} />
+                {sg.letter} <b className="text-gray-900">{sg.pct}%</b>{sg.correct === true && <span aria-hidden="true" className="text-gray-400">✓</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
 
 function Tile({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'good' | 'bad' }) {
   return (
@@ -231,10 +360,11 @@ function Tile({ label, value, hint, tone }: { label: string; value: string; hint
   )
 }
 
-function Card({ title, subtitle, legend, children }: {
+function Card({ title, subtitle, legend, aside, children }: {
   title: string
   subtitle?: string
   legend?: { label: string; color: string }[]
+  aside?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
@@ -244,6 +374,7 @@ function Card({ title, subtitle, legend, children }: {
           <h3 className="text-sm font-bold text-gray-900">{title}</h3>
           {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
         </div>
+        {aside}
         {legend && (
           <ul className="flex items-center gap-4">
             {legend.map((l) => (
