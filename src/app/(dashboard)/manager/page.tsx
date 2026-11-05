@@ -13,7 +13,9 @@ import { Header } from '@/components/layout/Header'
 import { save } from '@/lib/data/collection'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { useAuth } from '@/hooks/useAuth'
-import { useCourses, useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAllShadowAcknowledgments, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList, useBucketResultsFor } from '@/hooks/useFirestore'
+import { useCourses, useTeamTrainingRecords, useAllUsers, useTeams, useShadowRecordsByUser, useAllShadowAcknowledgments, useAssessmentScoresByUser, useRoleplayAssessmentsByUser, useFirestoreList, useBucketResultsFor, useMyBucketResult } from '@/hooks/useFirestore'
+import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
+import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import { OpenableMbtiPill } from '@/components/features/MbtiBadge'
 import { formatPersonName } from '@/lib/users/displayName'
 import { MBTI_DEFINITION } from '@/lib/bucketAssessments'
@@ -560,6 +562,9 @@ function EmployeeSidebar({
   // Each course's cover, shown beside its title in the learning history.
   const { data: allCourses } = useCourses()
   const coverOf = useMemo(() => new Map(allCourses.map((c) => [c.id, c.thumbnailUrl] as const)), [allCourses])
+  // The questionnaire a course is (MBTI, …), if it is one: its history card shows the type, not a score.
+  const questionnaireByCourse = useMemo(() => new Map(allCourses.map((c) => [c.id, courseQuestionnaireId(c)] as const)), [allCourses])
+  const questionnaireOf = (courseId: string) => questionnaireByCourse.get(courseId) ?? null
   // Latest Post + latest Pre (max 2 polygons) for the radar.
   const radarAssessments = useMemo(() => {
     const post = roleplayAssessments.find(a => a.type === 'post')
@@ -806,8 +811,10 @@ function EmployeeSidebar({
                       {rec.attemptCount > 1 && <span>· {rec.attemptCount} ครั้ง</span>}
                     </div>
                   </div>
-                  {/* Pre / Post as numbers only */}
-                  {rec.preTestScore != null || rec.postTestScore != null ? (
+                  {/* A questionnaire (MBTI, …) has no score: its result is the person's type. Otherwise Pre / Post as numbers. */}
+                  {questionnaireOf(rec.courseId) ? (
+                    <QuestionnaireTypeBox uid={user.uid} definitionId={questionnaireOf(rec.courseId)!} ownerName={enName(user)} />
+                  ) : rec.preTestScore != null || rec.postTestScore != null ? (
                     <div className="flex items-stretch gap-2 shrink-0">
                       <ScoreBox label="Pre-Test" value={rec.preTestScore} />
                       <ScoreBox
@@ -1214,6 +1221,19 @@ function CourseCover({ url }: { url?: string }) {
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
       </svg>
     </span>
+  )
+}
+
+// ── A questionnaire's result in the same small box: the person's type (MBTI opens its card) ──
+function QuestionnaireTypeBox({ uid, definitionId, ownerName }: { uid: string; definitionId: string; ownerName?: string }) {
+  const { data, loading } = useMyBucketResult(uid, definitionId)
+  return (
+    <div className="min-w-[4.75rem] rounded-xl border border-gray-100 bg-gray-50 px-3 py-1.5 text-center shrink-0">
+      <p className="text-xs text-gray-400 leading-tight mb-1">{definitionId === 'mbti' ? 'MBTI' : 'ผลประเมิน'}</p>
+      {loading
+        ? <span className="text-xs text-gray-300">…</span>
+        : <QuestionnaireResultCell definitionId={definitionId} code={data?.code} ownerName={ownerName} />}
+    </div>
   )
 }
 

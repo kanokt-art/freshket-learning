@@ -62,6 +62,7 @@ function onOpen() {
     .createMenu('Course Scores Sync')
     .addItem('ตรวจการตั้งค่า', 'checkSetup')
     .addItem('Sync now', 'syncNow')
+    .addItem('ทดสอบแจ้งเตือน Shadow (แถวล่าสุด)', 'testShadowSubmit')
     .addSeparator()
     .addItem('ตั้ง trigger (เที่ยงคืน + เมื่อส่งฟอร์ม)', 'setupTriggers')
     .addItem('ลบ trigger', 'removeTriggers')
@@ -267,6 +268,19 @@ function onFormSubmit(e) {
   if (!isAssessmentTab_(name)) return
   var out = runSync_(tabKey_(name))
   if (out.failed) throw new Error(out.lines.join(' | '))
+}
+
+/**
+ * ทดสอบเหมือนมีคนเพิ่งส่งฟอร์ม Shadow: ส่งแท็บโดยบอกว่าแถวล่าสุดคือแถวที่เพิ่งส่ง
+ * (กด Run ที่ onFormSubmit ใน editor จะไม่เกิดอะไร เพราะไม่มีข้อมูลการส่งฟอร์มส่งมาด้วย)
+ * ระบบแจ้งเตือนจริง แต่แจ้งเฉพาะ visit ที่ยังไม่เคยเข้าระบบ แถวที่ sync ไปแล้วจะขึ้น "แจ้งเตือน 0"
+ */
+function testShadowSubmit() {
+  var sheet = null
+  spreadsheet_().getSheets().forEach(function (s) { if (isShadowTab_(s.getName())) sheet = s })
+  var line = sheet ? syncShadow_(sheet.getLastRow()).line : 'ไม่พบแท็บ "Shadow"'
+  Logger.log(line)
+  try { SpreadsheetApp.getUi().alert(line) } catch (e) { /* รันจาก editor ไม่มี UI */ }
 }
 
 /** ตรวจก่อนใช้จริง: เห็นแท็บอะไร map กับหลักสูตรไหน หัวคอลัมน์ครบไหม และต่อระบบได้ไหม */
