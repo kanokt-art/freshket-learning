@@ -12,8 +12,8 @@ import { leadReviewId } from '@/lib/feedback/leadReviews'
 import { saleTrainers } from '@/lib/server/saleTrainers'
 import { notifyTrainers } from '@/lib/server/trainerNotice'
 import { ROLEPLAY_TOPICS } from '@/types/roleplay'
-import { getTeamLeadIds, type UserProfile } from '@/types/user'
-import { teamLeadsOf } from '@/lib/server/teamLeads'
+import type { UserProfile } from '@/types/user'
+import { announceNewShadowVisit } from '@/lib/server/shadowNotice'
 import {
   postCoursePublishedToSlack,
   postMandatoryPublishedToSlack,
@@ -101,23 +101,6 @@ async function dmOnce(store: Store, key: string, uid: string, dm: Parameters<typ
   }
 }
 
-/**
- * Who looks after a learner: their own manager on file, and their team's lead(s) and manager as team
- * management has them. The learner themself is left out.
- */
-async function supervisorsOf(store: Store, person: Partial<UserProfile> & { uid?: string }, selfUid: string): Promise<string[]> {
-  const ids = new Set<string>()
-  if (person.managerId) ids.add(person.managerId)
-  if (person.teamId) {
-    const team = (await store.get('teams', person.teamId)) as (Doc & { managerId?: string }) | null
-    if (team) {
-      for (const id of getTeamLeadIds(team as never)) ids.add(id)
-      if (typeof team.managerId === 'string' && team.managerId) ids.add(team.managerId)
-    }
-  }
-  ids.delete(selfUid)
-  return Array.from(ids).filter((id) => ID_RE.test(id))
-}
 
 export async function POST(req: NextRequest) {
   let body: Body
@@ -204,50 +187,13 @@ export async function POST(req: NextRequest) {
         // Only the person who made the visit announces it.
         if (!visit || visit.observerUid !== gate.uid) return NextResponse.json({ ok: true, posted: false })
 
-        // Name, position and department come from the sender's own HR record.
-        const sender = gate.person as Partial<UserProfile>
-        const parts = [visit.storeName ? `ร้าน ${visit.storeName}` : null, visit.segment || null].filter(Boolean)
-        const visitPath = `/shadow?visit=${encodeURIComponent(recordId)}`
-
-        // The bell rings for everyone who looks after the sender — their manager on file and their team's
-        // lead(s) and manager — in every department, once per visit. (It used to ring only the managerId
-        // on the profile, from the browser: a team lead never heard, and nobody did when it was empty.)
-        if (await store.claim('slackPosts', `shadow_submitted_bell:${recordId}`, { kind: 'shadow_submitted_bell', refId: recordId, postedAt: new Date() })) {
-          const who = formatPersonName(sender) || 'พนักงาน'
-          const now = new Date()
-          await Promise.all((await supervisorsOf(store, sender, gate.uid)).map((uid) =>
-            store.set(`notifications/${uid}/items`, `shadow_pending_ack_${recordId}`, {
-              type: 'shadow_pending_ack',
-              title: `${who} ส่ง Shadow Visit ใหม่`,
-              body: [...parts, 'รอการประเมิน'].join(' · '),
-              refId: recordId,
-              refPath: visitPath,
-              read: false,
-              createdAt: now,
-              createdByUid: gate.uid,
-            }, { merge: false }),
-          ))
-        }
-
-        // Only sales visits go to the channel.
-        if (!isSalesDepartment(sender.department)) {
-          return NextResponse.json({ ok: true, posted: false })
-        }
-
-        // Once per visit: asking again (a retry, a replay) posts nothing more.
-        const first = await store.claim('slackPosts', `shadow_submitted:${recordId}`, {
-          kind: 'shadow_submitted', refId: recordId, postedAt: new Date(),
-        })
-        if (!first) return NextResponse.json({ ok: true, posted: false })
-
-        posted = await postShadowSubmittedToSlack({
-          observerName: formatPersonName(sender),
-          position: sender.position,
-          department: sender.department,
-          visitSummary: slackText([...parts, 'รอการประเมิน'].join(' · ')),
-          shadowUrl: appUrl(visitPath),
-          // The sender's Team Lead(s) are tagged, as on a course completion.
-          teamLeads: await teamLeadsOf(store, { teamId: sender.teamId, uid: gate.uid }),
+        // The bell for everyone who looks after the sender (their manager on file and their team's lead(s)
+        // and manager), and the Slack group for a sales visit — once per visit, the same as a visit that
+        // arrives through the Google Form (lib/server/shadowNotice.ts). Name, position and department come
+        // from the sender's own HR record.
+        posted = await announceNewShadowVisit(store, {
+          recordId, senderUid: gate.uid, sender: gate.person as Partial<UserProfile>,
+          storeName: visit.storeName, segment: visit.segment,
         })
         break
       }

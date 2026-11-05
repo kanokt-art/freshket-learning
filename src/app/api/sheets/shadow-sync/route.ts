@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 import { getStore } from '@/lib/server/store'
 import { toShadowRecord, type ShadowSheetRow } from '@/lib/shadow/sheetImport'
+import { announceNewShadowVisit } from '@/lib/server/shadowNotice'
+import type { UserProfile } from '@/types/user'
 
 // POST /api/sheets/shadow-sync
 //
@@ -13,14 +15,19 @@ import { toShadowRecord, type ShadowSheetRow } from '@/lib/shadow/sheetImport'
 // updates the same records: the sheet wins, and anything added in the app afterwards
 // (a manager's review, which lives under the same id) is untouched.
 //
-// This does NOT notify anyone or post to Slack: it brings history across, it is not a
-// new visit being reported.
+// A visit new to the system and sent in within the last few days is reported like one logged in the
+// app (bell for the sender's manager and team lead(s), Slack group for sales); older rows are history
+// and stay quiet.
 //
 // Auth: the shared secret SHEETS_SYNC_SECRET in the `x-sync-secret` header (Apps Script
 // cannot present a Firebase ID token).
 export const maxDuration = 60
 
 const MAX_ROWS = 5000
+/** How recent a new row must be to be reported as a new visit rather than brought across as history. */
+const RECENT_MS = 3 * 24 * 60 * 60 * 1000
+/** A cap on announcements in one call, so a large back-fill cannot run the function out of time. */
+const MAX_ANNOUNCE = 30
 
 const same = (a: string, b: string) => {
   const x = Buffer.from(a), y = Buffer.from(b)
@@ -68,11 +75,44 @@ export async function POST(req: NextRequest) {
     const existing = new Set((await store.getMany('shadowRecords', ids)).map((d) => d.id))
     await store.setMany('shadowRecords', Array.from(docs.values()), { merge: true })
 
+    // A visit that is new to the system AND was sent in recently is reported like one logged in the app:
+    // the bell for the sender's manager and team lead(s), and the Slack group for sales. Older rows are
+    // history being brought across (a first full sync, or a row back-filled later) and stay quiet. Each
+    // visit is announced at most once, however often the tab is sent again.
+    const cutoff = Date.now() - RECENT_MS
+    const fresh = ids.filter((id) => {
+      if (existing.has(id)) return false
+      const at = docs.get(id)!.data.createdAt
+      const t = at instanceof Date ? at.getTime() : new Date(String(at)).getTime()
+      return Number.isFinite(t) && t >= cutoff
+    }).slice(0, MAX_ANNOUNCE)
+    let announced = 0
+    if (fresh.length > 0) {
+      const senders = new Map((await store.getMany('users', Array.from(new Set(fresh.map((id) => String(docs.get(id)!.data.observerUid))))))
+        .map((u) => [u.id, u as Partial<UserProfile>]))
+      for (const id of fresh) {
+        const d = docs.get(id)!.data
+        const senderUid = String(d.observerUid)
+        try {
+          await announceNewShadowVisit(store, {
+            recordId: id, senderUid, sender: senders.get(senderUid) ?? {},
+            storeName: typeof d.storeName === 'string' ? d.storeName : undefined,
+            segment: typeof d.segment === 'string' ? d.segment : undefined,
+          })
+          announced++
+        } catch (e) {
+          // Telling people must never fail the sync that saved the visit.
+          console.error('shadow-sync: announce failed', id, e)
+        }
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       rows: (body.rows as unknown[]).length,
       written: ids.length,
       created: ids.filter((id) => !existing.has(id)).length,
+      announced,
       unmatched: Array.from(new Set(errors.filter((e) => e.message.startsWith('ไม่พบพนักงาน')).map((e) => e.message.replace('ไม่พบพนักงานตามอีเมล ', '')))),
       unknownChoices: Array.from(unknownChoices),
       errors: errors.slice(0, 50),

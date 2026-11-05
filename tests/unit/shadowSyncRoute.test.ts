@@ -11,7 +11,7 @@ const writes: string[] = []
 
 const fakeStore = {
   query: async (path: string) => (path === 'users' ? users : []),
-  getMany: async (_p: string, ids: string[]) => shadow.filter((r) => ids.includes(r.id)),
+  getMany: async (p: string, ids: string[]) => (p === 'users' ? users : shadow).filter((r) => ids.includes(r.id)),
   setMany: async (path: string, docs: Array<{ id: string; data: Record<string, unknown> }>, opts: { merge?: boolean } = {}) => {
     writes.push(path)
     for (const d of docs) {
@@ -23,6 +23,11 @@ const fakeStore = {
   },
 }
 vi.mock('@/lib/server/store', () => ({ getStore: () => fakeStore }))
+
+const announced = vi.fn(async (_s: unknown, _v: { recordId: string; senderUid: string }) => true)
+vi.mock('@/lib/server/shadowNotice', () => ({
+  announceNewShadowVisit: (s: unknown, v: { recordId: string; senderUid: string }) => announced(s, v),
+}))
 
 import { POST } from '@/app/api/sheets/shadow-sync/route'
 
@@ -45,6 +50,37 @@ beforeEach(() => {
   users = [{ id: 'csv-1', email: 'Rin@freshket.co', displayName: 'Rin' }]
   shadow = []
   writes.length = 0
+  announced.mockClear()
+})
+
+// A visit sent in through the Google Form used to be saved silently: nobody's bell rang and nothing went
+// to Slack. A new, recent one is now reported like a visit logged in the app; history stays quiet.
+describe('telling people about a visit that came through the Google Form', () => {
+  const recent = () => new Date(Date.now() - 60 * 60 * 1000).toISOString()
+
+  it('reports a new visit sent in recently, under the sender’s person id, once', async () => {
+    const row = visit({ timestamp: recent() })
+    const res = await (await call({ rows: [row] })).json()
+    expect(res.announced).toBe(1)
+    expect(announced).toHaveBeenCalledTimes(1)
+    expect(announced.mock.calls[0][1].senderUid).toBe('csv-1')
+    // sending the tab again (the next form submit, the nightly sync) reports nothing more
+    await call({ rows: [row] })
+    expect(announced).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps old rows quiet: they are history being brought across', async () => {
+    const res = await (await call({ rows: [visit()] })).json()
+    expect(res.announced).toBe(0)
+    expect(announced).not.toHaveBeenCalled()
+  })
+
+  it('still saves the visit when telling people fails', async () => {
+    announced.mockRejectedValueOnce(new Error('slack down'))
+    const res = await (await call({ rows: [visit({ timestamp: recent() })] })).json()
+    expect(res.ok).toBe(true)
+    expect(shadow).toHaveLength(1)
+  })
 })
 
 describe('who may call it', () => {
