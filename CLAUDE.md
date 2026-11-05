@@ -193,3 +193,7 @@ See [design.md](./design.md) for the complete design spec: page templates, anima
 ## Skills Available
 
 See [Skill.md](./Skill.md) for the full list of available skills and when to invoke them.
+
+## Developer handbook
+
+Architecture map, where each feature lives, Slack event matrix, Apps Script syncs, conventions and pitfalls: see [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md). Update it when you change a flow it describes.
