@@ -14,6 +14,36 @@ import type { Question, DragPair, Assessment } from '@/types/assessment'
 
 const DEMO_MODE = getDemoMode()
 
+// The time left, as a card in the top-right corner: big numerals, a bar that drains, and a colour that turns
+// amber under five minutes and red under one. At zero the attempt is submitted on its own.
+function CountdownCard({ msLeft, totalMs }: { msLeft: number; totalMs: number }) {
+  const low = msLeft <= 300_000
+  const critical = msLeft <= 60_000
+  const pct = totalMs > 0 ? Math.max(0, Math.min(100, (msLeft / totalMs) * 100)) : 0
+  const tone = critical
+    ? { ring: 'border-rose-200', chip: 'bg-rose-100 text-rose-600', text: 'text-rose-600', bar: '#f43f5e' }
+    : low
+      ? { ring: 'border-amber-200', chip: 'bg-amber-100 text-amber-700', text: 'text-amber-700', bar: '#f59e0b' }
+      : { ring: 'border-freshket-200', chip: 'bg-freshket-100 text-freshket-700', text: 'text-gray-900', bar: '#00ce7c' }
+  return (
+    <div role="timer" aria-label={`เวลาที่เหลือ ${formatCountdown(msLeft)}`}
+      className={`fixed top-20 right-4 sm:right-6 z-30 w-40 rounded-2xl bg-white border shadow-md p-3 transition-colors duration-300 ${tone.ring} ${critical ? 'animate-pulse' : ''}`}>
+      <div className="flex items-center gap-2">
+        <span className={`size-7 rounded-full flex items-center justify-center shrink-0 ${tone.chip}`}>
+          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </span>
+        <span className="text-xs font-bold text-gray-500">เวลาที่เหลือ</span>
+      </div>
+      <p className={`text-3xl font-extrabold tabular-nums leading-none mt-2 ${tone.text}`}>{formatCountdown(msLeft)}</p>
+      <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden mt-2.5">
+        <div className="h-full rounded-full transition-all duration-1000 ease-linear" style={{ width: `${pct}%`, background: tone.bar }} />
+      </div>
+    </div>
+  )
+}
+
 /** mm:ss, clamped at zero so a late tick never shows a negative clock. */
 function formatCountdown(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
@@ -618,6 +648,10 @@ export default function TakeAssessmentPage() {
   }
 
   const progress = ((currentIndex) / total) * 100
+  // The full time shows on the card from the moment the quiz opens, before the server has answered with its
+  // deadline. A try-out (preview) and the demo are not timed, so they show no clock.
+  const totalMs = (assessment.timeLimitMinutes ?? 0) * 60_000
+  const timeCardMs = !isPreview && !DEMO_MODE && totalMs > 0 ? totalMs : null
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -633,25 +667,6 @@ export default function TakeAssessmentPage() {
           <p className="text-sm font-bold text-gray-800 truncate">{assessment.title}</p>
           <p className="text-xs text-gray-400 mt-0.5">ข้อ {currentIndex + 1} จาก {total}</p>
         </div>
-        {/* Countdown — turns amber under 5 minutes and red under 1, then the
-            attempt auto-submits at zero. */}
-        {msLeft != null && (
-          <div
-            aria-live="polite"
-            className={`shrink-0 flex items-center gap-1.5 text-sm font-bold px-3 py-1.5 rounded-full border tabular-nums ${
-              msLeft <= 60_000
-                ? 'text-rose-600 bg-rose-50 border-rose-200'
-                : msLeft <= 300_000
-                  ? 'text-amber-700 bg-amber-50 border-amber-200'
-                  : 'text-gray-600 bg-gray-50 border-gray-200'
-            }`}
-          >
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            {formatCountdown(msLeft)}
-          </div>
-        )}
         {antiCheatEnabled && (
           <div className="shrink-0 flex items-center gap-1.5 text-xs font-bold text-rose-600 bg-rose-50 px-3 py-1.5 rounded-full border border-rose-100">
             <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
@@ -661,6 +676,11 @@ export default function TakeAssessmentPage() {
           </div>
         )}
       </div>
+
+      {/* Countdown card, top right: the clock is the server's deadline, so a reload does not reset it */}
+      {(msLeft != null || timeCardMs != null) && (
+        <CountdownCard msLeft={msLeft ?? timeCardMs ?? 0} totalMs={totalMs} />
+      )}
 
       {/* Progress bar */}
       <div className="h-1.5 bg-gray-100">
@@ -679,63 +699,68 @@ export default function TakeAssessmentPage() {
               question={current}
               answer={answers[current.id]}
               onAnswer={(v) => setAnswer(current.id, v)}
+              index={currentIndex}
+              total={total}
             />
           )}
+
+          {/* Next (or Submit) sits right under the last choice, on the left, so it is the next thing the thumb
+              or the pointer reaches; on a phone both buttons are full width, Next on top. */}
+          <div className="mt-6 pb-10 flex flex-col sm:flex-row sm:items-center gap-3">
+            {currentIndex < total - 1 ? (
+              <button
+                onClick={() => setCurrentIndex((i) => i + 1)}
+                disabled={!canGoNext}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-freshket-500"
+              >
+                ถัดไป
+                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {submitting ? 'กำลังส่ง...' : 'ส่งคำตอบ'}
+                {submitting ? (
+                  <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                  </svg>
+                ) : (
+                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                )}
+              </button>
+            )}
+            <button
+              onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
+              disabled={currentIndex === 0}
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-3 text-sm font-normal text-gray-600 rounded-xl hover:bg-gray-100 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+              </svg>
+              ย้อนกลับ
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Navigation */}
-      <div className="bg-white border-t border-gray-100 px-6 py-4 flex items-center justify-between">
-        <button
-          onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
-          disabled={currentIndex === 0}
-          className="flex items-center gap-2 px-4 py-2.5 text-sm font-normal text-gray-600 rounded-xl hover:bg-gray-100 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-          </svg>
-          ย้อนกลับ
-        </button>
-
-        <div className="flex gap-1.5">
-          {questions.map((_, i) => (
-            <button key={i} onClick={() => setCurrentIndex(i)}
-              className={`size-2 rounded-full transition-all ${
-                i === currentIndex ? 'bg-freshket-500 w-4' : answers[questions[i].id] ? 'bg-freshket-300' : 'bg-gray-200'
+      {/* Jump between questions: the answered ones are filled */}
+      <div className="bg-white border-t border-gray-100 px-6 py-3 flex items-center justify-center">
+        <div className="flex flex-wrap justify-center gap-1.5" role="group" aria-label="ไปยังข้อ">
+          {questions.map((q, i) => (
+            <button key={q.id} onClick={() => setCurrentIndex(i)} aria-label={`ข้อ ${i + 1}`} aria-current={i === currentIndex}
+              className={`h-2 rounded-full transition-all ${
+                i === currentIndex ? 'bg-freshket-500 w-4' : answers[q.id] ? 'bg-freshket-300 w-2' : 'bg-gray-200 w-2'
               }`}
             />
           ))}
         </div>
-
-        {currentIndex < total - 1 ? (
-          <button
-            onClick={() => setCurrentIndex((i) => i + 1)}
-            disabled={!canGoNext}
-            className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            ถัดไป
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </svg>
-          </button>
-        ) : (
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {submitting ? 'กำลังส่ง...' : 'ส่งคำตอบ'}
-            {submitting ? (
-              <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-              </svg>
-            ) : (
-              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-              </svg>
-            )}
-          </button>
-        )}
       </div>
 
       {/* A failed submit must be loud: the score now lives only on the server, so
@@ -869,17 +894,27 @@ function QuestionView({
   question,
   answer,
   onAnswer,
+  index,
+  total,
 }: {
   question: Question
   answer: string | Record<string, string> | undefined
   onAnswer: (v: string | Record<string, string>) => void
+  index: number
+  total: number
 }) {
   return (
     <div className="animate-float-up space-y-6">
       {/* Question text */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-6">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <span className="inline-flex items-center text-xs font-bold px-3 py-1 rounded-full bg-freshket-100 text-freshket-700 border border-freshket-200">
+            ข้อ {index + 1} / {total}
+          </span>
+          <span className="text-xs font-bold text-gray-400">{question.points} คะแนน</span>
+        </div>
         <p className="text-base font-bold text-gray-900 leading-relaxed">{question.text}</p>
-        <p className="text-xs text-gray-400 mt-2">{question.points} คะแนน</p>
+        {question.description && <p className="text-sm text-gray-500 mt-2 leading-relaxed">{question.description}</p>}
       </div>
 
       {/* Answer area */}
@@ -922,22 +957,27 @@ function MultipleChoiceInput({
   return (
     <div className="space-y-3">
       {choices.map((choice, i) => (
-        <button key={choice.id} type="button" onClick={() => onSelect(choice.id)}
-          className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 text-left transition-all ${
+        <button key={choice.id} type="button" onClick={() => onSelect(choice.id)} aria-pressed={selected === choice.id}
+          className={`group w-full flex items-center gap-3 p-4 rounded-xl border-2 text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-freshket-300 ${
             selected === choice.id
-              ? 'border-freshket-500 bg-freshket-50'
-              : 'border-gray-100 bg-white hover:border-gray-200'
+              ? 'border-freshket-500 bg-freshket-100/70 shadow-sm'
+              : 'border-gray-100 bg-white hover:border-freshket-200 hover:bg-freshket-50 hover:shadow-sm'
           }`}>
-          <div className={`size-8 rounded-full border-2 flex items-center justify-center shrink-0 text-sm font-bold transition-all ${
+          <div className={`size-8 rounded-full border-2 flex items-center justify-center shrink-0 text-sm font-bold transition-all duration-150 ${
             selected === choice.id
               ? 'border-freshket-500 bg-freshket-500 text-white'
-              : 'border-gray-200 text-gray-400'
+              : 'border-gray-200 text-gray-400 group-hover:border-freshket-300 group-hover:bg-freshket-100 group-hover:text-freshket-700'
           }`}>
             {String.fromCharCode(65 + i)}
           </div>
-          <span className={`text-sm font-normal ${selected === choice.id ? 'text-freshket-700' : 'text-gray-700'}`}>
+          <span className={`flex-1 text-sm ${selected === choice.id ? 'font-bold text-freshket-700' : 'font-normal text-gray-700 group-hover:text-gray-900'}`}>
             {choice.text}
           </span>
+          {selected === choice.id && (
+            <svg className="size-5 text-freshket-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          )}
         </button>
       ))}
     </div>
@@ -953,7 +993,7 @@ function OpenEndedInput({
   onChange: (v: string) => void
 }) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-5">
+    <div className="bg-white rounded-2xl border-2 border-gray-100 p-5 transition-all duration-150 hover:border-freshket-200 focus-within:border-freshket-400 focus-within:bg-freshket-50/40">
       <label className="text-xs font-bold text-gray-500 block mb-2">คำตอบของคุณ</label>
       <textarea
         value={value ?? ''}
@@ -1175,6 +1215,8 @@ function ResultScreen({
         {reviewed.length > 0 && (
         <div className="space-y-3">
           <p className="text-xs font-bold text-gray-500">{reviewTitle}</p>
+          {/* A long quiz scrolls inside this box, so the score and the Back button stay on screen */}
+          <div className="max-h-80 overflow-y-auto space-y-3 pr-1" tabIndex={0} aria-label={reviewTitle}>
           {reviewed.map((q) => {
             const i = questions.indexOf(q)
             const ans = answers[q.id]
@@ -1224,6 +1266,7 @@ function ResultScreen({
               </div>
             )
           })}
+          </div>
         </div>
         )}
 

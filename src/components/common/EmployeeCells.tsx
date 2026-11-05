@@ -52,9 +52,9 @@ export function CopyIcon({ text, label = 'Copy', hoverOnly = false }: { text: st
 export function CopyableText({ text, className = '' }: { text?: string | null; className?: string }) {
   if (!text) return <span className="text-gray-300">—</span>
   return (
-    <span className={`inline-flex items-start gap-1 min-w-0 ${className}`}>
+    <span className={`group/copy inline-flex items-start gap-1 min-w-0 ${className}`}>
       <span className="break-words min-w-0">{text}</span>
-      <CopyIcon text={text} />
+      <CopyIcon text={text} hoverOnly />
     </span>
   )
 }
