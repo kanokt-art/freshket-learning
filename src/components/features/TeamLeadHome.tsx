@@ -13,8 +13,8 @@ import { useTeamActivity } from '@/hooks/useTeamActivity'
 import { TeamActivityCard } from '@/components/features/TeamActivityCard'
 
 // Team-lead / manager home — 3-column dashboard:
-//   center → what the team has done (take-aways, scores, Shadow Visits), then the news feed
-//   right  → the courses I still have to take
+//   center → news feed, all courses
+//   right  → the courses I still have to take, then what the team has done (take-aways, scores, Shadow Visits)
 export function TeamLeadHome() {
   const router = useRouter()
   const { user } = useAuth()
@@ -120,8 +120,6 @@ export function TeamLeadHome() {
 
         {/* ── CENTER: News feed (one card, posts split by dividers) ─── */}
         <div className="lg:col-span-9 flex flex-col gap-5">
-          <TeamActivityCard items={activity.items} people={members} loading={activity.loading} />
-
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             {/* Header */}
             <div className="px-5 py-3.5 flex items-center justify-between border-b border-gray-100">
@@ -170,6 +168,7 @@ export function TeamLeadHome() {
         {/* ── RIGHT: continue learning ─────────────────────────── */}
         <div className="lg:col-span-3 space-y-5">
           <ContinueLearningCard items={pending} onOpen={(id) => router.push(`/courses/${id}`)} greeting={firstName} />
+          <TeamActivityCard items={activity.items} people={members} loading={activity.loading} />
         </div>
       </div>
     </div>
