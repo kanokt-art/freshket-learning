@@ -8,7 +8,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useAllUsers } from '@/hooks/useFirestore'
-import { getDemoMode, toggleDemoMode } from '@/lib/demo/demoMode'
+import { getDemoMode, toggleDemoMode, DEMO_MODE_ALLOWED } from '@/lib/demo/demoMode'
 import { ROLE_LABELS, ROLE_HIERARCHY, type UserRole, type UserProfile } from '@/types/user'
 import { MOCK_USERS } from '@/lib/utils/mockData'
 
@@ -267,8 +267,8 @@ export function DemoRoleSwitcher() {
 
         {!collapsed && (<>
         <div className="w-px h-5 bg-gray-200 mx-1" />
-        {/* ── Demo mode toggle ─────────────────────────────────────────────── */}
-        <button
+        {/* ── Demo mode toggle: development only (a deployed build never runs demo mode) ───── */}
+        {DEMO_MODE_ALLOWED && (<button
           type="button"
           onClick={toggleDemoMode}
           title={isDemoMode ? 'ปิด Demo Mode → ใช้ Firebase จริง' : 'เปิด Demo Mode → ใช้ Mock Data'}
@@ -286,7 +286,7 @@ export function DemoRoleSwitcher() {
           <span className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors duration-200 ${isDemoMode ? 'bg-amber-400' : 'bg-gray-200'}`}>
             <span className={`inline-block size-3 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${isDemoMode ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
           </span>
-        </button>
+        </button>)}
 
         {/* ── Demo mode: role cards ─────────────────────────────────────────── */}
         {isDemoMode && (

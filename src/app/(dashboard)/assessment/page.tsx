@@ -17,13 +17,14 @@ import {
 } from '@/types/assessment'
 import { save, remove, patch } from '@/lib/data/collection'
 import { alertError, confirmAction } from '@/lib/ui/alert'
+import { getDemoMode } from '@/lib/demo/demoMode'
 import { parseFormJson, type ImportResult } from '@/lib/assessment/importFormJson'
 import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
 import { duplicateKeys, hasDuplicateAnswers, normalizeText } from '@/lib/assessment/authoring'
 import { REVEAL_MODES, type RevealMode } from '@/lib/assessment/reveal'
 import { clampMinutes, loadQuizDefaults, saveQuizDefaults, startingSettings } from '@/lib/assessment/quizDefaults'
 
-const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
+const DEMO_MODE = getDemoMode()
 
 function fmtDate(d: Date | string | undefined) {
   if (!d) return '—'

@@ -28,7 +28,9 @@ Roles (RBAC, ascending): `sale` < `team_lead` < `manager` < `super_admin`. HR ra
 `super_admin` is set by hand (`scripts/set-super-admin.mjs`). A **department head** (JG11+, `lib/users/departmentHead.ts`)
 also oversees their whole department even though their role is `manager`.
 
-Demo mode (`NEXT_PUBLIC_DEMO_MODE=true`) bypasses the backend and serves mock data; every feature that talks to
+Demo mode (`NEXT_PUBLIC_DEMO_MODE=true`) bypasses the backend and serves mock data **and skips sign-in, so it only runs
+under `next dev`**: any deployed build (Production or Preview) ignores the variable and the browser toggle
+(`src/lib/demo/demoMode.ts`, `DEMO_MODE_ALLOWED`). Every feature that talks to
 the server needs a demo branch (look for `getDemoMode()`).
 
 ---

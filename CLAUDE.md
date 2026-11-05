@@ -6,7 +6,7 @@ Internal web platform for Freshket sale team training tracking and enablement.
 
 - **Auth**: Google OAuth via Firebase Auth, `@freshket.co` domain only. Block all other domains immediately. Firebase is used for sign-in only.
 - **RBAC**: `sale` < `team_lead` < `manager` < `super_admin`
-- **Demo mode**: `NEXT_PUBLIC_DEMO_MODE=true` bypasses the backend entirely, serves mock data
+- **Demo mode**: `NEXT_PUBLIC_DEMO_MODE=true` bypasses the backend entirely, serves mock data. **Development only**: it can never run in a deployed (production) build, whatever the env var or the browser says
 - **Security**: Never commit `.env`, `.env.local`, or any file with API keys / service account JSON
 
 ## Data Layer (branch `phase4-supabase`: Firestore → Supabase Postgres)
