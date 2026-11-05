@@ -74,11 +74,13 @@ const readSeen = (uid: string, tab: HighlightTab): string | null => {
  * than the last time the person opened it carries a red dot until they open it. A news post opens in a
  * card; everything else goes to its page.
  */
-export function HomeHighlightsRow({ uid, candidates, pins, bodies }: {
+export function HomeHighlightsRow({ uid, candidates, pins, hidden, bodies }: {
   uid: string
   /** Everything this person may see, newest first. */
   candidates: readonly HighlightItem[]
   pins: readonly HighlightPin[]
+  /** Keys a super_admin hid from the row. */
+  hidden: readonly string[]
   /** A news post's text, by item key, for the card it opens in. */
   bodies?: ReadonlyMap<string, string>
 }) {
@@ -92,12 +94,12 @@ export function HomeHighlightsRow({ uid, candidates, pins, bodies }: {
     for (const t of TABS) {
       const inTab = candidates.filter((c) => tabOf(c) === t.id)
       const pinsInTab = pins.filter((p) => (p.key.startsWith('course:') ? 'course' : 'activity') === t.id)
-      out[t.id] = pickHighlights(inTab, pinsInTab)
+      out[t.id] = pickHighlights(inTab, pinsInTab, hidden)
     }
     return out
-  }, [candidates, pins])
+  }, [candidates, pins, hidden])
 
-  if (candidates.length === 0) return null
+  if (byTab.course.items.length === 0 && byTab.activity.items.length === 0) return null
 
   const open = (t: HighlightTab) => {
     setTab(t)
@@ -163,10 +165,13 @@ export function HomeHighlightsRow({ uid, candidates, pins, bodies }: {
  * nothing spotlighted shows its newest six by itself. A draft can be spotlighted ahead of time and shows
  * to learners once it is published.
  */
-export function HomeHighlightsAdmin({ all, pinnedKeys, onToggle }: {
+export function HomeHighlightsAdmin({ all, pinnedKeys, hiddenKeys, onToggle, onHide }: {
   all: readonly HighlightItem[]
   pinnedKeys: ReadonlySet<string>
+  hiddenKeys: ReadonlySet<string>
   onToggle: (key: string, on: boolean) => Promise<void>
+  /** Keep an item off the learners' Latest row (the course or tool itself is untouched). */
+  onHide: (key: string, on: boolean) => Promise<void>
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [shown, setShown] = useState<Record<HighlightTab, number>>({ course: 10, activity: 10 })
@@ -176,6 +181,7 @@ export function HomeHighlightsAdmin({ all, pinnedKeys, onToggle }: {
       {TABS.map((t) => {
         const rows = all.filter((i) => tabOf(i) === t.id)
         const spotlighted = rows.filter((i) => pinnedKeys.has(i.key)).length
+        const hiddenCount = rows.filter((i) => hiddenKeys.has(i.key)).length
         return (
           <section key={t.id}>
             <div className="flex items-end justify-between gap-3 mb-3">
@@ -184,7 +190,8 @@ export function HomeHighlightsAdmin({ all, pinnedKeys, onToggle }: {
                 <p className="text-xs text-gray-500 mt-0.5">
                   {spotlighted > 0
                     ? `Spotlight ${spotlighted} รายการ: แท็บนี้บนหน้าแรกของพนักงานแสดงเฉพาะรายการที่ Spotlight`
-                    : 'ยังไม่มี Spotlight: แท็บนี้แสดงรายการใหม่ล่าสุด 6 รายการให้อัตโนมัติ'}
+                    : 'ยังไม่มี Spotlight: แท็บนี้แสดงรายการใหม่ล่าสุด 6 รายการให้อัตโนมัติ (ไม่นับรายการที่ Hide)'}
+                  {hiddenCount > 0 && ` · Hide ${hiddenCount} รายการ`}
                 </p>
               </div>
               <span className="text-xs text-gray-400 shrink-0">{rows.length} รายการ</span>
@@ -199,16 +206,21 @@ export function HomeHighlightsAdmin({ all, pinnedKeys, onToggle }: {
                       <th className="text-left font-bold px-5 py-3">Item</th>
                       <th className="text-left font-bold px-3 py-3 hidden md:table-cell">Type</th>
                       <th className="text-left font-bold px-3 py-3 hidden sm:table-cell">Status</th>
-                      <th className="text-center font-bold px-5 py-3 w-40">Spotlight</th>
+                      <th className="text-center font-bold px-3 py-3 w-40">Spotlight</th>
+                      <th className="text-center font-bold px-5 py-3 w-32">Hide</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {rows.slice(0, shown[t.id]).map((item) => {
                       const on = pinnedKeys.has(item.key)
+                      const hidden = hiddenKeys.has(item.key)
                       return (
-                        <tr key={item.key}>
+                        <tr key={item.key} className={hidden ? 'bg-gray-50/70' : undefined}>
                           <td className="px-5 py-3">
-                            <p className="font-bold text-gray-900 line-clamp-1">{item.title}</p>
+                            <p className={`font-bold line-clamp-1 ${hidden ? 'text-gray-400' : 'text-gray-900'}`}>
+                              {item.title}
+                              {hidden && <span className="ml-2 align-middle text-xs font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">Hidden</span>}
+                            </p>
                             <p className="text-xs text-gray-400 mt-0.5">
                               {shortDate(item.at)}
                               <span className="md:hidden"> · {KIND_LABEL[item.kind]}</span>
@@ -223,7 +235,7 @@ export function HomeHighlightsAdmin({ all, pinnedKeys, onToggle }: {
                               ? <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-freshket-100 text-freshket-700">Published</span>
                               : <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500" title="แสดงบนหน้าแรกเมื่อเผยแพร่แล้ว">Draft</span>}
                           </td>
-                          <td className="px-5 py-3 text-center">
+                          <td className="px-3 py-3 text-center">
                             <button
                               type="button"
                               disabled={busy === item.key}
@@ -233,6 +245,19 @@ export function HomeHighlightsAdmin({ all, pinnedKeys, onToggle }: {
                               }`}
                             >
                               {on ? 'Spotlighted' : 'Spotlight'}
+                            </button>
+                          </td>
+                          <td className="px-5 py-3 text-center">
+                            <button
+                              type="button"
+                              disabled={busy === item.key}
+                              onClick={async () => { setBusy(item.key); try { await onHide(item.key, !hidden) } finally { setBusy(null) } }}
+                              title={hidden ? 'กลับมาแสดงใน Latest' : 'ไม่แสดงใน Latest ของพนักงาน (ตัวหลักสูตร/เครื่องมือยังใช้งานได้ปกติ)'}
+                              className={`inline-flex items-center justify-center min-w-[6rem] px-4 py-2 rounded-full text-sm font-bold transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed ${
+                                hidden ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-white text-gray-800 border border-gray-200 hover:bg-gray-50'
+                              }`}
+                            >
+                              {hidden ? 'Hidden' : 'Hide'}
                             </button>
                           </td>
                         </tr>

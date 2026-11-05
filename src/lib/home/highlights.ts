@@ -18,7 +18,11 @@ export interface HighlightItem {
 }
 
 export interface HighlightPin { key: string; pinnedAt: string }
-export interface HighlightsDoc { pins?: HighlightPin[] }
+export interface HighlightsDoc {
+  pins?: HighlightPin[]
+  /** Keys a super_admin hid from the row. The item itself (the course, the tool) is untouched. */
+  hidden?: string[]
+}
 
 export const HIGHLIGHTS_DOC = 'homeHighlights'
 /** How many of the newest items show while nothing is pinned. */
@@ -68,9 +72,15 @@ export function highlightCandidates(src: {
 
 /**
  * What the row shows: the pinned items the person may see, newest pin first. When none of the pins is
- * visible to them (or nothing is pinned), the newest few instead.
+ * visible to them (or nothing is pinned), the newest few instead. A hidden item never shows, either way.
  */
-export function pickHighlights(candidates: readonly HighlightItem[], pins: readonly HighlightPin[] | undefined): { items: HighlightItem[]; pinned: boolean } {
+export function pickHighlights(
+  all: readonly HighlightItem[],
+  pins: readonly HighlightPin[] | undefined,
+  hidden: readonly string[] = [],
+): { items: HighlightItem[]; pinned: boolean } {
+  const hide = new Set(hidden)
+  const candidates = all.filter((c) => !hide.has(c.key))
   const byKey = new Map(candidates.map((c) => [c.key, c]))
   const pinned = [...(pins ?? [])]
     .sort((a, b) => b.pinnedAt.localeCompare(a.pinnedAt))
@@ -93,6 +103,23 @@ export function hasUnseen(items: readonly HighlightItem[], seenAt: string | null
   if (newest === 0) return false
   const seen = seenAt ? new Date(seenAt).getTime() : 0
   return !Number.isFinite(seen) || newest > seen
+}
+
+/**
+ * Spotlight and Hide after one switch is pressed. The two exclude each other: spotlighting an item un-hides
+ * it, and hiding it takes away its spotlight.
+ */
+export function setHighlightState(
+  doc: { pins: readonly HighlightPin[]; hidden: readonly string[] },
+  key: string,
+  change: { spotlight: boolean } | { hide: boolean },
+  now = new Date(),
+): { pins: HighlightPin[]; hidden: string[] } {
+  const hidden = doc.hidden.filter((k) => k !== key)
+  if ('spotlight' in change) {
+    return { pins: togglePin(doc.pins, key, change.spotlight, now), hidden }
+  }
+  return { pins: togglePin(doc.pins, key, false, now), hidden: change.hide ? [...hidden, key] : hidden }
 }
 
 /** The pins after turning one on or off. */

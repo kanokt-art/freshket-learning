@@ -32,7 +32,13 @@ export default function SpotlightAdminPage() {
               Demo Mode: Spotlight เก็บไว้ในเบราว์เซอร์นี้เท่านั้น และหลักสูตร/เครื่องมือที่สร้างใหม่ในโหมดนี้ไม่ได้บันทึกจริง จึงไม่ขึ้นในรายการ
             </p>
           )}
-          <HomeHighlightsAdmin all={highlights.all} pinnedKeys={highlights.pinnedKeys} onToggle={highlights.setPinned} />
+          <HomeHighlightsAdmin
+            all={highlights.all}
+            pinnedKeys={highlights.pinnedKeys}
+            hiddenKeys={highlights.hiddenKeys}
+            onToggle={highlights.setPinned}
+            onHide={highlights.setHidden}
+          />
         </div>
       </div>
     </div>

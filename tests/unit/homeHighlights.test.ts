@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { highlightCandidates, pickHighlights, togglePin, hasUnseen, tabOf, AUTO_COUNT } from '@/lib/home/highlights'
+import { highlightCandidates, pickHighlights, togglePin, hasUnseen, tabOf, setHighlightState, AUTO_COUNT } from '@/lib/home/highlights'
 
 const day = (n: number) => new Date(Date.UTC(2026, 10, n))
 
@@ -62,6 +62,26 @@ describe('hasUnseen (the red dot on a tab)', () => {
   it('splits courses from everything else', () => {
     expect(candidates.filter((c) => tabOf(c) === 'course').map((c) => c.key)).toEqual(['course:c1'])
     expect(candidates.filter((c) => tabOf(c) === 'activity')).toHaveLength(3)
+  })
+})
+
+describe('Hide', () => {
+  it('keeps a hidden item off the row, whether the row shows the newest or the spotlighted', () => {
+    expect(pickHighlights(candidates, [], ['tool:t1']).items.map((i) => i.key)).not.toContain('tool:t1')
+    const pins = [{ key: 'tool:t1', pinnedAt: '2026-11-01T00:00:00Z' }, { key: 'course:c1', pinnedAt: '2026-11-02T00:00:00Z' }]
+    expect(pickHighlights(candidates, pins, ['tool:t1']).items.map((i) => i.key)).toEqual(['course:c1'])
+  })
+
+  it('Spotlight and Hide exclude each other', () => {
+    const hidden = setHighlightState({ pins: [{ key: 'tool:t1', pinnedAt: 'x' }], hidden: [] }, 'tool:t1', { hide: true })
+    expect(hidden).toEqual({ pins: [], hidden: ['tool:t1'] })
+    const back = setHighlightState(hidden, 'tool:t1', { spotlight: true }, new Date('2026-11-05T00:00:00Z'))
+    expect(back.hidden).toEqual([])
+    expect(back.pins.map((p) => p.key)).toEqual(['tool:t1'])
+  })
+
+  it('un-hiding leaves the item neither hidden nor spotlighted', () => {
+    expect(setHighlightState({ pins: [], hidden: ['tool:t1'] }, 'tool:t1', { hide: false })).toEqual({ pins: [], hidden: [] })
   })
 })
 
