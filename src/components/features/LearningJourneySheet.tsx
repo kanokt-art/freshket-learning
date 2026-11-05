@@ -12,7 +12,22 @@ import { latestBySlot, slotOfReview, type LeadReview, type LeadSlot } from '@/li
 // Manager's. A step that is done has a green tick, the next one waiting an orange dot, the rest a hollow
 // ring. A feedback opens in full in the reading sheet; at the foot, they can rate the course themselves.
 
-type StepState = 'done' | 'next' | 'later'
+export type StepState = 'done' | 'next' | 'later'
+
+/** Done, then the first one not done is "next", the rest "later". */
+export function stepStates(done: readonly boolean[]): StepState[] {
+  const firstOpen = done.findIndex((d) => !d)
+  return done.map((d, i) => (d ? 'done' : i === firstOpen ? 'next' : 'later'))
+}
+
+/** The steps, one below the other on a dotted line. */
+export function JourneyList({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <ol className={`relative space-y-4 before:absolute before:left-3 before:top-8 before:bottom-8 before:border-l-2 before:border-dashed before:border-gray-200 ${className}`}>
+      {children}
+    </ol>
+  )
+}
 
 const dmy = (d?: Date | string) => {
   if (!d) return ''
@@ -32,7 +47,7 @@ function Marker({ state }: { state: StepState }) {
   return <span className="block size-6 rounded-full bg-white border-2 border-gray-300 ring-4 ring-white" />
 }
 
-function Step({ state, title, meta, children, action }: {
+export function JourneyStep({ state, title, meta, children, action }: {
   state: StepState
   title: string
   meta: string
@@ -76,16 +91,14 @@ export function LearningJourneySheet({
   const latest = latestBySlot(reviews)
   const wrote = !!takeaway.trim()
 
-  // Done, then the first one not done is "next", the rest "later".
-  const doneFlags = [hasTakeAwayStep ? wrote : true, !!latest.team_lead, !!latest.manager]
-  const firstOpen = doneFlags.findIndex((d) => !d)
-  const stateOf = (i: number): StepState => (doneFlags[i] ? 'done' : i === firstOpen ? 'next' : 'later')
+  const states = stepStates([hasTakeAwayStep ? wrote : true, !!latest.team_lead, !!latest.manager])
+  const stateOf = (i: number) => states[i]
 
   const reviewStep = (slot: LeadSlot, i: number) => {
     const r = latest[slot]
     const stars = r ? toStars(r.score) : null
     return (
-      <Step
+      <JourneyStep
         key={slot}
         state={stateOf(i)}
         title={SLOT_TITLE[slot]}
@@ -100,7 +113,7 @@ export function LearningJourneySheet({
             {r.comment?.trim() && <p className={`text-sm text-gray-700 leading-relaxed whitespace-pre-wrap ${inline ? '' : 'line-clamp-3'}`}>{r.comment.trim()}</p>}
           </div>
         )}
-      </Step>
+      </JourneyStep>
     )
   }
 
@@ -131,8 +144,8 @@ export function LearningJourneySheet({
         <p className="text-sm text-gray-500 pr-8">ความคืบหน้าของคุณ</p>
         <h2 className="text-2xl font-extrabold text-gray-900 leading-snug mt-0.5 pr-8">{courseTitle}</h2>
 
-        <ol className="relative mt-6 space-y-4 before:absolute before:left-3 before:top-8 before:bottom-8 before:border-l-2 before:border-dashed before:border-gray-200">
-          <Step
+        <JourneyList className="mt-6">
+          <JourneyStep
             state={stateOf(0)}
             title="Key Take Away ของคุณ"
             meta={!hasTakeAwayStep ? 'หลักสูตรนี้ไม่มี Key Take Away' : wrote ? 'เขียนแล้ว' : 'ยังไม่ได้เขียน'}
@@ -143,10 +156,10 @@ export function LearningJourneySheet({
             ) : undefined}
           >
             {wrote && <p className={`text-sm text-gray-700 leading-relaxed whitespace-pre-wrap ${inline ? '' : 'line-clamp-3'}`}>{takeaway.trim()}</p>}
-          </Step>
+          </JourneyStep>
           {reviewStep('team_lead', 1)}
           {reviewStep('manager', 2)}
-        </ol>
+        </JourneyList>
       </div>
     </FeedbackSheetFrame>
   )

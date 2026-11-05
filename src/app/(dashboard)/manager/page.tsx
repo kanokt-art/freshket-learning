@@ -20,8 +20,8 @@ import { MBTI_DEFINITION } from '@/lib/bucketAssessments'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { RoleplayRadar } from '@/components/features/RoleplayRadar'
 import { RoleplayAssessCard } from '@/components/features/RoleplayAssessCard'
-import { FeedbackReadSheet } from '@/components/features/FeedbackReadSheet'
-import { hasContent, leadReviewId, slotOfReview, type LeadReview } from '@/lib/feedback/leadReviews'
+import { JourneyList, JourneyStep, stepStates } from '@/components/features/LearningJourneySheet'
+import { hasContent, latestBySlot, leadReviewId, slotOfReview, type LeadReview, type LeadSlot } from '@/lib/feedback/leadReviews'
 import { canAssessRoleplay as canAssessRoleplayOf } from '@/lib/roleplay/assessForm'
 import { announce } from '@/lib/notifications/announce'
 import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
@@ -618,10 +618,6 @@ function EmployeeSidebar({
   // Local optimistic overlay for feedback the lead just saved — merged on top of
   // the live docs so the UI reflects a save instantly, before the listener
   // round-trips. Once the listener catches up the overlay is simply redundant.
-  // A reflection can run to several paragraphs. Showing it inline stretched the
-  // course card until the score and the lead's feedback fell off screen, so the
-  // card carries an excerpt and the full text opens here.
-  const [readingReflection, setReadingReflection] = useState<{ courseTitle: string; text: string } | null>(null)
   // The viewer's own feedback just saved, keyed by course, laid over the live docs until they catch up.
   const [feedbackOverlay, setFeedbackOverlay] = useState<Record<string, LeadReview>>({})
   // Every reviewer's feedback on each course (a team lead's and a manager's are kept apart).
@@ -811,7 +807,7 @@ function EmployeeSidebar({
                     </div>
                   </div>
                   {/* Pre / Post as numbers only */}
-                  {(rec.preTestScore != null || rec.postTestScore != null) && (
+                  {rec.preTestScore != null || rec.postTestScore != null ? (
                     <div className="flex items-stretch gap-2 shrink-0">
                       <ScoreBox label="Pre-Test" value={rec.preTestScore} />
                       <ScoreBox
@@ -820,50 +816,27 @@ function EmployeeSidebar({
                         change={rec.preTestScore != null && rec.postTestScore != null ? rec.postTestScore - rec.preTestScore : undefined}
                       />
                     </div>
+                  ) : rec.score != null && (
+                    <div className="flex items-stretch gap-2 shrink-0">
+                      <ScoreBox label="คะแนน" value={rec.score} />
+                    </div>
                   )}
                   <span className={`shrink-0 text-xs font-bold px-2.5 py-0.5 rounded-full ${STATUS_PASTEL[rec.status]}`}>
                     {STATUS_LABELS[rec.status]}
                   </span>
                 </div>
 
-                {rec.score != null && (
-                  <div className="mb-2.5">
-                    <div className="flex items-center justify-between text-xs mb-1">
-                      <span className="text-gray-400">คะแนน</span>
-                      <span className={`font-bold ${scoreTextColor(rec.score)}`}>{rec.score} / 100</span>
-                    </div>
-                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${rec.score}%`, background: scoreBarColor(rec.score) }} />
-                    </div>
-                    {rec.passScore != null && <p className="text-xs text-gray-400 mt-1">เกณฑ์ผ่าน: {rec.passScore}</p>}
-                  </div>
-                )}
-
-                {/* Reflect knowledge (จากพนักงาน) + หัวหน้าคอมเมนต์ข้างล่าง */}
-                <div className="mt-1 rounded-xl border border-gray-100 overflow-hidden">
-                  <div className="bg-freshket-50 border-b border-freshket-100 px-3 py-2.5">
-                    <p className="text-xs font-bold text-freshket-700 mb-1">Reflect Knowledge (จากพนักงาน)</p>
-                    {takeaways[rec.courseId] ? (
-                      <ReflectionPreview
-                        text={takeaways[rec.courseId]}
-                        onOpen={() => setReadingReflection({ courseTitle: rec.courseTitle, text: takeaways[rec.courseId] })}
-                      />
-                    ) : (
-                      <p className="text-xs text-gray-400 italic">ยังไม่มี reflection จากพนักงาน</p>
-                    )}
-                  </div>
-                  <div className="px-3 py-2.5">
-                    <FeedbackBlock
-                      courseId={rec.courseId}
-                      courseTitle={rec.courseTitle}
-                      memberName={enName(user)}
-                      reviews={feedback[rec.courseId] ?? []}
-                      viewerUid={viewer?.uid}
-                      canEdit={canFeedback}
-                      onSave={saveFeedback}
-                    />
-                  </div>
-                </div>
+                {/* The member's path on this course: their Key Take Away, then the team lead's and the
+                    manager's feedback — in full, in the card. */}
+                <FeedbackJourney
+                  courseId={rec.courseId}
+                  takeaway={takeaways[rec.courseId] ?? ''}
+                  reviews={feedback[rec.courseId] ?? []}
+                  viewerUid={viewer?.uid}
+                  viewerSlot={slotOfReview({ leadRole: viewer?.role })}
+                  canEdit={canFeedback}
+                  onSave={saveFeedback}
+                />
               </div>
             ))}
           </div>
@@ -1047,93 +1020,6 @@ function EmployeeSidebar({
         )}
 
       </div>
-
-      {readingReflection && (
-        <ReflectionModal
-          courseTitle={readingReflection.courseTitle}
-          text={readingReflection.text}
-          onClose={() => setReadingReflection(null)}
-        />
-      )}
-    </div>
-  )
-}
-
-// ── Reflect Knowledge — excerpt on the card, full text in a modal ──────────────
-
-/** Roughly two lines' worth; past this the card starts pushing content off screen. */
-const REFLECTION_PREVIEW_CHARS = 120
-
-function ReflectionPreview({ text, onOpen }: { text: string; onOpen: () => void }) {
-  const flat = text.trim().replace(/\s+/g, ' ')
-  const isLong = flat.length > REFLECTION_PREVIEW_CHARS
-
-  // A short reflection is fully visible already — giving it a "read more" that
-  // reveals nothing new would just be a dead control.
-  if (!isLong) {
-    return <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{text}</p>
-  }
-
-  return (
-    <div>
-      <p className="text-xs text-gray-700 leading-relaxed">
-        {flat.slice(0, REFLECTION_PREVIEW_CHARS).trimEnd()}…
-      </p>
-      <button
-        type="button"
-        onClick={onOpen}
-        className="mt-1.5 inline-flex items-center gap-1 text-xs font-bold text-freshket-700 hover:text-freshket-600 transition-colors"
-      >
-        อ่านทั้งหมด
-        <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
-      </button>
-    </div>
-  )
-}
-
-function ReflectionModal({ courseTitle, text, onClose }: {
-  courseTitle: string
-  text: string
-  onClose: () => void
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  return (
-    <div
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
-        style={{ animation: 'panelIn 0.2s cubic-bezier(0.16,1,0.3,1)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100 shrink-0">
-          <div className="min-w-0">
-            <p className="text-xs font-bold text-freshket-700">Reflect Knowledge</p>
-            <p className="text-sm font-bold text-gray-900 truncate mt-0.5">{courseTitle}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="size-8 shrink-0 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-all"
-          >
-            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        {/* whitespace-pre-wrap so the learner's own paragraph breaks survive. */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
-          <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{text}</p>
-        </div>
-      </div>
     </div>
   )
 }
@@ -1207,25 +1093,36 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
   )
 }
 
-// ── Feedback (lead/manager comment + score on a member's course) ────────────────
-function FeedbackBlock({ courseId, courseTitle, memberName, reviews, viewerUid, canEdit, onSave }: {
+// ── The member's path on a course: Key Take Away → Team Lead feedback → Manager feedback ─────────
+// Shown in full in the history card (no card over the page). The reviewer gives or edits their own
+// feedback in their own step.
+const dmy = (d?: Date | string) => {
+  if (!d) return ''
+  const t = d instanceof Date ? d : new Date(d)
+  return isNaN(t.getTime()) ? '' : t.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
+}
+
+const SLOT_LABEL: Record<LeadSlot, string> = { team_lead: 'Team Lead', manager: 'Manager' }
+
+function FeedbackJourney({ courseId, takeaway, reviews, viewerUid, viewerSlot, canEdit, onSave }: {
   courseId: string
-  courseTitle?: string
-  memberName?: string
+  takeaway: string
   /** Every reviewer's feedback on this course (a team lead's and a manager's). */
   reviews: LeadReview[]
   viewerUid?: string
+  /** The step the viewer's own feedback goes in. */
+  viewerSlot: LeadSlot
   canEdit: boolean
   onSave: (courseId: string, comment: string, score: number | null) => Promise<void>
 }) {
   const mine = reviews.find((r) => r.leadUid === viewerUid)
-  const shown = reviews.filter(hasContent).sort((a, b) => (slotOfReview(a) === slotOfReview(b) ? 0 : slotOfReview(a) === 'team_lead' ? -1 : 1))
+  const latest = latestBySlot(reviews)
+  const wrote = !!takeaway.trim()
+  const states = stepStates([wrote, !!latest.team_lead, !!latest.manager])
   const [editing, setEditing] = useState(false)
   const [comment, setComment] = useState(mine?.comment ?? '')
   const [stars, setStars] = useState<number | null>(toStars(mine?.score))
   const [saving, setSaving] = useState(false)
-  // A feedback opened in the same sheet the learner reads it in.
-  const [reading, setReading] = useState<LeadReview | null>(null)
 
   useEffect(() => {
     setComment(mine?.comment ?? '')
@@ -1242,66 +1139,65 @@ function FeedbackBlock({ courseId, courseTitle, memberName, reviews, viewerUid, 
     }
   }
 
-  if (editing) {
+  const reviewStep = (slot: LeadSlot, i: number) => {
+    // The viewer's own feedback, if it is in this step; otherwise the newest one there.
+    const own = mine && hasContent(mine) && slotOfReview(mine) === slot ? mine : undefined
+    const r = own ?? latest[slot]
+    const stars = r ? toStars(r.score) : null
+    const mineHere = canEdit && slot === viewerSlot
     return (
-      <div className="space-y-2">
-        <textarea
-          rows={2}
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          placeholder="คอมเมนต์ถึงพนักงาน..."
-          className="w-full px-2.5 py-2 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          <StarsInput value={stars} onChange={setStars} disabled={saving} />
-          <div className="ml-auto flex gap-2">
-            <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">ยกเลิก</button>
-            <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs font-bold rounded-lg bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-60">
-              {saving ? 'บันทึก...' : 'บันทึก'}
-            </button>
+      <JourneyStep
+        key={slot}
+        state={states[i]}
+        title={`Feedback จาก ${SLOT_LABEL[slot]}`}
+        meta={r ? [r.leadName, dmy(r.updatedAt)].filter(Boolean).join(' · ') : `รอความเห็นจาก ${SLOT_LABEL[slot]}`}
+        action={mineHere && !editing ? (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="px-4 py-2 rounded-full bg-freshket-600 text-white text-sm font-bold hover:bg-freshket-700 transition-all duration-150"
+          >
+            {own ? 'แก้ไขความเห็นของคุณ' : '+ ให้ดาว / คอมเมนต์'}
+          </button>
+        ) : undefined}
+      >
+        {mineHere && editing ? (
+          <div className="space-y-2">
+            <textarea
+              rows={3}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="คอมเมนต์ถึงพนักงาน..."
+              className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <StarsInput value={stars} onChange={setStars} disabled={saving} />
+              <div className="ml-auto flex gap-2">
+                <button onClick={() => setEditing(false)} className="px-3 py-1.5 text-xs font-bold rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50">ยกเลิก</button>
+                <button onClick={submit} disabled={saving} className="px-3 py-1.5 text-xs font-bold rounded-xl bg-freshket-600 text-white hover:bg-freshket-700 disabled:opacity-60 disabled:cursor-not-allowed">
+                  {saving ? 'บันทึก...' : 'บันทึก'}
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        ) : r && (
+          <div className="space-y-1.5">
+            {stars !== null && <StarsDisplay value={stars} />}
+            {r.comment?.trim() && <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{r.comment.trim()}</p>}
+          </div>
+        )}
+      </JourneyStep>
     )
   }
 
   return (
-    <div className="space-y-2">
-      {reading && (
-        <FeedbackReadSheet
-          title={slotOfReview(reading) === 'manager' ? 'Feedback จาก Manager' : 'Feedback จาก Team Lead'}
-          person={memberName ? { name: memberName } : undefined}
-          courseTitle={courseTitle}
-          leadName={reading.leadName}
-          rating={toStars(reading.score)}
-          comment={reading.comment}
-          onClose={() => setReading(null)}
-        />
-      )}
-      {shown.map((r) => (
-        <div key={r.leadUid ?? r.id} className="rounded-xl bg-blue-50 border border-blue-100 p-3">
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <p className="text-xs font-bold text-blue-700">
-              {slotOfReview(r) === 'manager' ? 'Manager' : 'Team Lead'}{r.leadName ? ` · ${r.leadName}` : ''}
-            </p>
-            {toStars(r.score) != null && <StarsDisplay value={toStars(r.score) as number} />}
-          </div>
-          {r.comment && <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed line-clamp-3">{r.comment}</p>}
-          <div className="flex items-center gap-3 mt-1.5">
-            <button onClick={() => setReading(r)} className="text-xs font-bold text-blue-600 hover:text-blue-700">อ่านแบบเต็ม</button>
-            {canEdit && r.leadUid === viewerUid && (
-              <button onClick={() => setEditing(true)} className="text-xs font-bold text-blue-600 hover:text-blue-700">แก้ไข</button>
-            )}
-          </div>
-        </div>
-      ))}
-      {canEdit && !(mine && hasContent(mine)) && (
-        <button onClick={() => setEditing(true)} className="text-xs font-bold text-freshket-600 hover:text-freshket-700">
-          + ให้ดาว / คอมเมนต์
-        </button>
-      )}
-      {!canEdit && shown.length === 0 && <p className="text-xs text-gray-300 italic">ยังไม่มีความเห็นจากหัวหน้า</p>}
-    </div>
+    <JourneyList className="mt-3">
+      <JourneyStep state={states[0]} title="Key Take Away" meta={wrote ? 'จากพนักงาน' : 'พนักงานยังไม่ได้เขียน'}>
+        {wrote && <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{takeaway.trim()}</p>}
+      </JourneyStep>
+      {reviewStep('team_lead', 1)}
+      {reviewStep('manager', 2)}
+    </JourneyList>
   )
 }
 
