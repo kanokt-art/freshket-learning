@@ -13,6 +13,8 @@ import { useMentorName } from '@/hooks/useMentorName'
 import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
 import { UserQuestionnaireResult } from '@/components/features/QuestionnaireResultCell'
 import { MemberCourseDrawer } from '@/components/features/MemberCourseDrawer'
+import { CourseCover } from '@/components/features/CourseCover'
+import { ShadowVisitDrawer } from '@/components/features/ShadowVisitDrawer'
 import { formatPersonName } from '@/lib/users/displayName'
 import { ShadowPushButton } from '@/components/features/ShadowPushButton'
 import { HomeHighlightsRow } from '@/components/features/HomeHighlights'
@@ -920,6 +922,7 @@ function UserSidePanel({
   const { data: allCourses } = useCourses()
   // A questionnaire course (MBTI, …) has no score: its result is the person's type.
   const questionnaireByCourse = useMemo(() => new Map(allCourses.map((c) => [c.id, courseQuestionnaireId(c)] as const)), [allCourses])
+  const coverByCourse = useMemo(() => new Map(allCourses.map((c) => [c.id, c.thumbnailUrl] as const)), [allCourses])
   const { data: shadowRecords } = useShadowRecordsByUser(user.uid)
   const { data: roleplayAssessments } = useRoleplayAssessmentsByUser(user.uid)
 
@@ -1094,17 +1097,20 @@ function UserSidePanel({
               <div className="space-y-2">
                 {/* Table header */}
                 <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-gray-50 rounded-xl text-xs font-bold text-gray-500">
-                  <div className="col-span-5">หลักสูตร</div>
+                  <div className="col-span-4">หลักสูตร</div>
                   <div className="col-span-2 text-center">สถานะ</div>
+                  <div className="col-span-1 text-center">Pre</div>
+                  <div className="col-span-1 text-center">Post</div>
                   <div className="col-span-2 text-center">คะแนน</div>
-                  <div className="col-span-3 text-right">วันที่อบรม</div>
+                  <div className="col-span-2 text-right">วันที่อบรมจบ</div>
                 </div>
                 {userRecords.map(rec => {
+                  // The day the course was finished; not finished yet reads as a dash.
                   const dateStr = rec.completedAt
                     ? new Date(rec.completedAt as unknown as string).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
-                    : rec.startedAt
-                    ? new Date(rec.startedAt as unknown as string).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
                     : '—'
+                  const change = rec.preTestScore != null && rec.postTestScore != null ? rec.postTestScore - rec.preTestScore : null
+                  const tone = (v: number) => (v >= 80 ? 'text-freshket-600' : v >= 60 ? 'text-amber-600' : 'text-rose-600')
                   const scoreColor = rec.score != null
                     ? rec.score >= 80 ? 'text-freshket-600' : rec.score >= 60 ? 'text-amber-600' : 'text-rose-600'
                     : 'text-gray-400'
@@ -1114,15 +1120,27 @@ function UserSidePanel({
                         type="button"
                         onClick={() => setOpenCourse({ id: rec.courseId, title: rec.courseTitle })}
                         title="อ่าน Key Take Away และ Feedback"
-                        className="col-span-5 min-w-0 text-left group/course"
+                        className="col-span-4 min-w-0 text-left group/course flex items-center gap-3"
                       >
-                        <p className="text-xs font-bold text-gray-800 truncate leading-snug group-hover/course:text-freshket-700 group-hover/course:underline">{rec.courseTitle}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">ครั้งที่ {rec.attemptCount}</p>
+                        <CourseCover url={coverByCourse.get(rec.courseId)} className="size-11" />
+                        <span className="min-w-0">
+                          <span className="block text-xs font-bold text-gray-800 line-clamp-2 leading-snug group-hover/course:text-freshket-700 group-hover/course:underline">{rec.courseTitle}</span>
+                          <span className="block text-xs text-gray-400 mt-0.5">ครั้งที่ {rec.attemptCount}</span>
+                        </span>
                       </button>
                       <div className="col-span-2 flex justify-center">
                         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${STATUS_BADGE[rec.status]}`}>
                           {STATUS_LABELS[rec.status]}
                         </span>
+                      </div>
+                      <div className="col-span-1 text-center">
+                        <span className={`text-sm font-black tabular-nums ${rec.preTestScore != null ? tone(rec.preTestScore) : 'text-gray-300'}`}>{rec.preTestScore ?? '—'}</span>
+                      </div>
+                      <div className="col-span-1 text-center">
+                        <span className={`text-sm font-black tabular-nums ${rec.postTestScore != null ? tone(rec.postTestScore) : 'text-gray-300'}`}>{rec.postTestScore ?? '—'}</span>
+                        {change !== null && (
+                          <span className={`text-xs font-bold tabular-nums block leading-none mt-0.5 ${change > 0 ? 'text-freshket-600' : change < 0 ? 'text-rose-600' : 'text-gray-400'}`}>{change > 0 ? `+${change}` : change}</span>
+                        )}
                       </div>
                       <div className="col-span-2 text-center">
                         {questionnaireByCourse.get(rec.courseId) ? (
@@ -1138,7 +1156,7 @@ function UserSidePanel({
                           </>
                         )}
                       </div>
-                      <div className="col-span-3 text-right">
+                      <div className="col-span-2 text-right">
                         <span className="text-xs text-gray-500 whitespace-nowrap">{dateStr}</span>
                       </div>
                     </div>
@@ -1160,7 +1178,7 @@ function UserSidePanel({
         )}
 
         {/* Tab: Shadow Visit */}
-        {tab === 'shadow' && !selectedShadow && (
+        {tab === 'shadow' && (
           <div className="p-6 space-y-2.5">
             {shadowRecords.length === 0 ? (
               <EmptyState label="ยังไม่มีบันทึก Shadow Visit" />
@@ -1172,10 +1190,8 @@ function UserSidePanel({
           </div>
         )}
 
-        {/* Shadow Detail — push navigation within the card */}
-        {tab === 'shadow' && selectedShadow && (
-          <ShadowDetailPanel record={selectedShadow} onBack={() => setSelectedShadow(null)} />
-        )}
+        {/* A visit opens in a drawer on the right, over the list */}
+        {selectedShadow && <ShadowVisitDrawer record={selectedShadow} onClose={() => setSelectedShadow(null)} />}
 
         {/* Tab: Role Play */}
         {tab === 'roleplay' && (
@@ -1259,96 +1275,6 @@ function ShadowCard({ record, onClick }: { record: ShadowRecord; onClick?: () =>
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
           </svg>
         </div>
-      </div>
-    </div>
-  )
-}
-
-// ── ShadowDetailPanel ─────────────────────────────────────────────────────────
-
-const EVAL_DETAIL_FIELDS: { key: keyof ShadowRecord; label: string; color: string }[] = [
-  { key: 'opening',            label: 'Opening / Hook',       color: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
-  { key: 'interestPoint',      label: 'Interest Point',       color: 'bg-blue-100 text-blue-700 border border-blue-200' },
-  { key: 'customerPain',       label: 'Customer Pain',        color: 'bg-rose-100 text-rose-700 border border-rose-200' },
-  { key: 'diagnosticApproach', label: 'Diagnostic Approach',  color: 'bg-purple-100 text-purple-700 border border-purple-200' },
-  { key: 'closingNextStep',    label: 'Closing / Next Step',  color: 'bg-amber-100 text-amber-700 border border-amber-200' },
-  { key: 'bestPractice',       label: 'Best Practice',        color: 'bg-indigo-100 text-indigo-700 border border-indigo-200' },
-  { key: 'beyondClassroom',    label: 'Beyond Classroom',     color: 'bg-teal-100 text-teal-700 border border-teal-200' },
-]
-
-function ShadowDetailPanel({ record, onBack }: { record: ShadowRecord; onBack: () => void }) {
-  const mentorName = useMentorName()
-  const dateStr = record.createdAt
-    ? new Date(record.createdAt as unknown as string).toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })
-    : '—'
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Detail header */}
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-gray-100 bg-gray-50/60 shrink-0">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-xs font-bold text-gray-500 hover:text-freshket-600 transition-colors"
-        >
-          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-          </svg>
-          Shadow Visit
-        </button>
-        <span className="text-gray-300">/</span>
-        <p className="text-xs font-bold text-gray-700 flex-1 truncate">{record.storeName}</p>
-        <span className="text-xs text-gray-400 shrink-0">{dateStr}</span>
-        <ShadowPushButton record={record} />
-      </div>
-
-      {/* Scrollable detail content */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-
-        {/* Meta row */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className={`text-xs font-bold px-3 py-1 rounded-full ${SEGMENT_STYLE[record.segment] ?? 'bg-gray-100 text-gray-600'}`}>{record.segment}</span>
-          <span className={`text-xs font-bold px-3 py-1 rounded-full ${PERSONA_STYLE[record.persona] ?? 'bg-gray-100 text-gray-600'}`}>{record.persona}</span>
-          <span className="text-xs text-gray-500 ml-1">
-            Mentor: <span className="font-bold text-gray-700">{mentorName(record)}</span>
-            {record.mentorPosition && <span className="text-gray-400"> · {record.mentorPosition}</span>}
-          </span>
-          {record.ratingScore != null && (
-            <div className="flex items-center gap-1 ml-auto">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <svg key={i} className={`size-3.5 ${i < record.ratingScore! ? 'text-amber-400' : 'text-gray-200'}`} viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" />
-                </svg>
-              ))}
-              <span className="text-xs font-bold text-amber-600 ml-1">{record.ratingScore}/5</span>
-            </div>
-          )}
-        </div>
-
-        {/* Evaluator feedback (if any) */}
-        {record.evaluationFeedback && (
-          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
-            <p className="text-xs font-bold text-blue-600 mb-1.5">Evaluator Feedback</p>
-            <p className="text-sm text-gray-700 leading-relaxed">{record.evaluationFeedback}</p>
-          </div>
-        )}
-
-        {/* 7 evaluation fields */}
-        {EVAL_DETAIL_FIELDS.map(f => {
-          const val = record[f.key] as string | undefined
-          if (!val) return null
-          return (
-            <div key={f.key} className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
-              <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100">
-                <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full ${f.color}`}>{f.label}</span>
-              </div>
-              <div className="px-4 py-3 space-y-1">
-                {val.split('\n').map((line, i) => (
-                  <p key={i} className="text-sm text-gray-700 leading-relaxed">{line || ' '}</p>
-                ))}
-              </div>
-            </div>
-          )
-        })}
       </div>
     </div>
   )

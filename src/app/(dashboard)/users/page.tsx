@@ -29,6 +29,7 @@ import { patch } from '@/lib/data/collection'
 import { parseSlackMemberId } from '@/lib/slack/memberId'
 import { alertError, alertSuccess, confirmAction } from '@/lib/ui/alert'
 import { ShadowPushButton } from '@/components/features/ShadowPushButton'
+import { ShadowVisitDrawer } from '@/components/features/ShadowVisitDrawer'
 import { useMentorName } from '@/hooks/useMentorName'
 import { ImportAssessmentModal } from '@/components/features/ImportAssessmentModal'
 import { OrgBoard, isRosterRole, PHASE1_DEPARTMENTS } from '@/components/features/OrgBoard'
@@ -1152,86 +1153,6 @@ function ShadowListCard({ record, onClick }: { record: ShadowRecord; onClick: ()
   )
 }
 
-// ── Shadow detail panel (push navigation inside panel) ────────────────────────
-function UserShadowDetailPanel({ record, onBack }: { record: ShadowRecord; onBack: () => void }) {
-  const mentorName = useMentorName()
-  const dateStr = record.createdAt
-    ? new Date(record.createdAt as unknown as string).toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })
-    : '—'
-  return (
-    <div className="flex flex-col h-full">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-gray-100 bg-gray-50/60 shrink-0">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-xs font-bold text-gray-500 hover:text-freshket-600 transition-colors"
-        >
-          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-          </svg>
-          Shadow Visit
-        </button>
-        <span className="text-gray-300">/</span>
-        <p className="text-xs font-bold text-gray-700 flex-1 truncate">{record.storeName}</p>
-        <ShadowPushButton record={record} />
-      </div>
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {/* Badges */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className={`text-xs font-bold px-3 py-1 rounded-full ${SEGMENT_STYLE[record.segment] ?? 'bg-gray-100 text-gray-600'}`}>{record.segment}</span>
-          <span className={`text-xs font-bold px-3 py-1 rounded-full ${PERSONA_STYLE[record.persona] ?? 'bg-gray-100 text-gray-600'}`}>{record.persona}</span>
-        </div>
-        {/* Meta row */}
-        <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
-          <span className="flex items-center gap-1.5">
-            <svg className="size-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0" /></svg>
-            <span className="font-bold text-gray-700">{mentorName(record)}</span>
-            {record.mentorPosition && <span className="text-gray-400">· {record.mentorPosition}</span>}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <svg className="size-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>
-            {dateStr}
-          </span>
-          {record.ratingScore != null && (
-            <span className="flex items-center gap-0.5 ml-auto">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <svg key={i} className={`size-3.5 ${i < record.ratingScore! ? 'text-amber-400' : 'text-gray-200'}`} viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" />
-                </svg>
-              ))}
-              <span className="text-xs font-bold text-amber-600 ml-1">{record.ratingScore}/5</span>
-            </span>
-          )}
-        </div>
-        {/* Feedback */}
-        {record.evaluationFeedback && (
-          <div className="bg-freshket-50 border border-freshket-200 rounded-2xl p-4">
-            <p className="text-xs font-bold text-freshket-600 mb-1.5">Evaluator Feedback</p>
-            <p className="text-sm text-gray-700 leading-relaxed">{record.evaluationFeedback}</p>
-          </div>
-        )}
-        {/* 7 eval fields */}
-        {SHADOW_EVAL_FIELDS.map(f => {
-          const val = record[f.key] as string | undefined
-          if (!val) return null
-          return (
-            <div key={f.key} className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
-              <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100">
-                <p className="text-xs font-bold text-gray-500">{f.label}</p>
-              </div>
-              <div className="px-4 py-3 space-y-1">
-                {val.split('\n').map((line, i) => (
-                  <p key={i} className="text-sm text-gray-700 leading-relaxed">{line || ' '}</p>
-                ))}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
 // ── Right Panel ────────────────────────────────────────────────────────────────
 function UserPanel({
   userId,
@@ -1545,13 +1466,13 @@ function UserPanel({
               <p className="font-bold text-gray-700 mb-1">ไม่พบข้อมูล Shadow Visit</p>
               <p className="text-xs text-gray-400">ยังไม่มีบันทึก Shadow Visit สำหรับพนักงานนี้</p>
             </div>
-          ) : selectedShadow ? (
-            <UserShadowDetailPanel record={selectedShadow} onBack={() => setSelectedShadow(null)} />
           ) : (
             <div className="p-4 space-y-2.5">
               {shadowRecords.map((rec: ShadowRecord) => (
                 <ShadowListCard key={rec.id} record={rec} onClick={() => setSelectedShadow(rec)} />
               ))}
+              {/* A visit opens in a drawer on the right, over the list */}
+              {selectedShadow && <ShadowVisitDrawer record={selectedShadow} onClose={() => setSelectedShadow(null)} />}
             </div>
           )
         )}
