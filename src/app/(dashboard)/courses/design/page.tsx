@@ -16,6 +16,12 @@ import type { CoursePackage } from '@/types/coursePackage'
 
 const DEMO_MODE = getDemoMode()
 
+function fmtDate(d: Date | string | undefined) {
+  if (!d) return '—'
+  const dt = d instanceof Date ? d : new Date(d)
+  return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' })
+}
+
 // Course Design: gather existing courses into one package, in the order they should be taken, and let learners work
 // through it. This is where a super_admin makes, edits, publishes and deletes them; learners meet them on My Course
 // and at /courses/design/<id>.
@@ -112,53 +118,74 @@ export default function CourseDesignPage() {
             <p className="text-sm">ยังไม่มี Course Design กดสร้างเพื่อเริ่ม</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {packages.map((p) => {
-              const inside = p.courseIds.map((id) => byId.get(id)).filter((c): c is Course => !!c)
-              return (
-                <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col gap-3 hover:shadow-md transition-shadow duration-150">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="text-sm font-bold text-gray-900 leading-snug">{p.title}</h3>
-                      {p.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{p.description}</p>}
-                    </div>
-                    <span className={`shrink-0 text-xs font-bold px-2.5 py-1 rounded-full border ${p.isPublished ? 'bg-freshket-100 text-freshket-700 border-freshket-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-                      {p.isPublished ? 'เผยแพร่แล้ว' : 'ร่าง'}
-                    </span>
-                  </div>
-
-                  {/* The courses, in order */}
-                  <ol className="space-y-1.5">
-                    {inside.slice(0, 4).map((c, i) => (
-                      <li key={c.id} className="flex items-center gap-2 text-xs text-gray-600 min-w-0">
-                        <span className="size-5 rounded-full bg-freshket-100 text-freshket-700 font-bold flex items-center justify-center shrink-0">{i + 1}</span>
-                        <span className="truncate">{c.title}</span>
-                      </li>
-                    ))}
-                    {inside.length > 4 && <li className="text-xs text-gray-400 pl-7">และอีก {inside.length - 4} หลักสูตร</li>}
-                    {inside.length === 0 && <li className="text-xs text-gray-400">ยังไม่มีหลักสูตร</li>}
-                  </ol>
-
-                  <div className="flex items-center gap-2 text-xs text-gray-400">
-                    <span>{p.courseIds.length} หลักสูตร</span>
-                    {p.sequential && <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-bold">เรียนตามลำดับ</span>}
-                  </div>
-
-                  <div className="flex items-center gap-2 pt-1 mt-auto border-t border-gray-50">
-                    <button onClick={() => setEditing(p)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-all">แก้ไข</button>
-                    <button onClick={() => router.push(`/courses/design/${p.id}`)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-freshket-700 hover:bg-freshket-50 transition-all">ดูแบบผู้เรียน</button>
-                    <span className="flex-1" />
-                    <button onClick={() => void togglePublish(p)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-500 hover:bg-gray-50 transition-all">
-                      {p.isPublished ? 'ซ่อน' : 'เผยแพร่'}
-                    </button>
-                    <button onClick={() => void handleDelete(p)} aria-label="ลบ" title="ลบ"
-                      className="size-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-rose-50 hover:text-rose-500 transition-colors">
-                      <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    <th className="text-left text-xs font-bold text-gray-500 px-4 py-3">Course Design</th>
+                    <th className="text-left text-xs font-bold text-gray-500 px-3 py-3">Courses (in order)</th>
+                    <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Sequential</th>
+                    <th className="text-center text-xs font-bold text-gray-500 px-3 py-3">Status</th>
+                    <th className="text-left text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Last Updated</th>
+                    <th className="px-3 py-3" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {packages.map((p) => {
+                    const inside = p.courseIds.map((id) => byId.get(id)).filter((c): c is Course => !!c)
+                    return (
+                      <tr key={p.id} className="hover:bg-gray-50/60 transition-colors align-top">
+                        <td className="px-4 py-3 max-w-xs">
+                          <button type="button" onClick={() => setEditing(p)} className="text-left group">
+                            <p className="text-sm font-bold text-gray-900 group-hover:text-freshket-600 transition-colors">{p.title}</p>
+                            {p.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{p.description}</p>}
+                          </button>
+                        </td>
+                        <td className="px-3 py-3">
+                          {inside.length === 0 ? (
+                            <span className="text-xs text-gray-300">—</span>
+                          ) : (
+                            <ol className="space-y-1">
+                              {inside.slice(0, 4).map((c, i) => (
+                                <li key={c.id} className="flex items-center gap-2 text-xs text-gray-600 min-w-0">
+                                  <span className="size-5 rounded-full bg-freshket-100 text-freshket-700 font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                                  <span className="truncate max-w-[16rem]">{c.title}</span>
+                                </li>
+                              ))}
+                              {inside.length > 4 && <li className="text-xs text-gray-400 pl-7">และอีก {inside.length - 4} หลักสูตร</li>}
+                            </ol>
+                          )}
+                          <p className="text-xs text-gray-400 mt-1.5">{p.courseIds.length} หลักสูตร</p>
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          {p.sequential
+                            ? <span className="inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">เรียนตามลำดับ</span>
+                            : <span className="text-xs text-gray-300">—</span>}
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full border ${p.isPublished ? 'bg-freshket-100 text-freshket-700 border-freshket-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+                            {p.isPublished ? 'เผยแพร่แล้ว' : 'ร่าง'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">{fmtDate(p.updatedAt)}</td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => setEditing(p)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-all">แก้ไข</button>
+                            <button onClick={() => router.push(`/courses/design/${p.id}`)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-freshket-700 hover:bg-freshket-50 transition-all whitespace-nowrap">ดูแบบผู้เรียน</button>
+                            <button onClick={() => void togglePublish(p)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-500 hover:bg-gray-50 transition-all">{p.isPublished ? 'ซ่อน' : 'เผยแพร่'}</button>
+                            <button onClick={() => void handleDelete(p)} aria-label="ลบ" title="ลบ"
+                              className="size-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-rose-50 hover:text-rose-500 transition-colors">
+                              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

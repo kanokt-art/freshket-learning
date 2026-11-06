@@ -129,6 +129,37 @@ export function CoursePackageEditor({ initial, courses, saving, onSave, onClose 
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* Every other course, to add */}
+              <section className="bg-white rounded-2xl border border-gray-100 p-5">
+                <h3 className="text-sm font-bold text-gray-900 mb-3">เพิ่มหลักสูตร</h3>
+                <div className="relative mb-3">
+                  <svg className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+                  <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาหลักสูตร..."
+                    className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300" />
+                </div>
+                {available.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-10">{courses.length === chosen.length ? 'เพิ่มครบทุกหลักสูตรแล้ว' : 'ไม่พบหลักสูตร'}</p>
+                ) : (
+                  <ul className="space-y-2 max-h-[28rem] overflow-y-auto pr-1">
+                    {available.map((c) => (
+                      <li key={c.id}>
+                        <button type="button" onClick={() => set('courseIds', addCourse(chosen, c.id))}
+                          className="w-full flex items-center gap-3 rounded-xl border border-gray-100 p-2.5 text-left hover:border-freshket-200 hover:bg-freshket-50 transition-all duration-150 group">
+                          <Cover course={c} className="size-10" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-bold text-gray-900 truncate">{c.title}</span>
+                            <span className="block text-xs text-gray-400 truncate">{CATEGORY_LABELS[c.category] ?? c.category}{c.isPublished === false ? ' · ยังไม่เผยแพร่' : ''}</span>
+                          </span>
+                          <span className="size-7 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center shrink-0 group-hover:bg-freshket-500 group-hover:text-white transition-colors" aria-hidden="true">
+                            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
               {/* The package: its courses, in order */}
               <section className="bg-white rounded-2xl border border-gray-100 p-5">
                 <div className="flex items-center justify-between mb-3">
@@ -181,37 +212,6 @@ export function CoursePackageEditor({ initial, courses, saving, onSave, onClose 
                       )
                     })}
                   </ol>
-                )}
-              </section>
-
-              {/* Every other course, to add */}
-              <section className="bg-white rounded-2xl border border-gray-100 p-5">
-                <h3 className="text-sm font-bold text-gray-900 mb-3">เพิ่มหลักสูตร</h3>
-                <div className="relative mb-3">
-                  <svg className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
-                  <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาหลักสูตร..."
-                    className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300" />
-                </div>
-                {available.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-10">{courses.length === chosen.length ? 'เพิ่มครบทุกหลักสูตรแล้ว' : 'ไม่พบหลักสูตร'}</p>
-                ) : (
-                  <ul className="space-y-2 max-h-[28rem] overflow-y-auto pr-1">
-                    {available.map((c) => (
-                      <li key={c.id}>
-                        <button type="button" onClick={() => set('courseIds', addCourse(chosen, c.id))}
-                          className="w-full flex items-center gap-3 rounded-xl border border-gray-100 p-2.5 text-left hover:border-freshket-200 hover:bg-freshket-50 transition-all duration-150 group">
-                          <Cover course={c} className="size-10" />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-bold text-gray-900 truncate">{c.title}</span>
-                            <span className="block text-xs text-gray-400 truncate">{CATEGORY_LABELS[c.category] ?? c.category}{c.isPublished === false ? ' · ยังไม่เผยแพร่' : ''}</span>
-                          </span>
-                          <span className="size-7 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center shrink-0 group-hover:bg-freshket-500 group-hover:text-white transition-colors" aria-hidden="true">
-                            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
                 )}
               </section>
             </div>
