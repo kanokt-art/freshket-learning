@@ -12,8 +12,6 @@ import { useTeamActivity } from '@/hooks/useTeamActivity'
 import { TeamActivityCard } from '@/components/features/TeamActivityCard'
 import { HomeHighlightsRow } from '@/components/features/HomeHighlights'
 import { useHomeHighlights } from '@/hooks/useHomeHighlights'
-import { UserTable, UserSidePanel } from '@/components/features/MemberDirectory'
-import type { UserProfile } from '@/types/user'
 
 // Team-lead / manager home — 3-column dashboard:
 //   center → Latest, team course progress, the team's member table
@@ -91,7 +89,6 @@ export function TeamLeadHome() {
   const publishedCourses = useMemo(() => coursesForTeam(courses, user, members), [courses, user, members])
   const highlights = useHomeHighlights(user)
   const announcementBodies = useMemo(() => new Map(announcements.map((a) => [`announcement:${a.id}`, a.body])), [announcements])
-  const [selectedMember, setSelectedMember] = useState<UserProfile | null>(null)
 
   const memberUids = useMemo(() => members.map((m) => m.uid), [members])
   const courseTitles = useMemo(() => new Map(courses.map((c) => [c.id, c.title])), [courses])
@@ -139,9 +136,6 @@ export function TeamLeadHome() {
           <HomeHighlightsRow uid={user?.uid ?? ''} candidates={highlights.visible} pins={highlights.pins} hidden={highlights.hidden} bodies={announcementBodies} />
 
           <TeamCourseProgressCard courses={publishedCourses} progress={teamProgress} onOpen={(id) => router.push(`/courses/${id}?view=report`)} />
-
-          {/* The people I look after, shortest tenure first; every column sorts */}
-          <UserTable users={members} restrict={false} onSelect={setSelectedMember} selectedUid={selectedMember?.uid} />
         </div>
 
         {/* ── RIGHT: continue learning ─────────────────────────── */}
@@ -150,20 +144,11 @@ export function TeamLeadHome() {
           <TeamActivityCard items={activity.items} people={members} loading={activity.loading} />
         </div>
       </div>
-
-      {selectedMember && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-          onClick={() => setSelectedMember(null)}
-        >
-          <UserSidePanel user={selectedMember} onClose={() => setSelectedMember(null)} />
-        </div>
-      )}
     </div>
   )
 }
 
-// ── Team progress per course: a row of course cards to scroll sideways ─────────
+// ── Team progress per course: a grid of course cards, four to a row ─────────
 // Each card says how many of the team the course is for have finished it; a tap opens the course's
 // report, where the lead sees who is where.
 function TeamCourseProgressCard({ courses, progress, onOpen }: {
@@ -183,13 +168,14 @@ function TeamCourseProgressCard({ courses, progress, onOpen }: {
       {courses.length === 0 ? (
         <p className="text-xs text-gray-400 py-6 text-center">ยังไม่มีหลักสูตรที่เผยแพร่</p>
       ) : (
-        <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory px-5 pb-2 scroll-px-5">
+        // Four cards to a row; more than four wrap onto the next row
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 px-5">
           {courses.map((c) => {
             const p = progress.get(c.id) ?? { done: 0, total: 0 }
             const pct = p.total ? Math.round((p.done / p.total) * 100) : 0
             return (
               <button key={c.id} type="button" onClick={() => onOpen(c.id)}
-                className="snap-start shrink-0 w-56 rounded-2xl border border-gray-100 overflow-hidden text-left hover:border-gray-200 hover:shadow-sm transition-all duration-150">
+                className="min-w-0 rounded-2xl border border-gray-100 overflow-hidden text-left hover:border-gray-200 hover:shadow-sm transition-all duration-150">
                 <div className="h-28 bg-gradient-to-br from-freshket-200 to-emerald-100 flex items-center justify-center">
                   {c.thumbnailUrl
                     // eslint-disable-next-line @next/next/no-img-element
