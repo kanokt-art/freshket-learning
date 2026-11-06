@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  CATEGORY_LABELS, LEVEL_LABELS, LEVEL_COLORS,
+  CATEGORY_LABELS,
   type Course, type CourseCategory,
 } from '@/types/course'
 import { LearnerPackages } from '@/components/features/LearnerPackages'
@@ -335,11 +335,6 @@ export function LearnerCourseGridCard({ course, record, onClick, onDismiss, libr
         {isImg && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={course.thumbnailUrl} alt="" className="w-full h-full object-cover" />
-        )}
-        {course.level && (
-          <span className={`absolute top-2.5 left-2.5 text-xs font-bold px-2 py-0.5 rounded-full ${LEVEL_COLORS[course.level]}`}>
-            {LEVEL_LABELS[course.level]}
-          </span>
         )}
         {library?.tag && (
           <span className="absolute bottom-2.5 left-2.5 text-xs font-bold px-2 py-0.5 rounded-full bg-white/90 text-gray-600 border border-gray-200">

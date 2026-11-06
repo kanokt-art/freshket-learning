@@ -23,7 +23,6 @@ import { useCourses, useAssessments, useMyTrainingRecords, useAllUsers, useAllTr
 import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import {
   CATEGORY_LABELS,
-  LEVEL_LABELS,
   LESSON_TYPE_LABELS,
   type Course,
   type CourseCategory,
@@ -3315,28 +3314,9 @@ function CourseFormModal({ assessments, allUsers, onDone, userId, editCourse }: 
                       />
                     </div>
 
-                    <div>
-                      <label className="text-xs font-bold text-gray-600 block mb-1.5">ระดับความยาก (Level)</label>
-                      <select value={form.level} onChange={(e) => set('level', e.target.value as CourseLevel)}
-                        className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 bg-white">
-                        {(Object.keys(LEVEL_LABELS) as CourseLevel[]).map((lv) => (
-                          <option key={lv} value={lv}>{LEVEL_LABELS[lv]}</option>
-                        ))}
-                      </select>
-                      <p className="text-xs text-gray-400 mt-1">แสดงในตาราง My Course ของผู้เรียน</p>
-                    </div>
-
                     <div className="col-span-2">
                       <label className="text-xs font-bold text-gray-600 block mb-1.5">ผู้ดูแลคอร์ส</label>
                       <CourseAdminPicker users={allUsers} selectedIds={form.courseAdminIds} onChange={(ids) => set('courseAdminIds', ids)} />
-                    </div>
-
-                    <div className="col-span-2">
-                      <label className="text-xs font-bold text-gray-600 block mb-1.5">วิดีโอแนะนำคอร์ส</label>
-                      <input type="url" value={form.introVideoUrl} onChange={(e) => set('introVideoUrl', e.target.value)}
-                        placeholder="กรอก YouTube URL"
-                        className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 font-mono"
-                      />
                     </div>
 
                   </div>
