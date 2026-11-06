@@ -32,6 +32,37 @@ function fmtDate(d: Date | string | undefined) {
   return dt.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' })
 }
 
+const PAGE_SIZE = 10
+
+// Previous / numbered / next, with a window of page numbers around the current one.
+function Pagination({ page, pageCount, total, onChange }: { page: number; pageCount: number; total: number; onChange: (p: number) => void }) {
+  const pages: (number | '…')[] = []
+  for (let p = 1; p <= pageCount; p++) {
+    if (p === 1 || p === pageCount || Math.abs(p - page) <= 1) pages.push(p)
+    else if (pages[pages.length - 1] !== '…') pages.push('…')
+  }
+  const from = (page - 1) * PAGE_SIZE + 1
+  const to = Math.min(page * PAGE_SIZE, total)
+  const btn = 'min-w-8 h-8 px-2 inline-flex items-center justify-center rounded-lg text-xs font-bold transition-colors duration-150'
+  return (
+    <nav aria-label="เปลี่ยนหน้า" className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-gray-100">
+      <p className="text-xs text-gray-500">แสดง {from}–{to} จาก {total} ชุด</p>
+      <div className="flex items-center gap-1">
+        <button type="button" disabled={page === 1} onClick={() => onChange(page - 1)} aria-label="หน้าก่อนหน้า"
+          className={`${btn} text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed`}>‹</button>
+        {pages.map((p, i) => p === '…'
+          ? <span key={`gap-${i}`} className="px-1 text-xs text-gray-400">…</span>
+          : (
+            <button key={p} type="button" onClick={() => onChange(p)} aria-current={p === page ? 'page' : undefined}
+              className={`${btn} ${p === page ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'text-gray-600 hover:bg-gray-100'}`}>{p}</button>
+          ))}
+        <button type="button" disabled={page === pageCount} onClick={() => onChange(page + 1)} aria-label="หน้าถัดไป"
+          className={`${btn} text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed`}>›</button>
+      </div>
+    </nav>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function AssessmentPage() {
   const { user } = useAuth()
@@ -46,6 +77,8 @@ export default function AssessmentPage() {
   const [localDeleted, setLocalDeleted] = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState<Assessment | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // The table shows PAGE_SIZE quizzes at a time.
+  const [page, setPage] = useState(1)
 
   const allowed = !user || user.role === 'super_admin'
 
@@ -69,6 +102,11 @@ export default function AssessmentPage() {
       .filter((a) => !localDeleted.has(a.id))
       .map((a) => ({ ...a, ...(localUpdated[a.id] ?? {}) })),
   ]
+
+  const pageCount = Math.max(1, Math.ceil(all.length / PAGE_SIZE))
+  // After a delete the last page can disappear; stay on the last one that exists.
+  const currentPage = Math.min(page, pageCount)
+  const pageRows = all.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   function handleSave(assessment?: Assessment) {
     if (!assessment) {
@@ -109,7 +147,7 @@ export default function AssessmentPage() {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      <Header title="Questionnaire Management"subtitle={`${all.length} ชุด`} />
+      <Header title="Questionnaire Management" subtitle={`${all.length} ชุด`} />
       <CourseManagementTabs />
 
       <div className="flex-1 overflow-auto p-6">
@@ -155,7 +193,7 @@ export default function AssessmentPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {all.map((a) => (
+                {pageRows.map((a) => (
                   <AssessmentRow
                     key={a.id}
                     assessment={a}
@@ -167,6 +205,9 @@ export default function AssessmentPage() {
                 ))}
               </tbody>
             </table>
+            {pageCount > 1 && (
+              <Pagination page={currentPage} pageCount={pageCount} total={all.length} onChange={setPage} />
+            )}
           </div>
         )}
 

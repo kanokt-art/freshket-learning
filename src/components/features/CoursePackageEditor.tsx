@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import { LearnerAssignmentTab } from '@/components/features/LearnerAssignmentTab'
+import { CoverImagePicker } from '@/components/features/CoverImagePicker'
+import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
 import { PackageDashboardTab, PackageSummaryTab } from '@/components/features/PackageReportTabs'
 import { moveCourse, addCourse, removeCourse } from '@/lib/courses/packages'
 import { confirmAction } from '@/lib/ui/alert'
@@ -20,6 +22,8 @@ import type { Department, Team, UserProfile } from '@/types/user'
 export interface PackageDraft {
   title: string
   description: string
+  /** The cover image URL, or empty for none. */
+  thumbnailUrl: string
   courseIds: string[]
   sequential: boolean
   isPublished: boolean
@@ -44,6 +48,7 @@ export function draftOf(pkg: CoursePackage | null): PackageDraft {
   return {
     title: pkg?.title ?? '',
     description: pkg?.description ?? '',
+    thumbnailUrl: pkg?.thumbnailUrl ?? '',
     courseIds: pkg?.courseIds ?? [],
     sequential: pkg?.sequential ?? false,
     isPublished: pkg?.isPublished ?? false,
@@ -216,6 +221,17 @@ export function CoursePackageEditor({ initial, courses, allUsers, departments, t
                       <input type="text" value={draft.description} onChange={(e) => set('description', e.target.value)}
                         placeholder="อธิบายสั้นๆ ว่าชุดนี้เหมาะกับใคร และเรียนไปเพื่ออะไร"
                         className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white hover:border-freshket-500 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300" />
+                    </div>
+
+                    {/* Cover image — the Course Design is shown by this, the same picker the course form uses */}
+                    <div>
+                      <label className="text-xs font-bold text-gray-600 block mb-2">ภาพปก</label>
+                      <CoverImagePicker
+                        value={draft.thumbnailUrl} onChange={(url) => set('thumbnailUrl', url)}
+                        title={draft.title} description={draft.description} entityId={initial?.id}
+                        catalog={COURSE_IMAGE_CATALOG} uploadEndpoint="/api/upload/course-image" uploadIdField="courseId"
+                        aspect={3 / 1}
+                      />
                     </div>
 
                     {/* When it opens and closes */}

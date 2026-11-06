@@ -28,17 +28,20 @@ export function CourseManagementTabs() {
         : 'text-gray-500 font-normal border-transparent hover:text-gray-700'
     }`
 
-  const subCls = (active: boolean) =>
+  // Questionnaire Management carries its own colour (purple) so it reads as a different kind of page.
+  const subCls = (active: boolean, purple = false) =>
     `inline-flex items-center px-3 py-1.5 text-sm rounded-full border transition-colors whitespace-nowrap ${
       active
-        ? 'bg-freshket-100 text-freshket-700 border-freshket-200 font-bold'
+        ? purple
+          ? 'bg-purple-100 text-purple-700 border-purple-200 font-bold'
+          : 'bg-freshket-100 text-freshket-700 border-freshket-200 font-bold'
         : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-gray-900'
     }`
 
   return (
     <div className="bg-white border-b border-gray-100">
       <nav className="flex items-center gap-6 px-6">
-        <Link href="/courses" className={tabCls(isCourseActive)}>Course</Link>
+        <Link href="/courses" className={tabCls(isCourseActive)}>Course Management</Link>
         <Link href="/courses/roleplay" className={tabCls(isRoleplayActive)}>Role Play</Link>
       </nav>
 
@@ -46,7 +49,7 @@ export function CourseManagementTabs() {
         <div className="flex items-center gap-2 px-6 py-2.5 border-t border-gray-100 bg-slate-50/60 overflow-x-auto">
           <Link href="/courses" aria-current={isBankActive ? 'page' : undefined} className={subCls(isBankActive)}>Course Bank</Link>
           <Link href="/courses/design" aria-current={isDesignActive ? 'page' : undefined} className={subCls(isDesignActive)}>Course Design</Link>
-          <Link href="/assessment" aria-current={isQuestionnaireActive ? 'page' : undefined} className={subCls(isQuestionnaireActive)}>Questionnaire Management</Link>
+          <Link href="/assessment" aria-current={isQuestionnaireActive ? 'page' : undefined} className={subCls(isQuestionnaireActive, true)}>Questionnaire Management</Link>
         </div>
       )}
     </div>

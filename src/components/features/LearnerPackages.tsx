@@ -47,7 +47,13 @@ export function LearnerPackages() {
           return (
             <button key={pkg.id} type="button" onClick={() => router.push(`/courses/design/${pkg.id}`)}
               style={{ border: 'var(--card-border)' }}
-              className="text-left bg-white rounded-2xl p-5 flex flex-col gap-3 hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 group">
+              className="text-left bg-white rounded-2xl overflow-hidden flex flex-col hover:shadow-[0_8px_24px_rgba(38,41,44,0.08)] hover:-translate-y-0.5 transition-all duration-150 group">
+              {/* The Course Design's own cover leads the card */}
+              {pkg.thumbnailUrl
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={pkg.thumbnailUrl} alt="" className="w-full aspect-[3/1] object-cover" />
+                : <div className="w-full aspect-[3/1] bg-freshket-100" aria-hidden="true" />}
+              <div className="p-5 flex flex-col gap-3 flex-1">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="text-sm font-bold text-gray-900 leading-snug group-hover:text-freshket-600 transition-colors">{pkg.title}</h3>
@@ -74,6 +80,7 @@ export function LearnerPackages() {
                   {progress.next ? <>ต่อไป: <span className="font-bold text-gray-800">{progress.next.course.title}</span></> : 'ครบทุกหลักสูตรแล้ว'}
                 </p>
                 <span className="shrink-0 text-xs font-bold text-freshket-600">{finished ? 'ดูอีกครั้ง' : progress.done > 0 ? 'เรียนต่อ' : 'เริ่มเรียน'} →</span>
+              </div>
               </div>
             </button>
           )

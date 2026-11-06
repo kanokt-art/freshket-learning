@@ -9,6 +9,8 @@ export interface CoursePackage {
   id: string
   title: string
   description?: string
+  /** The cover picture. A Course Design is shown by its own cover, not by the covers of the courses inside it. */
+  thumbnailUrl?: string
   /** The courses, in the order they are taken. A course that is later deleted is simply skipped. */
   courseIds: string[]
   /** Learners must finish each course before the next one opens. */

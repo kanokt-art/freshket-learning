@@ -65,7 +65,12 @@ export default function CoursePackagePage() {
             </div>
           ) : (
             <>
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                {pkg.thumbnailUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={pkg.thumbnailUrl} alt="" className="w-full aspect-[3/1] object-cover" />
+                )}
+                <div className="p-6">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h2 className="text-lg font-bold text-gray-900 leading-snug">{pkg.title}</h2>
@@ -82,6 +87,7 @@ export default function CoursePackagePage() {
                 {pkg.sequential && (
                   <p className="text-xs text-gray-400 mt-3">เรียนตามลำดับ: หลักสูตรถัดไปจะเปิดเมื่อจบหลักสูตรก่อนหน้า</p>
                 )}
+                </div>
               </div>
 
               {progress.items.length === 0 ? (

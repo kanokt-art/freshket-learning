@@ -103,7 +103,7 @@ export default function CourseDesignPage() {
     setSaving(true)
     try {
       const fields = {
-        title: draft.title, description: draft.description, courseIds: draft.courseIds, sequential: draft.sequential,
+        title: draft.title, description: draft.description, thumbnailUrl: draft.thumbnailUrl, courseIds: draft.courseIds, sequential: draft.sequential,
         isPublished: draft.isPublished,
         assignedUserIds: draft.assignedUserIds, assignedDepartments: draft.assignedDepartments, assignedTeamIds: draft.assignedTeamIds,
         targetRoles: draft.targetRoles,
@@ -257,10 +257,17 @@ export default function CourseDesignPage() {
                     const learners = p.assignedUserIds?.length ?? 0
                     return (
                       <tr key={p.id} className="hover:bg-gray-50/60 transition-colors align-top">
-                        <td className="px-4 py-3 max-w-xs">
-                          <button type="button" onClick={() => setEditing(p)} className="text-left group">
-                            <p className="text-sm font-bold text-gray-900 group-hover:text-freshket-600 transition-colors">{p.title}</p>
-                            {p.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{p.description}</p>}
+                        <td className="px-4 py-3 max-w-md">
+                          <button type="button" onClick={() => setEditing(p)} className="text-left group flex items-start gap-3">
+                            {/* The cover leads: a Course Design is recognised by its own picture */}
+                            {p.thumbnailUrl
+                              // eslint-disable-next-line @next/next/no-img-element
+                              ? <img src={p.thumbnailUrl} alt="" className="w-28 aspect-[3/1] rounded-xl object-cover shrink-0 border border-gray-100" />
+                              : <span className="w-28 aspect-[3/1] rounded-xl bg-freshket-100 text-freshket-600 flex items-center justify-center shrink-0 text-xs font-bold">ไม่มีภาพปก</span>}
+                            <span className="min-w-0">
+                              <span className="block text-sm font-bold text-gray-900 group-hover:text-freshket-600 transition-colors">{p.title}</span>
+                              {p.description && <span className="block text-xs text-gray-400 mt-0.5 line-clamp-2">{p.description}</span>}
+                            </span>
                           </button>
                         </td>
                         <td className="px-3 py-3">
