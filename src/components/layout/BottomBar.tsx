@@ -180,8 +180,9 @@ function AdminFab({ role }: { role: string }) {
     { href: '/users', label: isSuperAdmin ? 'Administration' : 'จัดการพนักงาน' },
     ...(isSuperAdmin
       ? [
-          { href: '/courses', label: 'จัดการหลักสูตร' },
-          { href: '/assessment', label: 'สร้างแบบทดสอบ' },
+          { href: '/courses', label: 'Course Bank' },
+          { href: '/courses/design', label: 'Course Design' },
+          { href: '/assessment', label: 'Questionnaire Management' },
           { href: '/admin/guide', label: 'คู่มือ Admin' },
         ]
       : []),

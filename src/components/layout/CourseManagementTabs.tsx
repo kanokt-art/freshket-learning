@@ -3,18 +3,23 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-// Super-admin-only nav for the Course Management area (Main / Course / Course Design / Role Play).
+// Super-admin-only nav for the Course Management area (Course / Role Play).
 //
 // Two levels, no dropdowns (the same as the Administration nav): the top tabs are the areas; "Course"
-// shows its pages as a second row of sub tabs underneath — manage courses (the course table) and
-// create an assessment. Creating a course is the button at the top right of the course table.
+// shows its pages as a second row of sub tabs underneath and keeps that row on every one of them, so
+// moving between them never drops you back to a different area:
+//   Course Bank              the course table (drafts of content; creating a course is the button at its top right)
+//   Course Design            where courses are gathered, given learners and dates, and launched
+//   Questionnaire Management the assessments
 export function CourseManagementTabs() {
   const pathname = usePathname()
 
-  const isDesignActive = pathname.startsWith('/courses/design')
-  const isMainActive = pathname === '/courses' || (pathname.startsWith('/courses/') && !pathname.startsWith('/courses/roleplay') && !isDesignActive)
   const isRoleplayActive = pathname.startsWith('/courses/roleplay')
-  const isCourseActive = pathname === '/assessment'
+  const isDesignActive = pathname.startsWith('/courses/design')
+  const isQuestionnaireActive = pathname === '/assessment'
+  const isCourseActive = !isRoleplayActive
+  // Course Bank = the course table and the course pages under it (library, mandatory, a single course).
+  const isBankActive = isCourseActive && !isDesignActive && !isQuestionnaireActive
 
   const tabCls = (active: boolean) =>
     `inline-flex items-center gap-1 px-1 py-3 text-sm border-b-2 transition-colors ${
@@ -33,16 +38,15 @@ export function CourseManagementTabs() {
   return (
     <div className="bg-white border-b border-gray-100">
       <nav className="flex items-center gap-6 px-6">
-        <Link href="/courses" className={tabCls(isMainActive)}>Main</Link>
-        <Link href="/assessment" className={tabCls(isCourseActive)}>Course</Link>
-        <Link href="/courses/design" className={tabCls(isDesignActive)}>Course Design</Link>
+        <Link href="/courses" className={tabCls(isCourseActive)}>Course</Link>
         <Link href="/courses/roleplay" className={tabCls(isRoleplayActive)}>Role Play</Link>
       </nav>
 
       {isCourseActive && (
         <div className="flex items-center gap-2 px-6 py-2.5 border-t border-gray-100 bg-slate-50/60 overflow-x-auto">
-          <Link href="/courses" className={subCls(false)}>จัดการหลักสูตร</Link>
-          <Link href="/assessment" aria-current="page" className={subCls(true)}>สร้างแบบทดสอบ</Link>
+          <Link href="/courses" aria-current={isBankActive ? 'page' : undefined} className={subCls(isBankActive)}>Course Bank</Link>
+          <Link href="/courses/design" aria-current={isDesignActive ? 'page' : undefined} className={subCls(isDesignActive)}>Course Design</Link>
+          <Link href="/assessment" aria-current={isQuestionnaireActive ? 'page' : undefined} className={subCls(isQuestionnaireActive)}>Questionnaire Management</Link>
         </div>
       )}
     </div>

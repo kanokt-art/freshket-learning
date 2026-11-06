@@ -109,7 +109,7 @@ export default function AssessmentPage() {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      <Header title="แบบทดสอบ" subtitle={`${all.length} ชุด`} />
+      <Header title="Questionnaire Management"subtitle={`${all.length} ชุด`} />
       <CourseManagementTabs />
 
       <div className="flex-1 overflow-auto p-6">
