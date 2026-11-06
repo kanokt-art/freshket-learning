@@ -403,9 +403,13 @@ export const COURSE_PACKAGES: TableSpec = {
   fields: {
     title: fText('title'), description: fText('description'), courseIds: fArr('course_ids'),
     sequential: fBool('sequential'), isPublished: fBool('is_published'),
+    assignedUserIds: fArr('assigned_user_ids'), assignedDepartments: fArr('assigned_departments'),
+    assignedTeamIds: fArr('assigned_team_ids'), targetRoles: fArr('target_roles'),
+    startDate: fTs('start_date'), endDate: fTs('end_date'),
     createdBy: fText('created_by'), createdAt: fTs('created_at'), updatedAt: fTs('updated_at'),
   },
   uidFields: ['createdBy'],
+  uidListFields: ['assignedUserIds'],
   required: ['title', 'created_by'],
 }
 
