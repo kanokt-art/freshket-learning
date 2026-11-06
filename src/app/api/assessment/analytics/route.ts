@@ -1,19 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/server/store'
-import { requireSuperAdmin } from '@/lib/server/auth'
+import { requireStaff } from '@/lib/server/auth'
+import { managedMembers } from '@/lib/users/managedMembers'
 import { analyzeAttempts, type AttemptRow, type AssessmentDef } from '@/lib/assessment/analytics'
 import type { Question } from '@/types/assessment'
+import type { Team, UserProfile } from '@/types/user'
 
 // The course dashboard's numbers from quiz attempts: time taken, scores, pass/fail, the questions missed most.
 // Attempts are an audit trail the browser cannot read (policies.ts), so they are summed up here for a
-// super_admin. What leaves is totals, the question and choice texts, and how many people picked each choice —
+// super_admin, or for a Team Lead / Manager over only the people they look after. What leaves is totals, the question and choice texts, and how many people picked each choice —
 // never one learner's answers.
 
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/
 
 export async function GET(req: NextRequest) {
-  const gate = await requireSuperAdmin(req)
+  const gate = await requireStaff(req)
   if (!gate.ok) return gate.response
+  // A learner has no business here; a lead sees their own org (narrowed below), a super_admin sees everyone.
+  if (!gate.isSuperAdmin && gate.role !== 'team_lead' && gate.role !== 'manager') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   // One course (?courseId=) or several (?courseIds=a,b,c) — a Course Design looks at all of its courses at once.
   const ids = (req.nextUrl.searchParams.get('courseIds') ?? req.nextUrl.searchParams.get('courseId') ?? '').split(',').map((x) => x.trim()).filter(Boolean)
@@ -28,7 +34,16 @@ export async function GET(req: NextRequest) {
     const store = getStore()
     const rows = (await Promise.all(ids.map((courseId) => store.query('assessmentAttempts', { where: [{ field: 'courseId', op: '==', value: courseId }] })))).flat()
     const time = (v: unknown) => (v instanceof Date ? v.getTime() : v ? new Date(v as string).getTime() || 0 : 0)
-    const attempts = rows.filter((a) => !since || time(a.createdAt) >= since.getTime()) as unknown as AttemptRow[]
+    let attempts = rows.filter((a) => !since || time(a.createdAt) >= since.getTime()) as unknown as AttemptRow[]
+
+    // A lead's numbers cover only the people in their own org chart (the same set their team report lists).
+    if (!gate.isSuperAdmin) {
+      const [users, teams] = await Promise.all([store.query('users'), store.query('teams')])
+      const mine = new Set(managedMembers(
+        gate.person as unknown as UserProfile, users as unknown as UserProfile[], teams as unknown as Team[],
+      ).map((u) => u.uid))
+      attempts = attempts.filter((a) => mine.has(a.uid))
+    }
 
     // The quizzes the attempts were made on: their questions and choices, to name what people picked.
     const assessmentIds = Array.from(new Set(attempts.map((a) => a.assessmentId).filter(Boolean)))

@@ -3,6 +3,8 @@
 import { resultsRoster } from '@/lib/courses/audience'
 import { CopyableText } from '@/components/common/EmployeeCells'
 import { isActiveEmployee } from '@/lib/users/active'
+import { CourseDashboard } from '@/components/features/CourseDashboard'
+import type { DashRow } from '@/lib/courses/dashboardData'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
@@ -203,7 +205,7 @@ export default function CourseDetailPage() {
   const { data: allUsers }    = useAllUsers(isAdmin)
   const { data: teams }       = useTeams(isAdmin)
   const { data: departments } = useDepartments(isAdmin)
-  const [tab, setTab] = useState<'results' | 'content'>('results')
+  const [tab, setTab] = useState<'results' | 'dashboard' | 'content'>('results')
   // A lead's report covers only the people they look after.
   const teamUids = useMemo(
     () => (isLead ? new Set(managedMembers(user, allUsers, teams).map((m) => m.uid)) : null),
@@ -532,6 +534,15 @@ export default function CourseDetailPage() {
             </button>
             <button
               type="button"
+              onClick={() => setTab('dashboard')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 ${
+                tab === 'dashboard' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Dashboard
+            </button>
+            <button
+              type="button"
               onClick={() => setTab('content')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 ${
                 tab === 'content' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
@@ -616,6 +627,16 @@ export default function CourseDetailPage() {
           allUsers={teamUids ? allUsers.filter((u) => teamUids.has(u.uid)) : allUsers}
           teams={teams}
           departments={departments}
+        />
+      )}
+
+      {/* ── Dashboard tab: the same charts a super_admin sees; a lead's cover only their own org ── */}
+      {isAdmin && tab === 'dashboard' && (
+        <CourseDashboardTab
+          courseId={id}
+          course={course}
+          allRecords={allRecords}
+          allUsers={teamUids ? allUsers.filter((u) => teamUids.has(u.uid)) : allUsers}
         />
       )}
 
@@ -1622,6 +1643,29 @@ function scoreBarColor(score: number) {
 function formatDate(d?: Date) {
   if (!d) return '-'
   return new Date(d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
+}
+
+// The charts of one course (joined over time, before / after scores, pass rate, departments, questions missed) for
+// whoever the report covers: everyone for a super_admin, only the lead's own people for a Team Lead / Manager.
+function CourseDashboardTab({ courseId, course, allRecords, allUsers }: {
+  courseId: string
+  course: Course | null
+  allRecords: TrainingRecord[]
+  allUsers: UserProfile[]
+}) {
+  const rows = useMemo<DashRow[]>(() => {
+    return resultsRoster(course, allUsers, allRecords, courseId)
+      .filter((u) => isActiveEmployee(u))
+      .map((u) => {
+        const r = allRecords.find((x) => x.userId === u.uid && x.courseId === courseId)
+        return {
+          department: u.department,
+          record: r ? { status: r.status, startedAt: r.startedAt, completedAt: r.completedAt, updatedAt: r.updatedAt, preTestScore: r.preTestScore, postTestScore: r.postTestScore } : undefined,
+        }
+      })
+  }, [course, allUsers, allRecords, courseId])
+  const courseIds = useMemo(() => [courseId], [courseId])
+  return <CourseDashboard courseIds={courseIds} rows={rows} />
 }
 
 function CourseResultsDashboard({
