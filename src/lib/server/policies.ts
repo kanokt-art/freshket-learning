@@ -179,6 +179,8 @@ const POLICIES: Record<string, Policy> = {
   },
 
   courses: { read: staffRead, ...superWrites },
+  // Course Design: a package of courses. Anyone may read (the screen hides drafts); only a super_admin writes.
+  coursePackages: { read: staffRead, ...superWrites },
   tools: { read: staffRead, ...superWrites },
   mandatoryItems: { read: staffRead, ...superWrites },
   cuisineGuides: { read: staffRead, ...superWrites },

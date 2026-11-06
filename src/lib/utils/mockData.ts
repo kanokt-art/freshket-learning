@@ -1,5 +1,6 @@
 import type { UserProfile, Team, Department } from '@/types/user'
 import type { Course, CourseTopic, Resource } from '@/types/course'
+import type { CoursePackage } from '@/types/coursePackage'
 import type { TrainingRecord } from '@/types/tracking'
 import type { Assessment } from '@/types/assessment'
 
@@ -314,6 +315,21 @@ function courseTopics(key: string, subject: string, videoUrl: string): CourseTop
     },
   ]
 }
+
+// A sample Course Design for the demo: three of the sample courses, in order.
+export const MOCK_COURSE_PACKAGES: CoursePackage[] = [
+  {
+    id: 'package-01',
+    title: 'เส้นทางพนักงานขายใหม่',
+    description: 'เรียนต่อเนื่องตั้งแต่ความรู้สินค้าไปจนถึงเทคนิคการขาย',
+    courseIds: ['course-01', 'course-02', 'course-03'],
+    sequential: true,
+    isPublished: true,
+    createdBy: 'demo',
+    createdAt: new Date('2026-11-01T09:00:00'),
+    updatedAt: new Date('2026-11-01T09:00:00'),
+  },
+]
 
 export const MOCK_COURSES: Omit<Course, 'createdAt' | 'updatedAt'>[] = [
   {

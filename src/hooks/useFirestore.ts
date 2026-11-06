@@ -8,9 +8,11 @@ const DEMO_MODE = getDemoMode()
 import {
   MOCK_TRAINING_RECORDS,
   MOCK_ASSESSMENTS,
+  MOCK_COURSE_PACKAGES,
 } from '@/lib/utils/mockData'
 import type { TrainingRecord } from '@/types/tracking'
 import type { Course } from '@/types/course'
+import type { CoursePackage } from '@/types/coursePackage'
 import type { UserProfile, Team, Department } from '@/types/user'
 import type { Assessment } from '@/types/assessment'
 import type { ShadowRecord, ShadowAcknowledgment } from '@/types/shadow'
@@ -603,6 +605,17 @@ export function useCourses(): UseResult<Course> {
   )
 
   return DEMO_MODE ? { data: demoData, loading: false, error: null } : fbResult
+}
+
+// Course Designs (packages of courses). A learner's screens keep only the published ones that have a course for them
+// (lib/courses/packages.ts); the admin sees them all.
+export function useCoursePackages(): UseResult<CoursePackage> {
+  const fbResult = useFirestoreList<CoursePackage>(
+    'coursePackages',
+    [{ type: 'orderBy', field: 'createdAt', direction: 'desc' }],
+    !DEMO_MODE,
+  )
+  return DEMO_MODE ? { data: MOCK_COURSE_PACKAGES, loading: false, error: null } : fbResult
 }
 
 export function useCourse(id: string): { data: Course | null; loading: boolean; error: string | null } {

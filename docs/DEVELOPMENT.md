@@ -103,7 +103,7 @@ Browser ──► /api/data/{query,get,write} ──► policies.ts (canRead / c
 ### Migrations
 
 `supabase/migrations/00x_*.sql`, run **by the owner in the Supabase SQL Editor** (the Supabase MCP refuses statements
-containing `drop`). Keep each file idempotent. 002–010 exist; 010 (learner feedback) is applied. Adding a column
+containing `drop`). Keep each file idempotent. 002–011 exist; 010 (learner feedback) is applied; **011 (course packages) must be run before Course Design works**. Adding a column
 means: migration + `docMap.ts` field + type + (if the browser may write it) `policies.ts`.
 
 ---
@@ -119,6 +119,7 @@ means: migration + `docMap.ts` field + type + (if the browser may write it) `pol
 | `team-lead/` | Older team-lead dashboard | |
 | `shadow/` | Shadow Visit. Learners: own visits + form. Leads: member table | Table = `managedMembers`, team filter, sortable, newest start first, Avg Rating, **Acked** stage dots (member → team lead → manager, `lib/shadow/stages.ts`) |
 | `courses/`, `assessment/` | Course library, player, quiz, results | |
+| `courses/design/` (+ `[id]`) | **Course Design**: a super_admin gathers existing courses into an ordered package; learners see it on My Course and at `/courses/design/<id>` | `coursePackages` table (migration 011), rules in `lib/courses/packages.ts`. Optional "sequential" lock is enforced on that page only; each course stays its own course with its own audience and record |
 | `users/` | Employees page (admin) | Its member "Training" tab still has the older layout (see §10) |
 | `tools/` | `mandatory`, `cuisine-guide`, `new-joiner` | Mandatory Reading lives under Tools |
 | `admin/` | `announcements`, `activity`, `guide`, `rewards`, `settings`, `spotlight` | `spotlight` = pin/hide items shown in "Latest" |

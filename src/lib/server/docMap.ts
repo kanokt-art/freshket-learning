@@ -398,6 +398,17 @@ export const COURSES: TableSpec = {
   },
 }
 
+export const COURSE_PACKAGES: TableSpec = {
+  source: 'coursePackages', table: 'course_packages', keyColumns: ['id'], hasExtra: true,
+  fields: {
+    title: fText('title'), description: fText('description'), courseIds: fArr('course_ids'),
+    sequential: fBool('sequential'), isPublished: fBool('is_published'),
+    createdBy: fText('created_by'), createdAt: fTs('created_at'), updatedAt: fTs('updated_at'),
+  },
+  uidFields: ['createdBy'],
+  required: ['title', 'created_by'],
+}
+
 export const ASSESSMENTS: TableSpec = {
   source: 'assessments', table: 'assessments', keyColumns: ['id'], hasExtra: true,
   fields: {
@@ -715,7 +726,7 @@ export const NOTIFICATIONS: TableSpec = {
 
 /** Every table except users, in load order. */
 export const SPECS: TableSpec[] = [
-  TEAMS, COURSES, ASSESSMENTS, ASSESSMENT_SESSIONS, ASSESSMENT_ATTEMPTS, TRAINING_RECORDS,
+  TEAMS, COURSES, COURSE_PACKAGES, ASSESSMENTS, ASSESSMENT_SESSIONS, ASSESSMENT_ATTEMPTS, TRAINING_RECORDS,
   USER_STATS, USER_BUCKET_RESULTS, TOOLS, KNOWLEDGE_DECKS, CUISINE_GUIDES, MANDATORY_ITEMS,
   ANNOUNCEMENTS, RESOURCES, CSV_IMPORTS, APP_CONFIG, ASSESSMENT_SCORES, SHADOW_RECORDS,
   SHADOW_ACKNOWLEDGMENTS, ROLEPLAY_ASSESSMENTS, TAKEAWAYS, COURSE_FEEDBACK, LEARNER_FEEDBACK, SLACK_POSTS, NOTIFICATIONS,

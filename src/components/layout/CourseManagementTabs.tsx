@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-// Super-admin-only nav for the Course Management area (Main / Course / Role Play).
+// Super-admin-only nav for the Course Management area (Main / Course / Course Design / Role Play).
 //
 // Two levels, no dropdowns (the same as the Administration nav): the top tabs are the areas; "Course"
 // shows its pages as a second row of sub tabs underneath — manage courses (the course table) and
@@ -11,7 +11,8 @@ import { usePathname } from 'next/navigation'
 export function CourseManagementTabs() {
   const pathname = usePathname()
 
-  const isMainActive = pathname === '/courses' || (pathname.startsWith('/courses/') && !pathname.startsWith('/courses/roleplay'))
+  const isDesignActive = pathname.startsWith('/courses/design')
+  const isMainActive = pathname === '/courses' || (pathname.startsWith('/courses/') && !pathname.startsWith('/courses/roleplay') && !isDesignActive)
   const isRoleplayActive = pathname.startsWith('/courses/roleplay')
   const isCourseActive = pathname === '/assessment'
 
@@ -34,6 +35,7 @@ export function CourseManagementTabs() {
       <nav className="flex items-center gap-6 px-6">
         <Link href="/courses" className={tabCls(isMainActive)}>Main</Link>
         <Link href="/assessment" className={tabCls(isCourseActive)}>Course</Link>
+        <Link href="/courses/design" className={tabCls(isDesignActive)}>Course Design</Link>
         <Link href="/courses/roleplay" className={tabCls(isRoleplayActive)}>Role Play</Link>
       </nav>
 
