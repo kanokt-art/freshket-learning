@@ -312,8 +312,8 @@ export default function SaleDashboardPage() {
           </div>
 
           {/* Outstanding courses. Sale-role only — super_admin's overview has no personal course
-              schedule to show. */}
-          {!isAdmin && (
+              schedule to show. Nothing is drawn when there is nothing outstanding (the stat above says so). */}
+          {!isAdmin && pendingCourses.length > 0 && (
             <div className="grid grid-cols-1 gap-4">
               <PendingCoursesCard
                 courses={pendingCourses}
@@ -551,8 +551,7 @@ export default function SaleDashboardPage() {
 
 // ── Pending courses (left of the calendar) ────────────────────────────────────
 // Fills the slot that used to go blank whenever the learner had courses assigned
-// but none outstanding. Two states, one card: the work left to do, or a clear
-// "you're done" — never nothing.
+// but none outstanding. It is only drawn when there is work left to do.
 function PendingCoursesCard({
   courses,
   recordMap,
@@ -573,28 +572,6 @@ function PendingCoursesCard({
     const end = c.endDate instanceof Date ? c.endDate : new Date(c.endDate as unknown as string)
     if (isNaN(end.getTime())) return null
     return Math.ceil((end.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
-  }
-
-  if (courses.length === 0) {
-    return (
-      <div className="card-ds p-10 h-full flex flex-col items-center justify-center text-center">
-        <div className="size-20 rounded-full bg-freshket-100 flex items-center justify-center mb-4">
-          <svg className="size-10 text-freshket-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </div>
-        <h2 className="text-base font-bold text-gray-900 mb-1">ไม่มีหลักสูตรคงค้าง</h2>
-        <p className="text-sm font-normal text-gray-500 max-w-sm">
-          ตอนนี้คุณเรียนครบทุกหลักสูตรที่ได้รับมอบหมายแล้ว หากมีหลักสูตรใหม่ จะแสดงขึ้นที่นี่
-        </p>
-        <button
-          onClick={onSeeAll}
-          className="mt-5 px-4 py-2 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all duration-150"
-        >
-          ดูหลักสูตรทั้งหมด
-        </button>
-      </div>
-    )
   }
 
   return (
