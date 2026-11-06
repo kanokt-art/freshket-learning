@@ -3,6 +3,7 @@
 import { resultsRoster } from '@/lib/courses/audience'
 import { CopyableText } from '@/components/common/EmployeeCells'
 import { isActiveEmployee } from '@/lib/users/active'
+import { formatTenure } from '@/lib/users/tenure'
 import { CourseDashboard } from '@/components/features/CourseDashboard'
 import type { DashRow } from '@/lib/courses/dashboardData'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
@@ -1652,6 +1653,29 @@ function CourseDashboardTab({ courseId, course, allRecords, allUsers }: {
   )
 }
 
+type ResultSortKey = 'name' | 'position' | 'department' | 'team' | 'tenure' | 'status' | 'score' | 'completed'
+
+// A column header that sorts: an arrow shows the direction on the column in use.
+function SortTh({ label, k, sortKey, sortDir, onSort, className = '' }: {
+  label: string
+  k: ResultSortKey
+  sortKey: ResultSortKey | null
+  sortDir: 'asc' | 'desc'
+  onSort: (k: ResultSortKey) => void
+  className?: string
+}) {
+  const active = sortKey === k
+  return (
+    <th aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'} className={`text-left text-xs font-bold text-gray-400 px-3 py-3 ${className}`}>
+      <button type="button" onClick={() => onSort(k)}
+        className={`inline-flex items-center gap-1 hover:text-gray-700 transition-colors ${active ? 'text-gray-700' : ''}`}>
+        {label}
+        <span aria-hidden="true" className={active ? 'text-freshket-600' : 'text-gray-300'}>{active ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+      </button>
+    </th>
+  )
+}
+
 function CourseResultsDashboard({
   courseId,
   course,
@@ -1746,6 +1770,42 @@ function CourseResultsDashboard({
       return true
     })
   }, [rows, filterDept, filterTeam, filterStatus, search])
+
+  // Column sort: click a header to sort ascending, again for descending, a third time to clear.
+  const [sortKey, setSortKey] = useState<ResultSortKey | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  function toggleSort(key: ResultSortKey) {
+    if (sortKey !== key) { setSortKey(key); setSortDir('asc') }
+    else if (sortDir === 'asc') setSortDir('desc')
+    else setSortKey(null)
+  }
+  const sorted = useMemo(() => {
+    if (!sortKey) return filtered
+    const time = (v: unknown) => (v ? new Date(v as string).getTime() || null : null)
+    const statusRank: Record<string, number> = { completed: 0, in_progress: 1, failed: 2, not_started: 3 }
+    const value = (r: UserRow): string | number | null => {
+      switch (sortKey) {
+        case 'name': return formatPersonName(r.user).toLowerCase()
+        case 'position': return (r.user.position ?? '').toLowerCase() || null
+        case 'department': return r.deptName === '-' ? null : r.deptName.toLowerCase()
+        case 'team': return r.teamName === '-' ? null : r.teamName.toLowerCase()
+        // An earlier start date is a longer tenure, so ascending reads shortest tenure first.
+        case 'tenure': { const t = time(r.user.startDate); return t === null ? null : -t }
+        case 'status': return statusRank[r.record?.status ?? 'not_started']
+        case 'score': return r.record?.score ?? null
+        case 'completed': return time(r.record?.completedAt)
+      }
+    }
+    const dir = sortDir === 'asc' ? 1 : -1
+    // People with nothing to compare go last whichever way it is sorted.
+    return [...filtered].sort((a, b) => {
+      const x = value(a), y = value(b)
+      if (x === null && y === null) return 0
+      if (x === null) return 1
+      if (y === null) return -1
+      return (typeof x === 'string' && typeof y === 'string' ? x.localeCompare(y, 'th') : (x as number) - (y as number)) * dir
+    })
+  }, [filtered, sortKey, sortDir])
 
   // Reset team filter when dept changes
   useEffect(() => { setFilterTeam('all') }, [filterDept])
@@ -1911,17 +1971,18 @@ function CourseResultsDashboard({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  <th className="text-left text-xs font-bold text-gray-400 px-5 py-3">Name</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden md:table-cell">Position</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden md:table-cell">Department</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden lg:table-cell">Team</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">Status</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3">{questionnaireId ? 'Type' : 'Score'}</th>
-                  <th className="text-left text-xs font-bold text-gray-400 px-3 py-3 hidden lg:table-cell">Completed</th>
+                  <SortTh label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="px-5" />
+                  <SortTh label="Position" k="position" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell" />
+                  <SortTh label="Department" k="department" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell" />
+                  <SortTh label="Team" k="team" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
+                  <SortTh label="Tenure" k="tenure" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
+                  <SortTh label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTh label={questionnaireId ? 'Type' : 'Score'} k="score" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTh label="Completed" k="completed" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map(row => {
+                {sorted.map(row => {
                   const status: TrainingStatus | 'not_started' = row.record?.status ?? 'not_started'
                   const score = row.record?.score
                   // != null so a CSV-imported `score: null` renders as "no score"
@@ -1945,17 +2006,15 @@ function CourseResultsDashboard({
                           </div>
                           <div className="min-w-0">
                             <p className="text-sm font-bold text-gray-900 truncate">
-                              {row.user.displayName}
+                              {formatPersonName(row.user)}
                               {!isActiveEmployee(row.user) && (
                                 <span className="ml-2 align-middle text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
                                   ลาออก
                                 </span>
                               )}
                             </p>
-                            {(row.user.nickname || row.user.employeeId) && (
-                              <p className="text-xs text-gray-400 truncate">
-                                {row.user.nickname}{row.user.nickname && row.user.employeeId ? ' · ' : ''}{row.user.employeeId ?? ''}
-                              </p>
+                            {row.user.employeeId && (
+                              <p className="text-xs text-gray-400 truncate">{row.user.employeeId}</p>
                             )}
                           </div>
                         </div>
@@ -1974,6 +2033,11 @@ function CourseResultsDashboard({
                       {/* Team */}
                       <td className="px-3 py-3.5 hidden lg:table-cell">
                         <span className="text-xs text-gray-600">{row.teamName}</span>
+                      </td>
+
+                      {/* Tenure */}
+                      <td className="px-3 py-3.5 hidden lg:table-cell">
+                        <span className="text-xs text-gray-600 whitespace-nowrap">{formatTenure(row.user.startDate)}</span>
                       </td>
 
                       {/* Status */}
