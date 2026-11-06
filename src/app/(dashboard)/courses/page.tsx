@@ -2420,6 +2420,9 @@ function QuizLessonSettingsCard({
     currentAssessment?.googleFormUrl ? 'google_form' : 'self',
   )
   const [search, setSearch] = useState('')
+  const [browseOpen, setBrowseOpen] = useState(false)
+  // The quiz ticked in the card, applied only when ตกลง is pressed.
+  const [pickId, setPickId] = useState<string | null>(null)
 
   // /assessment is a full page, not a modal — navigating there leaves this
   // course draft behind unsaved (CourseFormModal's form state isn't
@@ -2439,15 +2442,13 @@ function QuizLessonSettingsCard({
   // Assessment-level settings, written straight to Firestore on save.
   const [saving, setSaving] = useState(false)
   const [title, setTitle] = useState('')
-  const [timeLimitMinutes, setTimeLimitMinutes] = useState('0')
   const [antiCheatEnabled, setAntiCheatEnabled] = useState(false)
   const [description, setDescription] = useState('')
   useEffect(() => {
     setTitle(currentAssessment?.title ?? '')
-    setTimeLimitMinutes(String(currentAssessment?.timeLimitMinutes ?? 0))
     setAntiCheatEnabled(currentAssessment?.antiCheatEnabled ?? false)
     setDescription(currentAssessment?.description ?? '')
-  }, [currentAssessment?.id, currentAssessment?.title, currentAssessment?.timeLimitMinutes,
+  }, [currentAssessment?.id, currentAssessment?.title,
     currentAssessment?.antiCheatEnabled, currentAssessment?.description])
 
   // "ใช้เป็นแบบทดสอบก่อนเรียน": ON means the learner also sits this quiz
@@ -2474,6 +2475,15 @@ function QuizLessonSettingsCard({
     onSetAssessment(a.id)
   }
 
+  async function confirmPick() {
+    const current = lesson.assessmentId ?? null
+    if (pickId === current) { setBrowseOpen(false); return }
+    if (pickId === null) { onSetAssessment(undefined); setBrowseOpen(false); return }
+    const a = assessments.find((x) => x.id === pickId)
+    setBrowseOpen(false)
+    if (a) await handlePickAssessment(a, false)
+  }
+
   async function handleSaveSettings() {
     if (!currentAssessment) return
     if (!title.trim()) {
@@ -2487,7 +2497,6 @@ function QuizLessonSettingsCard({
       // a value the quiz author may have just changed.
       await patch('assessments', currentAssessment.id, {
         title: title.trim(),
-        timeLimitMinutes: Number(timeLimitMinutes) || 0,
         antiCheatEnabled,
         description: description.trim(),
       })
@@ -2531,42 +2540,70 @@ function QuizLessonSettingsCard({
             </button>
           </div>
 
-          <div>
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาแบบทดสอบ..."
-              className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300 mb-1.5"
-            />
-            <div className="max-h-40 overflow-y-auto space-y-1 border border-gray-100 rounded-xl p-1.5 bg-gray-50/50">
-              {filtered.length === 0
-                ? (
-                  <div className="text-center py-4 space-y-2">
-                    <p className="text-xs text-gray-400">ไม่พบแบบทดสอบ{source === 'google_form' ? 'ชนิด Google Form' : 'ที่สร้างเอง'}</p>
-                    <button type="button" onClick={handleCreateNewAssessment}
-                      className="text-xs font-bold text-freshket-600 hover:text-freshket-700 hover:underline">
-                      + สร้างแบบทดสอบใหม่
-                    </button>
-                  </div>
-                )
-                : filtered.map((a) => {
-                  const active = lesson.assessmentId === a.id
-                  return (
-                    <button key={a.id} type="button" onClick={() => handlePickAssessment(a, active)}
-                      className={`w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg text-xs transition-all border ${
-                        active ? 'bg-freshket-100 text-freshket-700 font-bold border-freshket-300' : 'bg-white hover:bg-gray-100 text-gray-700 border-transparent'
-                      }`}>
-                      <span className={`shrink-0 size-4 rounded-full border-2 flex items-center justify-center ${active ? 'border-freshket-500 bg-freshket-500' : 'border-gray-300'}`}>
-                        {active && <svg className="size-2.5 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" /></svg>}
-                      </span>
-                      <span className="flex-1 truncate">{a.title}</span>
-                      <span className="text-gray-400 shrink-0">({a.questions.length} ข้อ)</span>
-                    </button>
-                  )
-                })}
+          {/* The quiz is chosen in a card of its own: browse, pick one, confirm. */}
+          <div className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50/50 p-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-gray-400">แบบทดสอบที่ใช้</p>
+              <p className="text-sm font-bold text-gray-800 truncate">
+                {currentAssessment ? currentAssessment.title : 'ยังไม่ได้เลือก'}
+                {currentAssessment && <span className="text-xs font-normal text-gray-400"> ({currentAssessment.questions.length} ข้อ)</span>}
+              </p>
             </div>
+            <button type="button" onClick={() => { setPickId(lesson.assessmentId ?? null); setSearch(''); setBrowseOpen(true) }}
+              className="shrink-0 px-4 py-2 text-xs font-bold rounded-xl border border-freshket-200 bg-freshket-100 text-freshket-700 hover:bg-freshket-200 transition-all duration-150">
+              Browse Questionnaire
+            </button>
           </div>
+
+          {browseOpen && (
+            <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setBrowseOpen(false)}>
+              <div role="dialog" aria-modal="true" aria-label="Browse Questionnaire" onClick={(e) => e.stopPropagation()}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[80vh] animate-pop-in">
+                <div className="px-6 pt-5 pb-3">
+                  <h3 className="font-bold text-gray-900">Browse Questionnaire</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">เลือกแบบทดสอบ{source === 'google_form' ? 'ชนิด Google Form' : 'ที่สร้างเอง'} 1 ชุด แล้วกดตกลง</p>
+                  <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาแบบทดสอบ..." autoFocus
+                    className="mt-3 w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300"
+                  />
+                </div>
+                <div className="flex-1 overflow-y-auto px-6 pb-2 space-y-1.5">
+                  {filtered.length === 0 ? (
+                    <div className="text-center py-8 space-y-2">
+                      <p className="text-sm text-gray-400">ไม่พบแบบทดสอบ</p>
+                      <button type="button" onClick={handleCreateNewAssessment}
+                        className="text-xs font-bold text-freshket-600 hover:text-freshket-700 hover:underline">
+                        + สร้างแบบทดสอบใหม่
+                      </button>
+                    </div>
+                  ) : filtered.map((a) => {
+                    const on = pickId === a.id
+                    return (
+                      <button key={a.id} type="button" role="radio" aria-checked={on} onClick={() => setPickId(on ? null : a.id)}
+                        className={`w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-xl text-sm transition-all duration-150 border ${
+                          on ? 'bg-freshket-50 border-freshket-200 text-freshket-700 font-bold' : 'bg-white border-gray-100 hover:bg-gray-50 text-gray-700'
+                        }`}>
+                        <span className={`shrink-0 size-4 rounded-full border-2 flex items-center justify-center ${on ? 'border-freshket-500 bg-freshket-500' : 'border-gray-300'}`}>
+                          {on && <svg className="size-2.5 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" /></svg>}
+                        </span>
+                        <span className="flex-1 truncate">{a.title}</span>
+                        <span className="text-xs text-gray-400 font-normal shrink-0">{a.questions.length} ข้อ{Number(a.timeLimitMinutes) > 0 ? ` · ${a.timeLimitMinutes} นาที` : ''}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
+                  <button type="button" onClick={() => setBrowseOpen(false)}
+                    className="px-4 py-2 text-sm text-gray-600 rounded-xl hover:bg-gray-100 transition-all duration-150">ยกเลิก</button>
+                  <button type="button" onClick={() => void confirmPick()}
+                    className="px-5 py-2 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all duration-150">ตกลง</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {currentAssessment ? (
             <>
-              <div className="grid grid-cols-2 gap-4">
+              <div>
                 <div>
                   <label className="text-xs font-bold text-gray-600 block mb-1.5">ชื่อแบบทดสอบ <span className="text-rose-500">*</span></label>
                   <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
@@ -2574,15 +2611,7 @@ function QuizLessonSettingsCard({
                     className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-freshket-500 placeholder:text-gray-300"
                   />
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-600 block mb-1.5">เวลาในการทำแบบทดสอบ</label>
-                  <div className="relative">
-                    <input type="number" min={0} value={timeLimitMinutes} onChange={(e) => setTimeLimitMinutes(e.target.value)}
-                      className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:border-freshket-500 pr-12" />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">นาที</span>
-                  </div>
-                  <p className="text-xs text-gray-400 mt-1">ใส่ 0 = ไม่จำกัดเวลา</p>
-                </div>
+                <p className="text-xs text-gray-400 mt-1">เวลาทำแบบทดสอบ{Number(currentAssessment.timeLimitMinutes) > 0 ? ` ${currentAssessment.timeLimitMinutes} นาที` : ' ไม่จำกัด'} — ตั้งไว้ที่ Questionnaire Management แล้ว</p>
               </div>
 
               <div className="flex items-center justify-between gap-3">
