@@ -21,7 +21,7 @@ import { getDemoMode } from '@/lib/demo/demoMode'
 import { parseFormJson, type ImportResult } from '@/lib/assessment/importFormJson'
 import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
 import { duplicateKeys, hasDuplicateAnswers, normalizeText } from '@/lib/assessment/authoring'
-import { REVEAL_MODES, type RevealMode } from '@/lib/assessment/reveal'
+import { REVEAL_MODES, revealResults, type QuestionVerdict, type RevealMode } from '@/lib/assessment/reveal'
 import { clampMinutes, loadQuizDefaults, saveQuizDefaults, startingSettings } from '@/lib/assessment/quizDefaults'
 
 const DEMO_MODE = getDemoMode()
@@ -478,6 +478,8 @@ function AssessmentEditor({
   const [allowRetakeOnFail, setAllowRetakeOnFail] = useState(start.allowRetakeOnFail)
   // What a learner sees of their answers once they submit.
   const [revealMode, setRevealMode] = useState<RevealMode>(start.revealMode)
+  // The sample result card under the settings: opens when a reveal option is clicked.
+  const [revealPreviewOpen, setRevealPreviewOpen] = useState(false)
   const [questions, setQuestions] = useState<Question[]>(initial?.questions ?? [])
   // Drag-to-reorder: the question being dragged and the one it is over.
   const [dragId, setDragId] = useState<string | null>(null)
@@ -715,7 +717,8 @@ function AssessmentEditor({
                   <span className="text-xs font-bold text-gray-600" aria-hidden="true">การเฉลย</span>
                   {REVEAL_MODES.map((m) => (
                     <label key={m.value} title={m.hint} className="flex items-center gap-1.5 text-xs font-bold text-gray-600 cursor-pointer select-none">
-                      <input type="radio" name="revealMode" value={m.value} checked={revealMode === m.value} onChange={() => setRevealMode(m.value)}
+                      <input type="radio" name="revealMode" value={m.value} checked={revealMode === m.value} onChange={() => { setRevealMode(m.value); setRevealPreviewOpen(true) }}
+                        onClick={() => setRevealPreviewOpen(true)}
                         className="size-4 border-gray-300 text-freshket-500 focus:ring-2 focus:ring-freshket-300 cursor-pointer" />
                       {m.label}
                     </label>
@@ -733,6 +736,9 @@ function AssessmentEditor({
               </span>
             )}
           </div>
+          {mode === 'builder' && revealPreviewOpen && (
+            <RevealPreviewCard mode={revealMode} onClose={() => setRevealPreviewOpen(false)} />
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -1236,6 +1242,53 @@ function ImportFromFormModal({ onCancel, onImport }: {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// A sample of what a learner sees after submitting under the chosen reveal option. It runs the same revealResults the
+// server applies, over three made-up questions (one right, two wrong), so the card cannot drift from the real thing.
+const SAMPLE_VERDICTS: (QuestionVerdict & { text: string })[] = [
+  { questionId: 's1', text: 'ข้อ 1: สันในหมูอยู่ส่วนไหนของหมู', correct: true, pointsEarned: 1, pointsPossible: 1, correctLabel: 'ส่วนหลัง ใต้กระดูกสันหลัง' },
+  { questionId: 's2', text: 'ข้อ 2: อุณหภูมิเก็บเนื้อสดที่เหมาะสม', correct: false, pointsEarned: 0, pointsPossible: 1, correctLabel: '0–4 °C' },
+  { questionId: 's3', text: 'ข้อ 3: ผักใบเขียวควรแยกจากข้อใด', correct: false, pointsEarned: 0, pointsPossible: 1, correctLabel: 'ผลไม้ที่ปล่อยแก๊สเอทิลีน' },
+]
+
+function RevealPreviewCard({ mode, onClose }: { mode: RevealMode; onClose: () => void }) {
+  const shown = new Map(revealResults(SAMPLE_VERDICTS, mode).map((r) => [r.questionId, r]))
+  const meta = REVEAL_MODES.find((m) => m.value === mode)
+  return (
+    <div className="mt-3 bg-white rounded-2xl border border-freshket-200 shadow-sm p-4" role="region" aria-label="ตัวอย่างหน้าผลลัพธ์ของผู้เรียน">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold text-gray-900">ตัวอย่างที่ผู้เรียนเห็น: {meta?.label}</p>
+          <p className="text-xs text-gray-500 mt-0.5">{meta?.hint} · สมมติผู้เรียนตอบถูก 1 ข้อ ผิด 2 ข้อ (ได้ 1/3 คะแนน)</p>
+        </div>
+        <button type="button" onClick={onClose} aria-label="ปิดตัวอย่าง" className="p-1 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors shrink-0">
+          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {SAMPLE_VERDICTS.map((q) => {
+          const v = shown.get(q.questionId)
+          return (
+            <div key={q.questionId} className={`rounded-xl border p-3 ${!v ? 'border-dashed border-gray-200 bg-gray-50' : v.correct ? 'border-freshket-200' : 'border-rose-200'}`}>
+              <p className="text-xs font-bold text-gray-700">{q.text}</p>
+              {!v ? (
+                <p className="text-xs text-gray-400 mt-1.5">ไม่แสดงข้อนี้</p>
+              ) : (
+                <>
+                  <p className={`text-xs font-bold mt-1.5 ${v.correct ? 'text-freshket-600' : 'text-rose-500'}`}>{v.correct ? '✓ ตอบถูก' : '✗ ตอบผิด'}</p>
+                  {v.correct === false && (
+                    <p className="text-xs mt-1 text-gray-500">{v.correctLabel ? 'เฉลย: ' + v.correctLabel : 'ไม่เฉลยคำตอบที่ถูก'}</p>
+                  )}
+                </>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {mode === 'none' && <p className="text-xs text-gray-500 mt-3">ผู้เรียนเห็นแค่คะแนนรวม ไม่เห็นผลรายข้อ</p>}
     </div>
   )
 }

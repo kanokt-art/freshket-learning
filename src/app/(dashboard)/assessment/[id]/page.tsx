@@ -1147,7 +1147,7 @@ function ResultScreen({
   const mode = normalizeRevealMode(result?.revealMode)
   // Which questions the review lists: all of them, or only the ones this quiz chooses to reveal.
   const reviewed = mode === 'none' ? [] : questions.filter((q) => verdictByQuestion.has(q.id))
-  const reviewTitle = mode === 'correct' ? 'ข้อที่คุณตอบถูก' : mode === 'wrong' ? 'ข้อที่ควรทบทวน' : 'สรุปคำตอบ'
+  const reviewTitle = mode === 'correct' ? 'ข้อที่คุณตอบถูก' : mode === 'wrong' ? 'ผลรายข้อ (ไม่เฉลยคำตอบที่ถูก)' : 'สรุปคำตอบ'
 
   // "12/15 คะแนน": points won out of the points that could be won. A quiz of written answers only has none to
   // count, so it shows the percentage alone.

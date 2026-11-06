@@ -4,14 +4,14 @@
 //
 //   none     score only
 //   correct  which questions were answered right (no answers given away)
-//   wrong    which were answered wrong, with the right answer for each
+//   wrong    which were answered right and which wrong, but never the right answer of a question the learner missed
 //   all      every question, right or wrong, with the right answer for the wrong ones (the original behaviour)
 
 export type RevealMode = 'none' | 'correct' | 'wrong' | 'all'
 
 export const REVEAL_MODES: { value: RevealMode; label: string; hint: string }[] = [
   { value: 'all', label: 'เฉลยทุกข้อ', hint: 'ดูผลถูก/ผิดทุกข้อ และเห็นคำตอบที่ถูกของข้อที่ผิด' },
-  { value: 'wrong', label: 'เฉลยข้อผิด', hint: 'เห็นเฉพาะข้อที่ตอบผิด พร้อมคำตอบที่ถูก' },
+  { value: 'wrong', label: 'เฉลยข้อผิด', hint: 'เห็นว่าข้อไหนผิด แต่ไม่บอกคำตอบที่ถูก (ข้อที่ตอบถูกก็เห็นว่าถูก)' },
   { value: 'correct', label: 'เฉลยข้อถูก', hint: 'เห็นเฉพาะข้อที่ตอบถูก ไม่เฉลยคำตอบของข้อที่ผิด' },
   { value: 'none', label: 'ไม่เฉลย', hint: 'เห็นแค่คะแนนรวม' },
 ]
@@ -39,7 +39,8 @@ export function revealResults(results: readonly QuestionVerdict[], mode: RevealM
     case 'correct':
       return results.filter((r) => r.correct === true).map((r) => ({ ...r, correctLabel: '' }))
     case 'wrong':
-      return results.filter((r) => r.correct === false)
+      // The right answer of a missed question stays on the server; a question answered right needs none.
+      return results.map((r) => ({ ...r, correctLabel: '' }))
     default:
       return results.map((r) => ({ ...r }))
   }

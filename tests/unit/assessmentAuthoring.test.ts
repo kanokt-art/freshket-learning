@@ -41,9 +41,9 @@ describe('revealResults', () => {
     ])
   })
 
-  it('"wrong" keeps only the wrong ones, with the right answer', () => {
+  it('"wrong" marks every question right or wrong but never sends the right answer', () => {
     const out = revealResults(results, 'wrong')
-    expect(out.map((r) => r.questionId)).toEqual(['b'])
-    expect(out[0].correctLabel).toBe('B')
+    expect(out.map((r) => [r.questionId, r.correct])).toEqual([['a', true], ['b', false], ['c', null]])
+    expect(out.every((r) => r.correctLabel === '')).toBe(true)
   })
 })
