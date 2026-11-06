@@ -370,6 +370,41 @@ export async function postCoursePublishedToSlack(ev: SlackCoursePublishedEvent):
   })
 }
 
+export interface SlackDesignPublishedEvent {
+  title: string
+  description?: string
+  /** How many courses the package holds. */
+  courseCount: number
+  recipientCount: number
+  /** True when the Course Design was already live and people were added to it. */
+  isAddition: boolean
+  url?: string
+}
+
+/**
+ * A Course Design went live (the step where courses are launched), or people were added to a live one. One post,
+ * to the course channel, with the headcount — never one per learner.
+ */
+export async function postDesignPublishedToSlack(ev: SlackDesignPublishedEvent): Promise<boolean> {
+  const title = slackText(ev.title)
+  const headline = ev.isAddition
+    ? `มีผู้เรียนใหม่ถูกเพิ่มเข้า Course Design *${title}*`
+    : `<!channel> 🎓 Course Design ใหม่: *${title}*`
+  return postToCourseChannel({
+    text: ev.isAddition
+      ? `มีผู้เรียนใหม่ถูกเพิ่มเข้า Course Design "${title}"`
+      : `<!channel> Course Design ใหม่: ${title}`,
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text: headline } },
+      ...(ev.description ? [{ type: 'section', text: { type: 'mrkdwn', text: slackText(ev.description) } }] : []),
+      { type: 'context', elements: [{ type: 'mrkdwn', text: `${ev.courseCount} หลักสูตร · ถึงผู้เรียน ${ev.recipientCount} คน` }] },
+      ...(ev.url
+        ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'ดู Course Design' }, url: ev.url }] }]
+        : []),
+    ],
+  })
+}
+
 export interface SlackMandatoryPublishedEvent {
   title: string
   /** Departments the item targets; empty means everyone. */

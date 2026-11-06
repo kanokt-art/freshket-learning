@@ -92,6 +92,8 @@ export interface Course {
   durationMinutes: number
   thumbnailUrl?: string
   isRequired: boolean
+  /** Set by the Course Design sync: this course's audience, dates and published state are a projection of the live Course Designs that hold it (lib/courses/designProjection.ts), not edited on the course. */
+  designManaged?: boolean
   targetRoles: string[]
   assignedUserIds?: string[]  // specific user assignment (empty = all target roles) — resolved snapshot, kept in sync with assignedDepartments/assignedTeamIds below
   // Department names selected as a WHOLE condition in the "เลือกสังกัด"

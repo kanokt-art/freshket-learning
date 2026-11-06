@@ -50,7 +50,9 @@ function duration(ms: number): string {
   return m > 0 ? `${m} นาที ${s % 60} วินาที` : `${s} วินาที`
 }
 
-export function CourseDashboard({ courseId, rows }: { courseId: string; rows: DashRow[] }) {
+export function CourseDashboard({ courseIds, rows }: { courseIds: string[]; rows: DashRow[] }) {
+  // A stable key, so the quiz numbers are fetched again only when the set of courses changes.
+  const courseIdsKey = courseIds.join(',')
   const [range, setRange] = useState<RangeId>('90d')
   const [questionSort, setQuestionSort] = useState<'order' | 'wrong'>('order')
   const scoped = useMemo(() => rowsInRange(rows, range), [rows, range])
@@ -64,17 +66,18 @@ export function CourseDashboard({ courseId, rows }: { courseId: string; rows: Da
   const [quizLoading, setQuizLoading] = useState(false)
   useEffect(() => {
     if (DEMO_MODE) { setQuiz(buildDemoAnalytics()); return }
-    if (!courseId) return
+    if (courseIds.length === 0) return
     let cancelled = false
     setQuizLoading(true)
     const since = rangeStart(range)
-    authedFetch(`/api/assessment/analytics?courseId=${encodeURIComponent(courseId)}${since ? `&since=${encodeURIComponent(since.toISOString())}` : ''}`)
+    authedFetch(`/api/assessment/analytics?courseIds=${encodeURIComponent(courseIds.join(','))}${since ? `&since=${encodeURIComponent(since.toISOString())}` : ''}`)
       .then(async (res) => (res.ok ? ((await res.json()) as AttemptAnalytics) : null))
       .then((data) => { if (!cancelled) setQuiz(data) })
       .catch(() => { if (!cancelled) setQuiz(null) })
       .finally(() => { if (!cancelled) setQuizLoading(false) })
     return () => { cancelled = true }
-  }, [courseId, range])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseIdsKey, range])
 
   const joined = scoped.filter((r) => !!r.record && r.record.status !== 'not_started').length
   const finishedPct = joined > 0 ? Math.round((status.completed / joined) * 100) : null

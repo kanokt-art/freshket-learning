@@ -15,8 +15,9 @@ export async function GET(req: NextRequest) {
   const gate = await requireSuperAdmin(req)
   if (!gate.ok) return gate.response
 
-  const courseId = req.nextUrl.searchParams.get('courseId') ?? ''
-  if (!ID_RE.test(courseId)) return NextResponse.json({ error: 'Invalid courseId' }, { status: 400 })
+  // One course (?courseId=) or several (?courseIds=a,b,c) — a Course Design looks at all of its courses at once.
+  const ids = (req.nextUrl.searchParams.get('courseIds') ?? req.nextUrl.searchParams.get('courseId') ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+  if (ids.length === 0 || ids.length > 50 || !ids.every((x) => ID_RE.test(x))) return NextResponse.json({ error: 'Invalid courseId' }, { status: 400 })
 
   // Optional: only tries made on or after this date.
   const sinceRaw = req.nextUrl.searchParams.get('since')
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const store = getStore()
-    const rows = await store.query('assessmentAttempts', { where: [{ field: 'courseId', op: '==', value: courseId }] })
+    const rows = (await Promise.all(ids.map((courseId) => store.query('assessmentAttempts', { where: [{ field: 'courseId', op: '==', value: courseId }] })))).flat()
     const time = (v: unknown) => (v instanceof Date ? v.getTime() : v ? new Date(v as string).getTime() || 0 : 0)
     const attempts = rows.filter((a) => !since || time(a.createdAt) >= since.getTime()) as unknown as AttemptRow[]
 

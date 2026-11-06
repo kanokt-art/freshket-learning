@@ -6,9 +6,12 @@ import { Header } from '@/components/layout/Header'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
 import { CoursePackageEditor, type PackageDraft } from '@/components/features/CoursePackageEditor'
 import { useAuth } from '@/hooks/useAuth'
-import { useCourses, useCoursePackages } from '@/hooks/useFirestore'
+import { useCourses, useCoursePackages, useAllUsers, useAllTrainingRecords, useDepartments, useTeams } from '@/hooks/useFirestore'
 import { save, remove, patch } from '@/lib/data/collection'
-import { alertError, confirmAction } from '@/lib/ui/alert'
+import { authedFetch } from '@/lib/api/authedFetch'
+import { alertError, alertSuccess, confirmAction } from '@/lib/ui/alert'
+import { designRecipients, notifyDesignLaunch } from '@/lib/notifications/designNotify'
+import { isInCourseTarget } from '@/lib/courses/audience'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { MOCK_COURSE_PACKAGES } from '@/lib/utils/mockData'
 import type { Course } from '@/types/course'
@@ -22,14 +25,21 @@ function fmtDate(d: Date | string | undefined) {
   return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' })
 }
 
-// Course Design: gather existing courses into one package, in the order they should be taken, and let learners work
-// through it. This is where a super_admin makes, edits, publishes and deletes them; learners meet them on My Course
-// and at /courses/design/<id>.
+// Course Design: the step where courses are launched. A super_admin gathers existing courses into one package, in
+// the order they should be taken, says who the learners are and when it opens, and publishes it. A course on its own
+// is only a draft of content. Learners meet a Course Design on My Course and at /courses/design/<id>.
+//
+// Saving a Course Design also runs the sync that carries its audience and dates onto its courses (the rest of the app
+// reads them there), and publishing it tells the learners.
 export default function CourseDesignPage() {
   const { user } = useAuth()
   const router = useRouter()
   const { data: liveCourses } = useCourses()
   const { data: livePackages, loading } = useCoursePackages()
+  const { data: allUsers } = useAllUsers()
+  const { data: departments } = useDepartments()
+  const { data: teams } = useTeams()
+  const { data: records } = useAllTrainingRecords(true)
 
   const allowed = !user || user.role === 'super_admin'
   useEffect(() => { if (!allowed) router.replace('/courses') }, [allowed, router])
@@ -42,23 +52,84 @@ export default function CourseDesignPage() {
 
   const [editing, setEditing] = useState<CoursePackage | 'new' | null>(null)
   const [saving, setSaving] = useState(false)
+  const [converting, setConverting] = useState(false)
+
+  // Courses that are live but still carry their own audience: they have no Course Design yet.
+  const unwrapped = useMemo(() => {
+    if (DEMO_MODE) return []
+    const held = new Set(packages.flatMap((p) => p.courseIds))
+    return courses.filter((c) => c.isPublished && !c.designManaged && !held.has(c.id))
+  }, [courses, packages])
 
   if (!allowed) return null
 
+  /** Carry the Course Designs' audience and dates onto their courses. Quiet when it works. */
+  async function syncCourses(): Promise<boolean> {
+    if (DEMO_MODE) return true
+    try {
+      const res = await authedFetch('/api/course-designs/sync', { method: 'POST' })
+      if (res.ok) return true
+      throw new Error((await res.json().catch(() => null))?.error ?? String(res.status))
+    } catch (e) {
+      void alertError('บันทึกแล้ว แต่ซิงก์ไปที่หลักสูตรไม่สำเร็จ', `${e instanceof Error ? e.message : e} — ลองบันทึกอีกครั้ง ผู้เรียนจะยังเห็นค่าเดิมจนกว่าจะซิงก์สำเร็จ`)
+      return false
+    }
+  }
+
   async function handleSave(draft: PackageDraft) {
     const now = new Date()
+    const before = editing && editing !== 'new' ? editing : null
+    const pkgShape = {
+      assignedUserIds: draft.assignedUserIds, assignedDepartments: draft.assignedDepartments,
+      assignedTeamIds: draft.assignedTeamIds, targetRoles: draft.targetRoles, courseIds: draft.courseIds,
+    }
+    const wasPublished = !!before?.isPublished
+    const previousAudience = new Set(before ? allUsers.filter((u) => isInCourseTarget(before, u)).map((u) => u.uid) : [])
+
+    // Going live (or adding people to a live one) tells learners: say how many, before it happens.
+    if (draft.isPublished && !DEMO_MODE) {
+      const n = designRecipients(pkgShape, allUsers, records, user?.uid, wasPublished ? previousAudience : undefined).length
+      const ok = await confirmAction({
+        title: wasPublished ? 'บันทึกและเพิ่มผู้เรียน?' : 'เผยแพร่ Course Design นี้?',
+        text: n > 0
+          ? `จะแจ้งเตือนผู้เรียน ${n} คน และถามต่อว่าจะประกาศใน Slack ไหม (คนที่เริ่มเรียนไปแล้วจะไม่ถูกแจ้งซ้ำ)`
+          : 'ไม่มีผู้เรียนใหม่ที่ต้องแจ้งเตือน',
+        confirmText: wasPublished ? 'บันทึก' : 'เผยแพร่',
+        cancelText: 'กลับไปแก้ไข',
+      })
+      if (!ok) return
+    }
+
     setSaving(true)
     try {
+      const fields = {
+        title: draft.title, description: draft.description, courseIds: draft.courseIds, sequential: draft.sequential,
+        isPublished: draft.isPublished,
+        assignedUserIds: draft.assignedUserIds, assignedDepartments: draft.assignedDepartments, assignedTeamIds: draft.assignedTeamIds,
+        targetRoles: draft.targetRoles,
+        startDate: draft.startDate ? new Date(`${draft.startDate}T00:00:00`) : null,
+        endDate: draft.endDate ? new Date(`${draft.endDate}T23:59:59`) : null,
+        updatedAt: now,
+      }
+      let id = before?.id ?? ''
       if (DEMO_MODE) {
-        setDemoPackages((prev) => editing && editing !== 'new'
-          ? prev.map((p) => (p.id === editing.id ? { ...p, ...draft, updatedAt: now } : p))
-          : [{ id: `package-${Date.now()}`, ...draft, createdBy: user?.uid ?? 'demo', createdAt: now, updatedAt: now }, ...prev])
-      } else if (editing && editing !== 'new') {
-        await save('coursePackages', { id: editing.id, ...draft, updatedAt: now })
+        const asDoc = { ...fields, startDate: fields.startDate ?? undefined, endDate: fields.endDate ?? undefined }
+        setDemoPackages((prev) => before
+          ? prev.map((p) => (p.id === before.id ? { ...p, ...asDoc } : p))
+          : [{ id: `package-${Date.now()}`, ...asDoc, createdBy: user?.uid ?? 'demo', createdAt: now }, ...prev])
+      } else if (before) {
+        await save('coursePackages', { id: before.id, ...fields })
       } else {
-        await save('coursePackages', { id: '', ...draft, createdBy: user?.uid ?? '', createdAt: now, updatedAt: now })
+        id = (await save('coursePackages', { id: '', ...fields, createdBy: user?.uid ?? '', createdAt: now })).id
       }
       setEditing(null)
+      await syncCourses()
+      if (draft.isPublished && !DEMO_MODE) {
+        notifyDesignLaunch({
+          pkg: { id, title: draft.title, ...pkgShape },
+          wasPublished, previousAudienceUids: previousAudience, users: allUsers, records, currentUid: user?.uid,
+        })
+      }
     } catch (e) {
       void alertError('บันทึกไม่สำเร็จ', e instanceof Error ? e.message : String(e))
     } finally {
@@ -69,8 +140,22 @@ export default function CourseDesignPage() {
   async function togglePublish(p: CoursePackage) {
     const next = !p.isPublished
     try {
-      if (DEMO_MODE) setDemoPackages((prev) => prev.map((x) => (x.id === p.id ? { ...x, isPublished: next } : x)))
-      else await patch('coursePackages', p.id, { isPublished: next, updatedAt: new Date() })
+      if (DEMO_MODE) { setDemoPackages((prev) => prev.map((x) => (x.id === p.id ? { ...x, isPublished: next } : x))); return }
+      if (next) {
+        const n = designRecipients(p as never, allUsers, records, user?.uid).length
+        const ok = await confirmAction({
+          title: 'เผยแพร่ Course Design นี้?',
+          text: n > 0 ? `จะแจ้งเตือนผู้เรียน ${n} คน และถามต่อว่าจะประกาศใน Slack ไหม` : 'ไม่มีผู้เรียนใหม่ที่ต้องแจ้งเตือน',
+          confirmText: 'เผยแพร่',
+          cancelText: 'ยกเลิก',
+        })
+        if (!ok) return
+      }
+      await patch('coursePackages', p.id, { isPublished: next, updatedAt: new Date() })
+      await syncCourses()
+      if (next) {
+        notifyDesignLaunch({ pkg: { ...p, title: p.title } as never, wasPublished: false, users: allUsers, records, currentUid: user?.uid })
+      }
     } catch (e) {
       void alertError('เปลี่ยนสถานะไม่สำเร็จ', e instanceof Error ? e.message : String(e))
     }
@@ -79,17 +164,39 @@ export default function CourseDesignPage() {
   async function handleDelete(p: CoursePackage) {
     const ok = await confirmAction({
       title: `ลบ "${p.title}"?`,
-      text: 'ลบเฉพาะชุด Course Design ส่วนหลักสูตรข้างในและความคืบหน้าของผู้เรียนยังอยู่ครบ',
+      text: 'หลักสูตรข้างในจะกลับเป็นร่างถ้าไม่ได้อยู่ใน Course Design ที่เผยแพร่อันอื่น ความคืบหน้าของผู้เรียนยังอยู่ครบ',
       confirmText: 'ลบ',
       cancelText: 'ยกเลิก',
       danger: true,
     })
     if (!ok) return
     try {
-      if (DEMO_MODE) setDemoPackages((prev) => prev.filter((x) => x.id !== p.id))
-      else await remove('coursePackages', p.id)
+      if (DEMO_MODE) { setDemoPackages((prev) => prev.filter((x) => x.id !== p.id)); return }
+      await remove('coursePackages', p.id)
+      await syncCourses()
     } catch (e) {
       void alertError('ลบไม่สำเร็จ', e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function handleConvert() {
+    const ok = await confirmAction({
+      title: `แปลง ${unwrapped.length} หลักสูตรเป็น Course Design?`,
+      text: 'แต่ละหลักสูตรที่เปิดอยู่จะได้ Course Design ของตัวเอง พร้อมผู้เรียนและวันที่เดิมทุกอย่าง ผู้เรียนจะไม่เห็นอะไรเปลี่ยนไป หลังจากนั้นผู้เรียนและวันที่ของหลักสูตรกำหนดที่ Course Design เท่านั้น',
+      confirmText: 'แปลง',
+      cancelText: 'ยกเลิก',
+    })
+    if (!ok) return
+    setConverting(true)
+    try {
+      const res = await authedFetch('/api/course-designs/convert', { method: 'POST' })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(json?.error ?? String(res.status))
+      void alertSuccess('แปลงเรียบร้อย', `สร้าง Course Design ${json?.converted?.length ?? 0} ชุด`)
+    } catch (e) {
+      void alertError('แปลงไม่สำเร็จ', e instanceof Error ? e.message : String(e))
+    } finally {
+      setConverting(false)
     }
   }
 
@@ -99,8 +206,20 @@ export default function CourseDesignPage() {
       <CourseManagementTabs />
 
       <div className="flex-1 overflow-auto p-6">
+        {unwrapped.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-sm text-amber-800">
+              มี <span className="font-bold">{unwrapped.length}</span> หลักสูตรที่เปิดอยู่และยังกำหนดผู้เรียนที่ตัวหลักสูตรเอง — แปลงเป็น Course Design เพื่อจัดการผู้เรียน วันที่ และสรุปผลในที่เดียว (ผู้เรียนไม่เห็นอะไรเปลี่ยน)
+            </p>
+            <button onClick={() => void handleConvert()} disabled={converting}
+              className="shrink-0 px-4 py-2 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 transition-all disabled:opacity-60">
+              {converting ? 'กำลังแปลง...' : 'แปลงเป็น Course Design'}
+            </button>
+          </div>
+        )}
+
         <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-          <p className="text-sm text-gray-500">รวมหลักสูตรหลายอันเป็นชุดเดียว เรียงลำดับได้ แล้วให้ผู้เรียนเรียนต่อเนื่องในชุดนั้น</p>
+          <p className="text-sm text-gray-500">ขั้นตอนสุดท้ายของการยิงหลักสูตร: รวมหลักสูตร เรียงลำดับ กำหนดผู้เรียนและวันที่ แล้วเผยแพร่ให้ผู้เรียนเรียนต่อเนื่อง</p>
           <button onClick={() => setEditing('new')}
             className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all">
             <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
@@ -125,15 +244,17 @@ export default function CourseDesignPage() {
                   <tr>
                     <th className="text-left text-xs font-bold text-gray-500 px-4 py-3">Course Design</th>
                     <th className="text-left text-xs font-bold text-gray-500 px-3 py-3">Courses (in order)</th>
+                    <th className="text-center text-xs font-bold text-gray-500 px-3 py-3">Learners</th>
+                    <th className="text-left text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Start Date</th>
                     <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Sequential</th>
                     <th className="text-center text-xs font-bold text-gray-500 px-3 py-3">Status</th>
-                    <th className="text-left text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Last Updated</th>
                     <th className="px-3 py-3" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {packages.map((p) => {
                     const inside = p.courseIds.map((id) => byId.get(id)).filter((c): c is Course => !!c)
+                    const learners = p.assignedUserIds?.length ?? 0
                     return (
                       <tr key={p.id} className="hover:bg-gray-50/60 transition-colors align-top">
                         <td className="px-4 py-3 max-w-xs">
@@ -158,6 +279,10 @@ export default function CourseDesignPage() {
                           )}
                           <p className="text-xs text-gray-400 mt-1.5">{p.courseIds.length} หลักสูตร</p>
                         </td>
+                        <td className="px-3 py-3 text-center text-sm font-bold text-gray-700 tabular-nums">
+                          {learners > 0 ? learners : <span className="text-gray-300 font-normal">—</span>}
+                        </td>
+                        <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">{p.startDate ? fmtDate(p.startDate) : 'ทันที'}</td>
                         <td className="px-3 py-3 text-center">
                           {p.sequential
                             ? <span className="inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">เรียนตามลำดับ</span>
@@ -168,7 +293,6 @@ export default function CourseDesignPage() {
                             {p.isPublished ? 'เผยแพร่แล้ว' : 'ร่าง'}
                           </span>
                         </td>
-                        <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">{fmtDate(p.updatedAt)}</td>
                         <td className="px-3 py-3">
                           <div className="flex items-center justify-end gap-1">
                             <button onClick={() => setEditing(p)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-all">แก้ไข</button>
@@ -194,6 +318,11 @@ export default function CourseDesignPage() {
         <CoursePackageEditor
           initial={editing === 'new' ? null : editing}
           courses={courses}
+          allUsers={allUsers}
+          departments={departments}
+          teams={teams}
+          records={records}
+          isSuperAdmin
           saving={saving}
           onSave={(d) => void handleSave(d)}
           onClose={() => setEditing(null)}

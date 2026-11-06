@@ -39,6 +39,16 @@ export type AnnounceEvent =
       isAddition?: boolean
     }
   | {
+      /** A Course Design went live, or people were added to a live one. The server reads its title from the database; super_admin only. */
+      kind: 'design_published'
+      packageId: string
+      /** For the confirmation dialog only: the server ignores it. */
+      title: string
+      courseCount: number
+      recipientCount: number
+      isAddition?: boolean
+    }
+  | {
       kind: 'mandatory_published'
       /** The item announced. The server reads its title and departments from the database; super_admin only. */
       itemId: string

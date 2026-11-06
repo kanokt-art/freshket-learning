@@ -13,6 +13,10 @@ export function describeAnnouncement(event: AnnounceEvent): string {
       return event.isAddition
         ? `จะโพสต์ที่ช่องหลักสูตรว่ามีผู้เรียน ${event.recipientCount} คนถูกเพิ่มเข้าหลักสูตร "${event.courseTitle}" (ไม่แท็ก @channel)`
         : `จะโพสต์ที่ช่องหลักสูตรว่ามีหลักสูตรใหม่ "${event.courseTitle}" และแท็ก @channel ทั้งช่อง`
+    case 'design_published':
+      return event.isAddition
+        ? `จะโพสต์ที่ช่องหลักสูตรว่ามีผู้เรียน ${event.recipientCount} คนถูกเพิ่มเข้า Course Design "${event.title}" (ไม่แท็ก @channel)`
+        : `จะโพสต์ที่ช่องหลักสูตรว่ามี Course Design ใหม่ "${event.title}" (${event.courseCount} หลักสูตร) ถึงผู้เรียน ${event.recipientCount} คน และแท็ก @channel ทั้งช่อง`
     case 'mandatory_published':
       return `จะโพสต์ใน Slack และส่ง DM แจ้ง Mandatory Reading "${event.title}" ถึงคนในกลุ่มเป้าหมาย (${event.recipientCount} คน)`
     default:

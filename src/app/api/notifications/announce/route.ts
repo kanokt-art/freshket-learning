@@ -16,6 +16,7 @@ import type { UserProfile } from '@/types/user'
 import { announceNewShadowVisit } from '@/lib/server/shadowNotice'
 import {
   postCoursePublishedToSlack,
+  postDesignPublishedToSlack,
   postMandatoryPublishedToSlack,
   postShadowSubmittedToSlack,
   postShadowAckedToSlack,
@@ -138,6 +139,25 @@ export async function POST(req: NextRequest) {
           recipientCount: count(body.recipientCount),
           isAddition: body.isAddition === true,
           courseUrl: appUrl(`/courses/${courseId}`),
+        })
+        break
+      }
+
+      // A Course Design went live (or people were added to it). Title, description and course count come from the
+      // stored package; only the headcount is the caller's, and it is capped.
+      case 'design_published': {
+        if (!gate.isSuperAdmin) return notAllowed()
+        const packageId = idOf(body.packageId)
+        if (!packageId) return bad('Invalid packageId')
+        const pkg = (await store.get('coursePackages', packageId)) as (Doc & { isPublished?: boolean; title?: string; description?: string; courseIds?: string[] }) | null
+        if (!pkg?.isPublished || typeof pkg.title !== 'string' || !pkg.title) return bad('Course Design not found or not published')
+        posted = await postDesignPublishedToSlack({
+          title: pkg.title,
+          description: typeof pkg.description === 'string' && pkg.description.trim() ? pkg.description.trim().slice(0, 300) : undefined,
+          courseCount: Array.isArray(pkg.courseIds) ? pkg.courseIds.length : 0,
+          recipientCount: count(body.recipientCount),
+          isAddition: body.isAddition === true,
+          url: appUrl(`/courses/design/${packageId}`),
         })
         break
       }
