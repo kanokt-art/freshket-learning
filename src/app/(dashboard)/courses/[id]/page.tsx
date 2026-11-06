@@ -205,7 +205,7 @@ export default function CourseDetailPage() {
   const { data: allUsers }    = useAllUsers(isAdmin)
   const { data: teams }       = useTeams(isAdmin)
   const { data: departments } = useDepartments(isAdmin)
-  const [tab, setTab] = useState<'results' | 'dashboard' | 'content'>('results')
+  const [tab, setTab] = useState<'dashboard' | 'results'>('dashboard')
   // A lead's report covers only the people they look after.
   const teamUids = useMemo(
     () => (isLead ? new Set(managedMembers(user, allUsers, teams).map((m) => m.uid)) : null),
@@ -520,41 +520,8 @@ export default function CourseDetailPage() {
           </button>
         )}
 
-        {/* Tab switcher — admin/lead only */}
-        {isAdmin && (
-          <div className="flex items-center gap-0.5 bg-gray-100 rounded-xl p-1 shrink-0">
-            <button
-              type="button"
-              onClick={() => setTab('results')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 ${
-                tab === 'results' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              ผลการเรียน
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab('dashboard')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 ${
-                tab === 'dashboard' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Dashboard
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab('content')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 ${
-                tab === 'content' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              เนื้อหา
-            </button>
-          </div>
-        )}
-
         {/* Steps pill — content tab only */}
-        {(!isAdmin || tab === 'content') && (
+        {!isAdmin && (
           <div className="shrink-0 text-xs font-bold text-freshket-600 bg-freshket-50 px-3 py-1.5 rounded-full border border-freshket-200">
             {steps.filter((s) => isDone(s.id)).length} / {steps.length} ขั้นตอน
           </div>
@@ -574,6 +541,18 @@ export default function CourseDetailPage() {
       )}
 
       {/* A signal on the right edge when a team lead or manager has said something new: opens the journey */}
+      {/* Report tabs: a bar of their own, so they are the first thing seen. Dashboard opens first. */}
+      {isAdmin && (
+        <div role="tablist" aria-label="รายงานหลักสูตร" className="bg-white border-b border-gray-100 px-6 flex items-center gap-6 shrink-0">
+          {([['dashboard', 'Dashboard'], ['results', 'Member Report']] as const).map(([key, label]) => (
+            <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
+              className={`py-3 text-sm border-b-2 transition-colors ${tab === key ? 'text-freshket-600 font-bold border-freshket-500' : 'text-gray-500 border-transparent hover:text-gray-700'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {!isAdmin && newestReview > 0 && feedbackSheet === null && (() => {
         const isNew = newestReview > feedbackSeen
         return (
@@ -641,7 +620,7 @@ export default function CourseDetailPage() {
       )}
 
       {/* ── Content tab ──────────────────────────────────────────────────── */}
-      {(!isAdmin || tab === 'content') && <>
+      {!isAdmin && <>
 
       {/* ── Mobile stepper (tabs) ─────────────────────────────────────────── */}
       <div className="lg:hidden bg-white border-b border-gray-100 px-4 overflow-x-auto">
@@ -1665,7 +1644,12 @@ function CourseDashboardTab({ courseId, course, allRecords, allUsers }: {
       })
   }, [course, allUsers, allRecords, courseId])
   const courseIds = useMemo(() => [courseId], [courseId])
-  return <CourseDashboard courseIds={courseIds} rows={rows} />
+  // The page is a fixed-height column, so the dashboard scrolls inside its own box.
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto">
+      <CourseDashboard courseIds={courseIds} rows={rows} />
+    </div>
+  )
 }
 
 function CourseResultsDashboard({
