@@ -1347,16 +1347,6 @@ function LessonPreviewModal({ topics, assessments, courseId, hasKeyTakeAway, key
 
   const activeQuizAssessment = assessments.find((a) => a.id === selectedLesson?.assessmentId)
 
-  // Try the quiz for real, exactly as a learner would (same page, same grading).
-  function tryQuiz(lesson: CourseLesson) {
-    const step = lesson.quizRole === 'pre_test' ? 'pre' : lesson.quizRole === 'post_test' ? 'post' : undefined
-    sessionStorage.setItem('assessment_return', JSON.stringify({
-      courseId,
-      ...(step ? { step, lessonId: lesson.id } : {}),
-    }))
-    router.push(`/assessment/${lesson.assessmentId}?preview=1`)
-  }
-
   const embedUrl = selectedLesson?.type === 'video' ? toPreviewEmbedUrl(selectedLesson.videoUrl ?? '')
     : selectedLesson?.type === 'file' ? toPreviewEmbedUrl(selectedLesson.fileUrl ?? '')
     : null
@@ -1528,17 +1518,6 @@ function LessonPreviewModal({ topics, assessments, courseId, hasKeyTakeAway, key
                   {selectedLesson.type === 'quiz' && (
                     selectedLesson.assessmentId ? (
                       <div className="flex-1 min-h-0 flex flex-col gap-3">
-                        {courseId ? (
-                          <div className="shrink-0 flex flex-wrap items-center gap-3">
-                            <button type="button" onClick={() => tryQuiz(selectedLesson)}
-                              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-colors">
-                              ทดลองทำแบบทดสอบ
-                            </button>
-                            <p className="text-xs text-amber-600">ทดลองเหมือนผู้เรียน: ไม่บันทึกคะแนนและไม่แจ้งเตือนใคร</p>
-                          </div>
-                        ) : (
-                          <p className="shrink-0 text-xs text-gray-400">บันทึกหลักสูตรก่อน จึงจะทดลองทำแบบทดสอบจริงได้</p>
-                        )}
                         <div className="flex-1 min-h-0 flex flex-col">
                           <QuizPreviewInline key={selectedLesson.id} assessment={activeQuizAssessment} />
                         </div>
