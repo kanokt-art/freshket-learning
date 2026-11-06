@@ -25,8 +25,8 @@ export interface HighlightsDoc {
 }
 
 export const HIGHLIGHTS_DOC = 'homeHighlights'
-/** How many of the newest items show while nothing is pinned. */
-export const AUTO_COUNT = 6
+/** The most a tab shows, pinned or not: the five newest, so an older one drops off as a newer one arrives. */
+export const AUTO_COUNT = 5
 
 export const KIND_LABEL: Record<HighlightKind, string> = {
   mandatory: 'Mandatory',
@@ -86,7 +86,7 @@ export function pickHighlights(
     .sort((a, b) => b.pinnedAt.localeCompare(a.pinnedAt))
     .map((p) => byKey.get(p.key))
     .filter((c): c is HighlightItem => !!c)
-  if (pinned.length > 0) return { items: pinned, pinned: true }
+  if (pinned.length > 0) return { items: pinned.slice(0, AUTO_COUNT), pinned: true }
   return { items: candidates.slice(0, AUTO_COUNT), pinned: false }
 }
 

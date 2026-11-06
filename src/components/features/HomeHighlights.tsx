@@ -51,7 +51,7 @@ function Card({ item, pinned, onOpen }: { item: HighlightItem; pinned: boolean; 
       </div>
     </>
   )
-  const cls = 'snap-start shrink-0 w-60 sm:w-64 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden text-left hover:shadow-md transition-all duration-150'
+  const cls = 'block min-w-0 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden text-left hover:shadow-md transition-all duration-150'
   return onOpen
     ? <button type="button" onClick={onOpen} className={cls}>{body}</button>
     : <Link href={item.href} className={cls}>{body}</Link>
@@ -135,7 +135,7 @@ export function HomeHighlightsRow({ uid, candidates, pins, hidden, bodies }: {
       {current.items.length === 0 ? (
         <p className="text-xs text-gray-400 py-6 text-center bg-white rounded-2xl border border-gray-100">{TABS.find((t) => t.id === tab)?.empty}</p>
       ) : (
-        <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-5 px-5 scroll-px-5">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
           {current.items.map((item) => (
             <Card key={item.key} item={item} pinned={current.pinned} onOpen={item.kind === 'announcement' ? () => setReading(item) : undefined} />
           ))}

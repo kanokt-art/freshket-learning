@@ -447,10 +447,10 @@ export default function SaleDashboardPage() {
                     <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
                   </button>
                 </div>
-                {/* One row that scrolls sideways, on a phone and on a computer. */}
-                <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-2 -mx-5 px-5 scroll-px-5">
+                {/* Five to a row; more than five wrap onto the next row. */}
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
                   {listedForYou.map((course) => (
-                    <div key={course.id} className="snap-start shrink-0 w-56 sm:w-60">
+                    <div key={course.id} className="min-w-0 flex">
                       <LearnerCourseGridCard
                         course={course}
                         record={recordByCourse[course.id]}
