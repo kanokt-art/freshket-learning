@@ -108,8 +108,8 @@ function toMillis(v: unknown): number {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function ManagerPage() {
   const { user } = useAuth()
-  // A team lead sees one team, so a Team column would repeat the same value on every row.
-  const showTeamColumn = user?.role !== 'team_lead'
+  // A team lead sees the same Team column and Team filter as a manager (a lead can be given more than one team).
+  const showTeamColumn = true
   const { data: allUsers } = useAllUsers()
   const { data: teams } = useTeams()
 
