@@ -4,8 +4,6 @@ import { lessonLabel, topicLabel, isUnnamedLesson, isUnnamedTopic, defaultLesson
 import { isInCourseTarget } from '@/lib/courses/audience'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { confirmAndAnnounce } from '@/lib/notifications/confirmAnnounce'
-import { pushNotification } from '@/lib/notifications/push'
 import dynamic from 'next/dynamic'
 
 // recharts is ~94 kB gzipped and this page only uses it for one admin-only,
@@ -21,8 +19,7 @@ const DeptCompletionChart = dynamic(
   },
 )
 import { useAuth } from '@/hooks/useAuth'
-import { useCourses, useAssessments, useMyTrainingRecords, useAllUsers, useAllTrainingRecords, useDepartments, useTeams, useBucketResultsFor } from '@/hooks/useFirestore'
-import { courseQuestionnaireId } from '@/lib/courses/questionnaire'
+import { useCourses, useAssessments, useMyTrainingRecords, useAllUsers, useAllTrainingRecords, useDepartments, useTeams } from '@/hooks/useFirestore'
 import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import {
   CATEGORY_LABELS,
@@ -35,12 +32,10 @@ import {
   type CourseLesson,
   type LessonType,
 } from '@/types/course'
-import { STATUS_LABELS, STATUS_COLORS, recordProgressPercent, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
+import { STATUS_LABELS, STATUS_COLORS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
 import { QUESTION_TYPE_LABELS, QUESTION_TYPE_COLORS, type Assessment } from '@/types/assessment'
-import type { UserProfile, UserRole, Department, Team } from '@/types/user'
-import { getTeamLeadIds, getTeamManagerIds } from '@/types/user'
-import { save, remove, patch, removeMany } from '@/lib/data/collection'
-import { formatDateEN } from '@/lib/utils/dateFormatter'
+import type { UserProfile, Department, Team } from '@/types/user'
+import { save, remove, patch } from '@/lib/data/collection'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
 import { MyCourseTabs } from '@/components/layout/MyCourseTabs'
@@ -48,21 +43,18 @@ import { CourseSubTabs } from '@/components/layout/CourseSubTabs'
 import { LearnerCourseDashboard } from '@/components/features/LearnerCourseDashboard'
 import { CourseResultsImport } from '@/components/features/CourseResultsImport'
 
-import { getDemoMode, FRESHKET_LOGO_URL } from '@/lib/demo/demoMode'
+import { getDemoMode } from '@/lib/demo/demoMode'
 import { demoStore } from '@/lib/demo/demoStore'
 import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { InfoTooltip } from '@/components/common/InfoTooltip'
 import { alertError, confirmAction } from '@/lib/ui/alert'
-import { formatTenure } from '@/lib/users/tenure'
-import { CopyableText, StartDateCell } from '@/components/common/EmployeeCells'
+import { CopyableText } from '@/components/common/EmployeeCells'
 import { formatPersonName } from '@/lib/users/displayName'
 import { CourseDashboard } from '@/components/features/CourseDashboard'
-import { OverrideRecordModal, computeAssignedRows, sortLearnerRows, useLearnerSort, SortableTh, AssignedLearnersTable, AssignedLearnersTableModal, FilterCombobox, SidePanel, PanelFooter, computeGroupState, GroupCheckbox, IndividualAssignmentPanel, DepartmentTeamPicker, ConditionGroupPicker, SaveConfirmationModal, TENURE_BUCKETS, tenureYears, fmtTenure, type AssignedLearnerRow, type AssignedSortKey, type SortableLearnerRow, type GroupState, type DeptTreeNode , fmtDate, approxProgressPct } from '@/components/features/LearnerAssignment'
-import { onlyCurrentOrIncoming, isCurrentOrIncoming, isActiveEmployee } from '@/lib/users/active'
+import { IndividualAssignmentPanel, fmtDate, approxProgressPct } from '@/components/features/LearnerAssignment'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { BUCKET_ASSESSMENT_LIST, getBucketAssessment, MBTI_DEFINITION } from '@/lib/bucketAssessments'
-import { PHASE1_DEPARTMENTS, isTargetDepartment } from '@/lib/modules'
 const DEMO_MODE = getDemoMode()
 const ALL_CATEGORIES = Object.keys(CATEGORY_LABELS) as CourseCategory[]
 
@@ -124,82 +116,6 @@ function CategoryIcon({ category, className }: { category: CourseCategory; class
       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 01-.982-3.172M9.497 14.25a7.454 7.454 0 00.981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 007.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M7.73 9.728a6.726 6.726 0 002.748 1.35m8.272-6.842V4.5c0 2.108-.966 3.99-2.48 5.228m2.48-5.492a46.32 46.32 0 012.916.52 6.003 6.003 0 01-5.395 4.972m0 0a6.726 6.726 0 01-2.749 1.35m0 0a6.772 6.772 0 01-3.044 0" />
     </svg>
   )
-}
-
-// Notifies the right learners after a course's publish state or roster changes —
-// shared by the full edit-form save AND the quick publish toggle on the overview
-// modal, so both paths keep the same "don't re-notify already-enrolled users"
-// and "only ping newly-added assignees" rules.
-function notifyCoursePublishChanges(
-  c: Course,
-  wasPublished: boolean,
-  prevAssignedUserIds: string[] | undefined,
-  allUsers: UserProfile[],
-  allTrainingRecords: TrainingRecord[],
-  currentUid: string | undefined,
-) {
-  const alreadyEnrolled = new Set(
-    allTrainingRecords.filter(r => r.courseId === c.id).map(r => r.userId)
-  )
-
-  if (c.isPublished && !wasPublished) {
-    // First publish → notify all role-based or individually-assigned targets who aren't already enrolled
-    const isNotifyTarget = (u: UserProfile) =>
-      isCurrentOrIncoming(u) && isInCourseTarget(c, u) && !alreadyEnrolled.has(u.uid)
-    const targets = DEMO_MODE
-      ? demoStore.getUsers().filter(isNotifyTarget)
-      : allUsers.filter(isNotifyTarget)
-    // Two channels, two shapes. The bell is a personal feed, so it gets one
-    // item per learner; Slack is a shared channel, so it gets ONE post
-    // carrying the headcount — fanning out there would repeat the same
-    // announcement N times.
-    const recipients = targets.filter(u => u.uid !== currentUid)
-    recipients.forEach(u => {
-      pushNotification(u.uid, {
-        type: 'new_course',
-        title: `หลักสูตรใหม่: ${c.title}`,
-        body: `มีหลักสูตรใหม่สำหรับคุณ — คลิกเพื่อดูรายละเอียด`,
-        refId: c.id,
-        refPath: `/courses/${c.id}`,
-      })
-    })
-    if (recipients.length > 0) {
-      void confirmAndAnnounce({
-        kind: 'course_published',
-        courseId: c.id,
-        courseTitle: c.title,
-        courseDescription: c.description,
-        recipientCount: recipients.length,
-      })
-    }
-  } else if (c.isPublished && wasPublished && prevAssignedUserIds && (c.assignedUserIds?.length ?? 0) > 0) {
-    // Already-published course updated — notify only users newly added to assignedUserIds
-    const prevAssigned = new Set(prevAssignedUserIds)
-    const newlyAdded = (c.assignedUserIds ?? []).filter(
-      id => !prevAssigned.has(id) && !alreadyEnrolled.has(id)
-    )
-    const targets = allUsers.filter(u => newlyAdded.includes(u.uid) && isCurrentOrIncoming(u))
-    const recipients = targets.filter(u => u.uid !== currentUid)
-    recipients.forEach(u => {
-      pushNotification(u.uid, {
-        type: 'new_course',
-        title: `หลักสูตร: ${c.title}`,
-        body: `คุณถูกเพิ่มเข้าหลักสูตร — คลิกเพื่อดูรายละเอียด`,
-        refId: c.id,
-        refPath: `/courses/${c.id}`,
-      })
-    })
-    if (recipients.length > 0) {
-      void confirmAndAnnounce({
-        kind: 'course_published',
-        courseId: c.id,
-        courseTitle: c.title,
-        courseDescription: c.description,
-        recipientCount: recipients.length,
-        isAddition: true,
-      })
-    }
-  }
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -296,46 +212,6 @@ export default function CoursesPage() {
     return m
   }, [allTrainingRecords])
 
-
-  // Quick publish/unpublish from the overview modal's Settings tab — bypasses
-  // the full edit form but still runs the Firestore write and the same
-  // notify-on-publish rules as a normal save (via notifyCoursePublishChanges).
-  async function handleTogglePublish(course: Course, reopenOverview = true) {
-    const now = new Date()
-    const updated: Course = { ...course, isPublished: !course.isPublished, updatedAt: now }
-    if (DEMO_MODE) {
-      demoStore.updateCourse(course.id, updated)
-    } else {
-      await patch('courses', course.id, {
-        isPublished: updated.isPublished,
-        updatedAt: now,
-      })
-      setLocalUpdated((p) => ({ ...p, [course.id]: updated }))
-    }
-    notifyCoursePublishChanges(updated, course.isPublished, course.assignedUserIds, allUsers, allTrainingRecords, user?.uid)
-    if (reopenOverview) setLearnerResultsCourse(updated)
-  }
-
-  // Close or reopen a course for learners, after saying what it does. Closing hides it from EVERY
-  // learner — not yet started, in progress or finished — until it is published again; their records
-  // and scores are kept and come back with it.
-  async function togglePublishWithConfirm(course: Course, reopenOverview = false) {
-    const learners = enrollmentByCourseid[course.id]?.enrolled ?? 0
-    const yes = course.isPublished
-      ? await confirmAction({
-          title: 'ปิดการเผยแพร่หลักสูตรนี้?',
-          text: `ผู้เรียนทุกคน ทั้งที่ยังไม่เริ่ม กำลังเรียน และเรียนจบแล้ว จะไม่เห็นหลักสูตร "${course.title}" อีก จนกว่าจะเผยแพร่ใหม่ ประวัติและคะแนนของผู้เรียน${learners > 0 ? ` ${learners} คน` : ''}ยังอยู่ครบ และกลับมาเห็นเมื่อเผยแพร่อีกครั้ง`,
-          confirmText: 'ปิดการเผยแพร่',
-          danger: true,
-        })
-      : await confirmAction({
-          title: 'เผยแพร่หลักสูตรอีกครั้ง?',
-          text: `ผู้เรียนที่เกี่ยวข้องจะเห็นหลักสูตร "${course.title}" อีกครั้ง พร้อมความคืบหน้าเดิมของแต่ละคน`,
-          confirmText: 'เผยแพร่',
-        })
-    if (!yes) return
-    await handleTogglePublish(course, reopenOverview)
-  }
 
   async function handleDelete(course: Course) {
     setDeleting(true)
@@ -510,7 +386,6 @@ export default function CoursesPage() {
               enrollmentByCourseid={enrollmentByCourseid}
               onEdit={(course) => setEditingCourse(course)}
               onDelete={(course) => setConfirmDelete(course)}
-              onTogglePublish={(course) => void togglePublishWithConfirm(course)}
               onViewLearners={(course) => setLearnerResultsCourse(course)}
               onNavigate={(course) => router.push(`/courses/${course.id}`)}
             />
@@ -551,7 +426,6 @@ export default function CoursesPage() {
           allUsers={allUsers}
           allTrainingRecords={allTrainingRecords}
           onClose={() => setLearnerResultsCourse(null)}
-          onTogglePublish={() => togglePublishWithConfirm(learnerResultsCourse, true)}
         />
       )}
 
@@ -572,12 +446,8 @@ export default function CoursesPage() {
           key={editingCourse?.id ?? '__new__'}
           assessments={allAssessments}
           allUsers={allUsers}
-          allTrainingRecords={allTrainingRecords}
-          departments={departments}
-          teams={teams}
           onDone={(c) => {
             if (c) {
-              const wasPublished = editingCourse?.isPublished ?? false
               if (DEMO_MODE) {
                 if (editingCourse) demoStore.updateCourse(c.id, c)
                 else demoStore.addCourse(c)
@@ -585,14 +455,12 @@ export default function CoursesPage() {
                 if (editingCourse) setLocalUpdated((p) => ({ ...p, [c.id]: c }))
                 else setLocalCreated((p) => [c, ...p])
               }
-              notifyCoursePublishChanges(c, wasPublished, editingCourse?.assignedUserIds, allUsers, allTrainingRecords, user?.uid)
             }
             setShowCreate(false)
             setEditingCourse(null)
           }}
           userId={user?.uid ?? ''}
           editCourse={editingCourse ?? undefined}
-          isSuperAdmin={isSuperAdmin}
         />
       )}
     </div>
@@ -635,11 +503,11 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
 }
 
 // ── Course Table (list view) ────────────────────────────────────────────────────
-function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMap = {}, enrollmentByCourseid, onEdit, onDelete, onTogglePublish, onViewLearners, onNavigate }: {
+function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMap = {}, enrollmentByCourseid, onEdit, onDelete, onViewLearners, onNavigate }: {
   courses: Course[]; allAssessments: Assessment[]; allUsers: UserProfile[]; isSuperAdmin: boolean
   recordMap?: Record<string, TrainingStatus>
   enrollmentByCourseid: Record<string, { enrolled: number; completed: number; in_progress: number }>
-  onEdit: (c: Course) => void; onDelete: (c: Course) => void; onTogglePublish: (c: Course) => void; onViewLearners: (c: Course) => void; onNavigate: (c: Course) => void
+  onEdit: (c: Course) => void; onDelete: (c: Course) => void; onViewLearners: (c: Course) => void; onNavigate: (c: Course) => void
 }) {
   // Learners get a clean, read-only list — no authoring/publish/enrolment columns
   // and no edit/delete. They only see the course, its category, and their own
@@ -747,7 +615,7 @@ function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMa
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <div className="flex items-center gap-1.5">
-                    {/* "ปิดเผยแพร่" = was open to learners (has records) and is now closed; "ร่าง" = never opened. */}
+                    {/* Launching is a Course Design's job: "เผยแพร่แล้ว" = in a live Course Design, "ปิดเผยแพร่" = was open (has records) and no longer is, "ร่าง" = never launched. */}
                     <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${course.isPublished ? 'bg-freshket-100 text-freshket-700' : rec.enrolled > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
                       {course.isPublished ? 'เผยแพร่แล้ว' : rec.enrolled > 0 ? 'ปิดเผยแพร่' : 'ร่าง'}
                     </span>
@@ -759,18 +627,6 @@ function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMa
                             <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                           </svg>
-                        </button>
-                        <button type="button" title={course.isPublished ? 'ปิดการเผยแพร่' : 'เผยแพร่อีกครั้ง'} onClick={(e) => { e.stopPropagation(); onTogglePublish(course) }}
-                          className={`size-7 flex items-center justify-center rounded-lg border border-gray-200 transition-all ${course.isPublished ? 'text-gray-400 hover:bg-amber-500 hover:text-white hover:border-amber-500' : 'text-amber-600 hover:bg-freshket-500 hover:text-white hover:border-freshket-500'}`}>
-                          {course.isPublished ? (
-                            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                            </svg>
-                          ) : (
-                            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5v-9m0 0l-3.5 3.5M12 7.5l3.5 3.5M4.5 19.5h15" />
-                            </svg>
-                          )}
                         </button>
                         <button type="button" title="ลบหลักสูตร" onClick={(e) => { e.stopPropagation(); onDelete(course) }}
                           className="size-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-rose-500 hover:text-white hover:border-rose-500 transition-all">
@@ -794,25 +650,23 @@ function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMa
 // ── Learner Results Modal (80% of screen) ───────────────────────────────────────
 const RESULT_STATUS_FILTERS: (TrainingStatus | 'all')[] = ['all', 'not_started', 'in_progress', 'completed', 'failed']
 
-type CourseOverviewTab = 'overview' | 'learners' | 'settings'
+type CourseOverviewTab = 'overview' | 'learners'
 const OVERVIEW_TABS: { id: CourseOverviewTab; label: string }[] = [
   { id: 'overview', label: 'ภาพรวม' },
   { id: 'learners', label: 'สรุปข้อมูลผู้เรียน' },
-  { id: 'settings', label: 'ตั้งค่า' },
 ]
 
 // Replaces the old learner-only results table with a 3-tab course dashboard:
 // completion overview + per-department bar chart, the learner list (former
 // LearnerResultsModal content), and a quick publish/unpublish toggle so a
 // super_admin doesn't have to open the full edit form just to open/close a course.
-function CourseOverviewModal({ course, allUsers, allTrainingRecords, onClose, onTogglePublish }: {
+function CourseOverviewModal({ course, allUsers, allTrainingRecords, onClose }: {
   course: Course; allUsers: UserProfile[]; allTrainingRecords: TrainingRecord[]
-  onClose: () => void; onTogglePublish: () => void | Promise<void>
+  onClose: () => void
 }) {
   const [tab, setTab] = useState<CourseOverviewTab>('overview')
   const [deptFilter, setDeptFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<TrainingStatus | 'all'>('all')
-  const [toggling, setToggling] = useState(false)
 
   const targetUsers = useMemo(() => {
     if (course.assignedUserIds && course.assignedUserIds.length > 0) {
@@ -857,15 +711,6 @@ function CourseOverviewModal({ course, allUsers, allTrainingRecords, onClose, on
       })
       .sort((a, b) => b.completedPct - a.completedPct)
   }, [departments, rows])
-
-  async function handleTogglePublish() {
-    setToggling(true)
-    try {
-      await onTogglePublish()
-    } finally {
-      setToggling(false)
-    }
-  }
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1008,22 +853,6 @@ function CourseOverviewModal({ course, allUsers, allTrainingRecords, onClose, on
           </>
         )}
 
-        {tab === 'settings' && (
-          <div className="flex-1 overflow-auto p-6">
-            <div className="max-w-md flex items-center justify-between p-4 rounded-2xl border border-gray-100">
-              <div className="min-w-0 pr-4">
-                <p className="text-sm font-bold text-gray-900">เผยแพร่หลักสูตร</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {course.isPublished ? 'ผู้เรียนที่เกี่ยวข้องมองเห็นคอร์สนี้อยู่ — ปิดการเผยแพร่เพื่อซ่อนจากทุกคน (รวมคนที่เรียนอยู่และเรียนจบแล้ว)' : 'ปิดการเผยแพร่อยู่: ซ่อนจากผู้เรียนทุกคน ประวัติยังอยู่ครบ'}
-                </p>
-              </div>
-              <button type="button" disabled={toggling} onClick={handleTogglePublish}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 shrink-0 disabled:opacity-60 ${course.isPublished ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                <span className={`inline-block size-4.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${course.isPublished ? 'translate-x-5.5' : 'translate-x-0.5'}`} />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
@@ -1257,7 +1086,7 @@ function QuizPreviewInline({ assessment }: { assessment?: Assessment }) {
 }
 
 // ── Course Builder (full-page, sidebar tabs) ──────────────────────────────────
-type BuilderTab = 'details' | 'lessons' | 'quiz' | 'learners' | 'dashboard' | 'summary'
+type BuilderTab = 'details' | 'lessons' | 'quiz'
 
 // Order = setup first, then the read-only report. "สรุปผลการเรียน" sits last
 // because it reports on the course rather than configuring it. "แบบทดสอบ"
@@ -1266,9 +1095,6 @@ const BUILDER_TABS: { id: BuilderTab; label: string }[] = [
   { id: 'details',  label: 'รายละเอียดคอร์ส' },
   { id: 'lessons',  label: 'บทเรียน' },
   { id: 'quiz',     label: 'แบบทดสอบ' },
-  { id: 'learners', label: 'กำหนดผู้เรียน' },
-  { id: 'dashboard', label: 'แดชบอร์ด' },
-  { id: 'summary',  label: 'สรุปผลการเรียน' },
 ]
 
 function makeId(): string {
@@ -1277,20 +1103,14 @@ function makeId(): string {
 
 type FormState = {
   title: string; description: string; category: CourseCategory; level: CourseLevel
-  durationMinutes: string; isRequired: boolean; targetRoles: UserRole[]
+  durationMinutes: string; isRequired: boolean
   thumbnailUrl: string; slideUrl: string; formUrl: string
-  startDate: string; endDate: string
   instructorId: string; courseAdminIds: string[]; introVideoUrl: string
   hasCertificate: boolean; allowRetake: boolean
   openEnrollment: boolean
   topics: CourseTopic[]
-  assignedUserIds: string[]
-  /** See the assignedDepartments / assignedTeamIds comments on the Course type. */
-  assignedDepartments: string[]
-  assignedTeamIds: string[]
   hasKeyTakeAway: boolean; keyTakeAwayPrompt: string
   quizEnabled: boolean
-  isPublished: boolean
   // Challenge
   isChallenge: boolean
   challengeWindowStart: string
@@ -1309,25 +1129,19 @@ function formFromCourse(c: Course): FormState {
     title: c.title, description: c.description, category: c.category,
     level: c.level ?? 'beginner',
     durationMinutes: String(c.durationMinutes), isRequired: c.isRequired,
-    targetRoles: c.targetRoles as UserRole[],
     thumbnailUrl: c.thumbnailUrl ?? '', slideUrl: (c as Course & { slideUrl?: string }).slideUrl ?? '',
     formUrl: c.formUrl ?? '',
-    startDate: toInputDate(c.startDate), endDate: toInputDate(c.endDate),
     instructorId: c.instructorId ?? '', courseAdminIds: c.courseAdminIds ?? [],
     introVideoUrl: c.introVideoUrl ?? '',
     hasCertificate: !!c.hasCertificate, allowRetake: !!c.allowRetake,
     openEnrollment: !!c.openEnrollment,
     topics: c.topics ?? [],
-    assignedUserIds: c.assignedUserIds ?? [],
-    assignedDepartments: c.assignedDepartments ?? [],
-    assignedTeamIds: c.assignedTeamIds ?? [],
     hasKeyTakeAway: !!c.hasKeyTakeAway,
     keyTakeAwayPrompt: c.keyTakeAwayPrompt ?? '',
     // Older courses predate this flag: infer it from whether any lesson
     // already carries a pre/post role, so opening one doesn't silently read
     // as "quizzes off" and strip the roles on the next save.
     quizEnabled: c.quizEnabled ?? (c.topics ?? []).some((t) => t.lessons.some((l) => !!l.quizRole)),
-    isPublished: c.isPublished,
     isChallenge: !!c.isChallenge,
     challengeWindowStart: toInputDate(c.challengeWindowStart),
     challengeWindowEnd: toInputDate(c.challengeWindowEnd),
@@ -1345,21 +1159,6 @@ function BuilderTabIcon({ id, className }: { id: BuilderTab; className?: string 
   if (id === 'lessons') return (
     <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M6 6.878V6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 004.5 9v.878m13.5-3A2.25 2.25 0 0119.5 9v.878m0 0a2.246 2.246 0 00-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0121 12v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6c0-.98.626-1.813 1.5-2.122" />
-    </svg>
-  )
-  if (id === 'learners') return (
-    <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-    </svg>
-  )
-  if (id === 'dashboard') return (
-    <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.148 2.148A12.061 12.061 0 0116.5 7.605" />
-    </svg>
-  )
-  if (id === 'summary') return (
-    <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
     </svg>
   )
   return (
@@ -3231,120 +3030,20 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
   )
 }
 
-function CourseFormModal({ assessments, allUsers, allTrainingRecords, departments, teams, onDone, userId, editCourse, isSuperAdmin }: {
+function CourseFormModal({ assessments, allUsers, onDone, userId, editCourse }: {
   assessments: Assessment[]; allUsers: UserProfile[]
-  allTrainingRecords: import('@/types/tracking').TrainingRecord[]
-  departments: Department[]; teams: Team[]
-  onDone: (c?: Course) => void; userId: string; editCourse?: Course; isSuperAdmin: boolean
+  onDone: (c?: Course) => void; userId: string; editCourse?: Course
 }) {
   const isEdit = !!editCourse
-
-  // Users who already have a training record for this course — cannot be added again
-  const enrolledUserIds = useMemo(() => {
-    if (!editCourse?.id) return new Set<string>()
-    return new Set(allTrainingRecords.filter((r) => r.courseId === editCourse.id).map((r) => r.userId))
-  }, [allTrainingRecords, editCourse?.id])
-
-  // ── Learner assignment condition derivations ──
-  // Every picker below builds its groups from THIS list, not from allUsers.
-  // The department/team picker counted resigned staff: "ยังไม่มีทีม" under
-  // Sales Management showed 74 people when only 2 still worked here — the
-  // other 72 had left (Resigned / No show). Assigning a course to someone who
-  // has resigned is never intended, so they are excluded at the source rather
-  // than in each of the four pickers.
-  //
-  // Note this filters on employment status, NOT on whether someone has a team:
-  // 210 of the 285 active employees have no teamId, so requiring a team would
-  // hide most of the company from the picker.
-  // Only departments in the current rollout: people elsewhere are not target and are never offered.
-  const assignableUsers = useMemo(
-    () => onlyCurrentOrIncoming(allUsers).filter((u) => isTargetDepartment(u.department)),
-    [allUsers],
-  )
-
-  // A user's teamId can point at a team document that no longer exists (the
-  // team was deleted/merged and the member was never re-homed) — found via a
-  // real case: a department showed as only "partially selected" no matter
-  // what an admin checked, because one manager's stale teamId excluded her
-  // from BOTH the team-membership map (her team isn't in `teams` anymore)
-  // AND the unassignedIds bucket (her teamId field is still non-empty, so
-  // `!u.teamId` was false) — she was invisible to this picker entirely, with
-  // nothing on screen to explain why "select all" wouldn't stick.
-  // A stale reference is functionally identical to having no team, so it's
-  // treated as unassigned here rather than only checking `!u.teamId`.
-  const validTeamIds = useMemo(() => new Set(teams.map((t) => t.id)), [teams])
-
-  // A team's lead/manager doesn't necessarily carry that team's id in their
-  // own teamId field (teamLeadIds/managerIds on the TEAM doc is the actual
-  // source of truth for who leads it — same relationship /team-lead and
-  // /manager already read the same way). Without folding them in here, a
-  // lead who has no personal teamId showed up under "ยังไม่มีทีม" even though
-  // they plainly are attached to a team — confusing, since unchecking that
-  // bucket then left the department permanently stuck at "partial" for
-  // someone who isn't actually unassigned.
-  const leadOrManagerTeamId = useMemo(() => {
-    const map = new Map<string, string>() // uid -> teamId they lead/manage
-    for (const t of teams) {
-      for (const uid of [...getTeamLeadIds(t), ...getTeamManagerIds(t)]) {
-        if (!map.has(uid)) map.set(uid, t.id) // first team wins if someone leads more than one
-      }
-    }
-    return map
-  }, [teams])
-
-  // Phase 1 departments only. The picker listed every department in the
-  // roster — including ones with nobody in them — so an admin assigning
-  // learners scrolled past a dozen teams that cannot use the platform yet to
-  // reach the four that can.
-  const deptTree: DeptTreeNode[] = useMemo(() => departments
-    .filter((dept) => PHASE1_DEPARTMENTS.has(dept.name))
-    .map((dept) => ({
-    id: dept.id, name: dept.name,
-    teams: teams.filter((t) => t.departmentId === dept.id).map((t) => ({
-      id: t.id, name: t.name,
-      memberIds: assignableUsers
-        .filter((u) => u.teamId === t.id || leadOrManagerTeamId.get(u.uid) === t.id)
-        .map((u) => u.uid),
-    })),
-    unassignedIds: assignableUsers
-      .filter((u) =>
-        u.department === dept.name &&
-        (!u.teamId || !validTeamIds.has(u.teamId)) &&
-        !leadOrManagerTeamId.has(u.uid),
-      )
-      .map((u) => u.uid),
-  })),
-  [departments, teams, assignableUsers, validTeamIds, leadOrManagerTeamId])
-
-  const rankGroups = useMemo(() => {
-    const map = new Map<string, string[]>()
-    assignableUsers.forEach((u) => { if (u.rank) map.set(u.rank, [...(map.get(u.rank) ?? []), u.uid]) })
-    return Array.from(map.entries()).map(([label, userIds]) => ({ key: label, label, userIds }))
-  }, [assignableUsers])
-
-  const positionGroups = useMemo(() => {
-    const map = new Map<string, string[]>()
-    assignableUsers.forEach((u) => { if (u.position) map.set(u.position, [...(map.get(u.position) ?? []), u.uid]) })
-    return Array.from(map.entries()).map(([label, userIds]) => ({ key: label, label, userIds }))
-  }, [assignableUsers])
-
-  const tenureGroups = useMemo(() => TENURE_BUCKETS.map((b) => ({
-    key: b.key, label: b.label,
-    userIds: assignableUsers.filter((u) => { const y = tenureYears(u.startDate); return y !== null && b.test(y) }).map((u) => u.uid),
-  })), [assignableUsers])
 
   const [tab, setTab] = useState<BuilderTab>('details')
   const [form, setForm] = useState<FormState>(editCourse ? formFromCourse(editCourse) : {
     title: '', description: '', category: 'product', level: 'beginner', durationMinutes: '60',
-    isRequired: false, targetRoles: ['sale', 'team_lead'],
-    thumbnailUrl: '', slideUrl: '', formUrl: '', startDate: '', endDate: '',
+    isRequired: false,
+    thumbnailUrl: '', slideUrl: '', formUrl: '',
     instructorId: '', courseAdminIds: [], introVideoUrl: '',
     hasCertificate: false, allowRetake: false, openEnrollment: false, topics: [],
-    assignedUserIds: [],
-    assignedDepartments: [],
-    assignedTeamIds: [],
     hasKeyTakeAway: false, keyTakeAwayPrompt: '', quizEnabled: false,
-    isPublished: true,
     isChallenge: false, challengeWindowStart: '', challengeWindowEnd: '', challengeMultiplier: '2',
   })
   const [saving, setSaving] = useState(false)
@@ -3358,126 +3057,10 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   const formJson = useMemo(() => JSON.stringify(form), [form])
   const isDirty = !isEdit || formJson !== baselineRef.current
 
-  // computeAssignedRows does an allUsers.find + allTrainingRecords.find per
-  // assignee (O(assignees × records)) — was called inline in JSX, unmemoized,
-  // recomputing on every render of this modal while the Learners tab is open.
-  const assignedRows = useMemo(
-    () => computeAssignedRows(form.assignedUserIds, allUsers, allTrainingRecords, editCourse?.id),
-    [form.assignedUserIds, allUsers, allTrainingRecords, editCourse?.id],
-  )
-
-  // The table hides people who have resigned or are outside the target departments, but they stay
-  // in assignedUserIds. Count only who the table shows, and say how many are left behind (with a
-  // button to clear them).
-  const activeAssignedIds = useMemo(
-    () => new Set(assignedRows.filter((r) => isCurrentOrIncoming(r.user) && isTargetDepartment(r.user.department)).map((r) => r.user.uid)),
-    [assignedRows],
-  )
-  const hiddenAssignedCount = form.assignedUserIds.filter((id) => !activeAssignedIds.has(id)).length
-  function clearHiddenAssigned() {
-    setForm((p) => ({ ...p, assignedUserIds: p.assignedUserIds.filter((id) => activeAssignedIds.has(id)) }))
-  }
-
-  // Whether the roster should show a Pre-Test/Post-Test column at all — only
-  // once the admin has tagged a lesson with that role in the "แบบทดสอบ" tab.
-  // A 'pre_test' lesson is sat twice (before the material and again after), so
-  // it produces a post score too and lights up BOTH columns.
-  const hasPreTest = useMemo(() => form.topics.some((t) => t.lessons.some((l) => l.quizRole === 'pre_test')), [form.topics])
-  const hasPostTest = useMemo(() => form.topics.some((t) => t.lessons.some((l) => !!l.quizRole)), [form.topics])
-
-  // ── Learner assignment UI state ──
-  const [openPanel, setOpenPanel] = useState<'individual' | 'department' | 'rank' | 'position' | 'tenure' | null>(null)
-  // Both toggles used to always start at false, forgetting on every reopen
-  // that a course already had a condition configured (assignedDepartments/
-  // assignedTeamIds were the only things actually saved — the toggle itself
-  // had no memory). Seed from what's actually persisted so re-opening an
-  // existing course shows its real state instead of looking unconfigured.
-  const hasSavedDeptCondition =
-    (editCourse?.assignedDepartments?.length ?? 0) > 0 ||
-    (editCourse?.assignedTeamIds?.length ?? 0) > 0
-  const [condMasterOn, setCondMasterOn] = useState(hasSavedDeptCondition)
-  const [condToggles, setCondToggles] = useState({
-    department: hasSavedDeptCondition, rank: false, position: false, tenure: false,
-  })
-  // Only the department condition has a picker that reports back WHICH values
-  // were chosen (assignedDepartments for a whole department, assignedTeamIds
-  // for individual teams within a partially-selected one) — rank/position/
-  // tenure still resolve straight to a uid snapshot with no persisted "what
-  // was picked" of their own, so they can't yet show a saved summary or an
-  // edit-vs-standby state.
-  // Tracks form.* (not the editCourse snapshot above) so it updates the
-  // moment a picker confirms, in the same render pass.
-  const deptConditionSaved = form.assignedDepartments.length > 0 || form.assignedTeamIds.length > 0
-
-  // Standalone teams saved via assignedTeamIds, grouped by their department
-  // for display — "just the Chain team" needs to show WHERE Chain is, since
-  // team names alone (e.g. two different "Team A"s in different
-  // departments) aren't unique enough on their own.
-  const assignedTeamsByDept = useMemo(() => {
-    const teamIdSet = new Set(form.assignedTeamIds)
-    if (teamIdSet.size === 0) return []
-    return deptTree
-      .map((dept) => ({
-        deptName: dept.name,
-        teamNames: dept.teams.filter((t) => teamIdSet.has(t.id)).map((t) => t.name),
-      }))
-      .filter((g) => g.teamNames.length > 0)
-  }, [form.assignedTeamIds, deptTree])
-  // The conditions live in a pop-up card (opened from the compact row), so the learner list below
-  // gets the screen.
-  const [showCond, setShowCond] = useState(false)
-  // One line for the compact row: what the saved department/team condition covers.
-  const condSummary = useMemo(() => {
-    if (!condMasterOn) return 'ปิดอยู่'
-    const names = Array.from(new Set([...form.assignedDepartments, ...assignedTeamsByDept.map((g) => g.deptName)]))
-    return names.length > 0 ? 'สังกัด: ' + names.join(', ') : 'ยังไม่ได้ตั้งเงื่อนไข — กด "ตั้งเงื่อนไข"'
-  }, [condMasterOn, form.assignedDepartments, assignedTeamsByDept])
-  const [showConfirm, setShowConfirm] = useState(false)
-  const [showAssignedTable, setShowAssignedTable] = useState(false)
   const [showLessonPreview, setShowLessonPreview] = useState(false)
 
   function set<K extends keyof FormState>(key: K, val: FormState[K]) {
     setForm((p) => ({ ...p, [key]: val }))
-  }
-
-  // Manually removing someone breaks the "whole department"/"whole team"
-  // guarantee that assignedDepartments/assignedTeamIds rely on — the
-  // auto-sync route would otherwise just re-add that person on the next CSV
-  // import, silently undoing an admin's explicit removal. So any manual
-  // removal clears BOTH conditions entirely: department/team auto-sync has
-  // to be re-selected in the picker if still wanted, rather than the system
-  // guessing which department(s)/team(s) are still "whole" after an
-  // arbitrary uid was pulled out.
-  // People removed from the roster who had already started. Their training records are
-  // deleted when the course is saved (not before: closing the form without saving changes nothing).
-  const [dropRecordUids, setDropRecordUids] = useState<Set<string>>(new Set())
-  function noteStartedRemoved(uids: string[]) {
-    const started = uids.filter((id) => enrolledUserIds.has(id))
-    if (started.length > 0) setDropRecordUids((prev) => new Set([...Array.from(prev), ...started]))
-  }
-
-  function removeAssignedUser(uid: string) {
-    noteStartedRemoved([uid])
-    setForm((p) => ({
-      ...p,
-      assignedUserIds: p.assignedUserIds.filter((id) => id !== uid),
-      assignedDepartments: [],
-      assignedTeamIds: [],
-    }))
-  }
-
-  // One state update for the whole selection. Calling removeAssignedUser in a
-  // loop would queue N updates that each rebuild the array from the previous
-  // one — correct, but O(n²) over a 165-learner list.
-  function removeAssignedUsers(uids: string[]) {
-    noteStartedRemoved(uids)
-    const drop = new Set(uids)
-    setForm((p) => ({
-      ...p,
-      assignedUserIds: p.assignedUserIds.filter((id) => !drop.has(id)),
-      assignedDepartments: [],
-      assignedTeamIds: [],
-    }))
   }
 
   // Master switch for the course's quiz. Quiz lessons are system-managed: they
@@ -3522,36 +3105,24 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   function handleSubmitClick(ev: React.FormEvent) {
     ev.preventDefault()
     if (!validate()) return
-    setShowConfirm(true)
+    void performSave()
   }
 
-  // Draft saves skip the notify-confirmation modal (nothing to notify — a draft isn't visible to anyone)
-  // and force isPublished to false regardless of the toggle in the Details tab.
-  function handleSaveDraft() {
-    if (!validate()) return
-    performSave(false)
-  }
-
-  async function performSave(publishOverride?: boolean) {
+  async function performSave() {
     setSaving(true)
     setSaveError(null)
     try {
       const now = new Date()
-      const toDate = (s: string) => s ? new Date(s) : undefined
+      // What this saves is the course's CONTENT. Who it is for, when it opens and whether it is live belong to the
+      // Course Design that launches it, so none of that is written here (a Course Design keeps them on the course).
       const payload = {
         title: form.title.trim(), description: form.description.trim(),
         category: form.category, level: form.level,
         durationMinutes: Number(form.durationMinutes) || 60,
-        // Learner targeting is fully driven by assignedUserIds in this UI (individual + condition pickers) —
-        // targetRoles is left empty so CoursesPage's OR-based visibility check relies solely on assignedUserIds.
-        isRequired: form.isRequired, targetRoles: [],
-        assignedUserIds: form.assignedUserIds,
-        assignedDepartments: form.assignedDepartments,
-        assignedTeamIds: form.assignedTeamIds,
+        isRequired: form.isRequired,
         thumbnailUrl: form.thumbnailUrl.trim() || undefined,
         slideUrl: form.slideUrl.trim() || undefined,
         formUrl: form.formUrl.trim() || undefined,
-        startDate: toDate(form.startDate), endDate: toDate(form.endDate),
         instructorId: form.instructorId || undefined,
         courseAdminIds: form.courseAdminIds,
         introVideoUrl: form.introVideoUrl.trim() || undefined,
@@ -3559,7 +3130,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
         allowRetake: form.allowRetake,
         openEnrollment: form.openEnrollment,
         topics: form.topics,
-        isPublished: publishOverride ?? form.isPublished,
         quizEnabled: form.quizEnabled,
         hasKeyTakeAway: form.hasKeyTakeAway,
         keyTakeAwayPrompt: form.hasKeyTakeAway && form.keyTakeAwayPrompt.trim() ? form.keyTakeAwayPrompt.trim() : undefined,
@@ -3570,33 +3140,23 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
       }
       if (DEMO_MODE) {
         if (isEdit && editCourse) onDone({ ...editCourse, ...payload, updatedAt: now })
-        else onDone({ id: `local-${Date.now()}`, ...payload, createdBy: userId, createdAt: now, updatedAt: now } as Course)
+        else onDone({ id: `local-${Date.now()}`, ...payload, isPublished: false, targetRoles: [], createdBy: userId, createdAt: now, updatedAt: now } as Course)
         return
       }
-      const dates = { startDate: toDate(form.startDate), endDate: toDate(form.endDate) }
       if (isEdit && editCourse) {
-        await save('courses', { ...payload, ...dates, id: editCourse.id, updatedAt: now })
-        // Whoever was removed after starting loses their history in this course now that
-        // the removal is saved (someone re-added meanwhile keeps theirs).
-        const stay = new Set(form.assignedUserIds)
-        const dropIds = allTrainingRecords
-          .filter((r) => r.courseId === editCourse.id && dropRecordUids.has(r.userId) && !stay.has(r.userId))
-          .map((r) => r.id)
-        if (dropIds.length > 0) {
-          // The server refreshes their summaries when the records are deleted.
-          await removeMany('trainingRecords', dropIds)
-        }
+        await save('courses', { ...payload, id: editCourse.id, updatedAt: now })
         onDone({ ...editCourse, ...payload, updatedAt: now })
       } else {
+        // A new course is a draft: nobody is assigned and learners do not see it until a Course Design launches it.
         const { id } = await save('courses', {
-          ...payload, ...dates, id: '', createdBy: userId, createdAt: now, updatedAt: now,
+          ...payload, id: '', isPublished: false, targetRoles: [], assignedUserIds: [], assignedDepartments: [], assignedTeamIds: [],
+          createdBy: userId, createdAt: now, updatedAt: now,
         })
-        onDone({ id, ...payload, createdBy: userId, createdAt: now, updatedAt: now } as Course)
+        onDone({ id, ...payload, isPublished: false, targetRoles: [], createdBy: userId, createdAt: now, updatedAt: now } as Course)
       }
     } catch (e) {
       console.error('performSave:', e)
       setSaveError('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
-      setShowConfirm(false)
     } finally {
       setSaving(false)
     }
@@ -3606,91 +3166,7 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
   // the แบบทดสอบ switch and hidden there, so counting them would make the
   // badge disagree with the list.
   const lessonCount = form.topics.reduce((s, t) => s + t.lessons.filter((l) => l.type !== 'quiz').length, 0)
-  // "สรุปผลการเรียน" only makes sense once the course exists and can have real
-  // training records — hide it while creating a brand-new course.
-  const visibleTabs = isEdit ? BUILDER_TABS : BUILDER_TABS.filter((t) => t.id !== 'summary' && t.id !== 'dashboard')
-
-  // ── Learner summary tab: same targeting rule as LearnerResultsModal (explicit
-  // assignedUserIds, falling back to target roles) so the count here always
-  // matches what "กำหนดผู้เรียน" and the course card actually reflect. ──
-  const summaryTargetUsers = useMemo(() => {
-    if (!editCourse) return []
-    if (form.assignedUserIds.length > 0) {
-      const ids = new Set(form.assignedUserIds)
-      return allUsers.filter((u) => ids.has(u.uid))
-    }
-    // Only the role-based fallback is filtered. An explicitly assigned learner
-    // stays in the report even after they resign — they may have a training
-    // record, and dropping them would silently remove completed work from the
-    // summary. A role-derived audience, by contrast, is "whoever holds this
-    // role today", which should not include people who have left.
-    return assignableUsers.filter((u) => form.targetRoles.includes(u.role))
-  }, [editCourse, form.assignedUserIds, form.targetRoles, allUsers, assignableUsers])
-
-  // A questionnaire course (MBTI…) has no score: the summary shows the type each learner got instead.
-  const questionnaireId = useMemo(() => courseQuestionnaireId({ topics: form.topics }), [form.topics])
-  const { data: questionnaireResults } = useBucketResultsFor(questionnaireId ?? 'mbti', !!questionnaireId)
-  const typeByUid = useMemo(() => new Map(questionnaireResults.map((r) => [String(r.uid), r.code] as const)), [questionnaireResults])
-
-  const summaryRows = useMemo(() => summaryTargetUsers.map((u) => {
-    const record = editCourse ? allTrainingRecords.find((r) => r.courseId === editCourse.id && r.userId === u.uid) : undefined
-    const status: TrainingStatus = record?.status ?? 'not_started'
-    return { user: u, record, status }
-  }), [summaryTargetUsers, allTrainingRecords, editCourse])
-
-  // Resigned learners stay in summaryRows on purpose (see summaryTargetUsers
-  // above — their training record must not silently disappear from the
-  // report), but a super_admin scanning "who still needs to finish this
-  // course" doesn't want them cluttering the view. Default ON: hidden until
-  // asked for, since the common case is looking at the active roster.
-  const [hideResigned, setHideResigned] = useState(true)
-  const visibleSummaryRows = useMemo(
-    () => hideResigned ? summaryRows.filter((r) => isCurrentOrIncoming(r.user)) : summaryRows,
-    [summaryRows, hideResigned],
-  )
-  const resignedCount = useMemo(
-    () => summaryRows.filter((r) => !isCurrentOrIncoming(r.user)).length,
-    [summaryRows],
-  )
-
-  // Search by name — first name / surname (Thai or English) / nickname.
-  // Doesn't touch summaryStats below: those numbers describe the toggle
-  // (active vs. all), and searching for one person shouldn't make the
-  // overview card read as if the course only had that one learner.
-  const [summarySearch, setSummarySearch] = useState('')
-  const searchedSummaryRows = useMemo(() => {
-    const q = summarySearch.trim().toLowerCase()
-    if (!q) return visibleSummaryRows
-    return visibleSummaryRows.filter((r) => {
-      const u = r.user
-      return (
-        u.displayName.toLowerCase().includes(q) ||
-        (u.displayNameEN?.toLowerCase() ?? '').includes(q) ||
-        (u.nickname?.toLowerCase() ?? '').includes(q)
-      )
-    })
-  }, [visibleSummaryRows, summarySearch])
-
-  // Column sort for the summary table. 165 rows is far past what anyone can
-  // scan unsorted, and this table had no sorting at all.
-  const summarySort = useLearnerSort()
-  const sortedSummaryRows = useMemo(
-    () => sortLearnerRows(searchedSummaryRows, summarySort.sortKey, summarySort.sortDir),
-    [searchedSummaryRows, summarySort.sortKey, summarySort.sortDir],
-  )
-
-  // Stats reflect whatever the toggle currently shows (not the search), so
-  // the numbers above the table describe the course's real audience even
-  // while someone is searching for a specific person within it.
-  const summaryStats = useMemo(() => {
-    const total = visibleSummaryRows.length
-    const completed = visibleSummaryRows.filter((r) => r.status === 'completed').length
-    const inProgress = visibleSummaryRows.filter((r) => r.status === 'in_progress').length
-    const notStarted = visibleSummaryRows.filter((r) => r.status === 'not_started').length
-    const scored = visibleSummaryRows.filter((r) => r.record?.score != null)
-    const avgScore = scored.length > 0 ? Math.round(scored.reduce((s, r) => s + (r.record!.score ?? 0), 0) / scored.length) : null
-    return { total, completed, inProgress, notStarted, avgScore }
-  }, [visibleSummaryRows])
+  const visibleTabs = BUILDER_TABS
 
   return (
     <div className="absolute inset-0 z-20 bg-white flex flex-col">
@@ -3730,9 +3206,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                     <span className="flex-1 truncate">{t.label}</span>
                     {t.id === 'lessons' && lessonCount > 0 && (
                       <span className={`shrink-0 text-xs font-bold px-1.5 rounded-full ${isActive ? 'bg-freshket-100 text-freshket-700' : 'bg-gray-100 text-gray-500'}`}>{lessonCount}</span>
-                    )}
-                    {t.id === 'summary' && summaryStats.total > 0 && (
-                      <span className={`shrink-0 text-xs font-bold px-1.5 rounded-full ${isActive ? 'bg-freshket-100 text-freshket-700' : 'bg-gray-100 text-gray-500'}`}>{summaryStats.total}</span>
                     )}
                   </button>
                   {/* Master switch for the whole course's quizzes, sitting in
@@ -3795,14 +3268,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                       className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 bg-white">
                       {ALL_CATEGORIES.map((cat) => <option key={cat} value={cat}>{CATEGORY_LABELS[cat]}</option>)}
                     </select>
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-bold text-gray-600 block mb-1.5">วันที่เริ่มคอร์ส</label>
-                    <input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)}
-                      className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300"
-                    />
-                    <p className="text-xs text-gray-400 mt-1">ไม่ตั้งค่า = เผยแพร่ทันที</p>
                   </div>
 
                   <div className="col-span-2">
@@ -3874,13 +3339,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                       />
                     </div>
 
-                    <div>
-                      <label className="text-xs font-bold text-gray-600 block mb-1.5">วันสิ้นสุด</label>
-                      <input type="date" value={form.endDate} min={form.startDate || undefined} onChange={(e) => set('endDate', e.target.value)}
-                        className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300"
-                      />
-                      <p className="text-xs text-gray-400 mt-1">ไม่ตั้งค่า = ไม่มีกำหนด</p>
-                    </div>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
@@ -3890,13 +3348,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
                         <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.isRequired ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                       </button>
                       <span className="text-xs text-gray-600 font-normal">บังคับเรียน</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button type="button" onClick={() => set('isPublished', !form.isPublished)}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${form.isPublished ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                        <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${form.isPublished ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-                      </button>
-                      <span className="text-xs text-gray-600 font-normal">เผยแพร่ทันที</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button type="button" onClick={() => set('isChallenge', !form.isChallenge)}
@@ -4000,255 +3451,6 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
               )}
 
               {/* ── Assign Learners tab ── */}
-              {tab === 'learners' && (
-              <div className="w-full px-6 py-8 space-y-4">
-                <button type="button" onClick={() => setShowAssignedTable(true)}
-                  className="group flex items-center justify-between px-3 py-2 -mx-1 rounded-xl w-[calc(100%+0.5rem)] hover:bg-gray-50 transition-colors">
-                  <span className="text-xs font-bold text-gray-500">ทั้งหมด</span>
-                  <span className="flex items-center gap-1.5 text-sm font-bold text-gray-900 group-hover:text-freshket-600 transition-colors">
-                    <svg className="size-4 text-gray-400 group-hover:text-freshket-500 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-                    </svg>
-                    {form.assignedUserIds.length - hiddenAssignedCount}
-                  </span>
-                </button>
-                {hiddenAssignedCount > 0 && (
-                  <div className="flex items-center justify-between gap-3 px-3 py-2 -mt-2 rounded-xl bg-amber-50 border border-amber-200">
-                    <p className="text-xs text-amber-700">
-                      +{hiddenAssignedCount} คนที่ลาออก ไม่พบในระบบ หรืออยู่นอกแผนก target ยังค้างอยู่ในรายชื่อ (ไม่แสดงในตาราง และไม่รับแจ้งเตือน)
-                    </p>
-                    <button type="button" onClick={clearHiddenAssigned}
-                      className="shrink-0 text-xs font-bold text-amber-700 hover:underline">
-                      ล้าง
-                    </button>
-                  </div>
-                )}
-
-                {/* Card: Individual assignment */}
-                <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
-                  <div className="flex items-center justify-between gap-3 px-4 py-3.5">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="size-9 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 shrink-0">
-                        <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                        </svg>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-gray-800">มอบหมายรายบุคคล</p>
-                        <p className="text-xs text-gray-400">เลือกและจัดการรายชื่อผู้เรียนของคอร์สนี้ได้โดยตรง</p>
-                      </div>
-                    </div>
-                    <button type="button" onClick={() => setOpenPanel('individual')}
-                      className="size-9 shrink-0 flex items-center justify-center rounded-xl border border-gray-200 text-gray-500 hover:bg-freshket-500 hover:text-white hover:border-freshket-500 transition-all">
-                      <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Card: Conditional assignment — a compact row; the conditions open in a card */}
-                <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
-                  <div className="flex items-center justify-between gap-3 px-4 py-3">
-                    <button type="button" onClick={() => setShowCond(true)} disabled={!condMasterOn}
-                      className="flex items-center gap-3 min-w-0 flex-1 text-left disabled:cursor-default">
-                      <div className={`size-9 rounded-lg flex items-center justify-center shrink-0 ${condMasterOn ? 'bg-freshket-100 text-freshket-600' : 'bg-gray-100 text-gray-400'}`}>
-                        <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
-                        </svg>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-gray-800">มอบหมายตามเงื่อนไข</p>
-                        <p className="text-xs text-gray-400 truncate">{condSummary}</p>
-                      </div>
-                    </button>
-                    {condMasterOn && (
-                      <button type="button" onClick={() => setShowCond(true)}
-                        className="shrink-0 px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-freshket-500 hover:text-white hover:border-freshket-500 transition-all">
-                        ตั้งเงื่อนไข
-                      </button>
-                    )}
-                    <button type="button" onClick={() => setCondMasterOn((v) => !v)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 shrink-0 ${condMasterOn ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                      <span className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${condMasterOn ? 'translate-x-6' : 'translate-x-1'}`} />
-                    </button>
-                  </div>
-                </div>
-
-                {form.assignedUserIds.length > 0 && (
-                  <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
-                    <div className="max-h-[calc(100vh-17rem)] min-h-[20rem] overflow-auto">
-                      <AssignedLearnersTable
-                        rows={assignedRows}
-                        enrolledUserIds={enrolledUserIds}
-                        onRemove={removeAssignedUser}
-                        onRemoveMany={removeAssignedUsers}
-                        courseId={editCourse?.id}
-                        courseTitle={form.title}
-                        hasPreTest={hasPreTest}
-                        hasPostTest={hasPostTest}
-                        isSuperAdmin={isSuperAdmin}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-              )}
-
-              {/* ── Dashboard tab: the same learners as the summary, drawn as charts ── */}
-              {tab === 'dashboard' && editCourse && (
-                <CourseDashboard
-                  courseId={editCourse.id}
-                  rows={visibleSummaryRows.map((r) => ({ department: r.user.department, record: r.record }))}
-                />
-              )}
-
-              {/* ── Summary tab ── */}
-              {tab === 'summary' && (
-              <div className="w-full px-6 py-8 space-y-4">
-                {/* Overview card */}
-                <div className="rounded-2xl border border-gray-100 bg-white p-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <p className="text-sm font-bold text-gray-800">ภาพรวมผู้เรียน</p>
-                    {resignedCount > 0 && (
-                      <label className="inline-flex items-center gap-2 text-xs font-normal text-gray-500 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={hideResigned}
-                          onChange={(e) => setHideResigned(e.target.checked)}
-                          className="size-3.5 rounded border-gray-300 text-freshket-500 focus:ring-2 focus:ring-freshket-300 cursor-pointer"
-                        />
-                        ซ่อนพนักงานที่ลาออก ({resignedCount} คน)
-                      </label>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <div className="rounded-xl bg-slate-50 border border-gray-100 p-3.5 text-center">
-                      <p className="text-xl font-black text-gray-900">{summaryStats.total}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">ผู้เรียนทั้งหมด</p>
-                    </div>
-                    <div className="rounded-xl bg-freshket-50 border border-freshket-100 p-3.5 text-center">
-                      <p className="text-xl font-black text-freshket-700">{summaryStats.completed}</p>
-                      <p className="text-xs text-freshket-600 mt-0.5">ผ่านแล้ว</p>
-                    </div>
-                    <div className="rounded-xl bg-blue-50 border border-blue-100 p-3.5 text-center">
-                      <p className="text-xl font-black text-blue-700">{summaryStats.inProgress}</p>
-                      <p className="text-xs text-blue-600 mt-0.5">กำลังเรียน</p>
-                    </div>
-                    <div className="rounded-xl bg-gray-50 border border-gray-100 p-3.5 text-center">
-                      <p className="text-xl font-black text-gray-600">{questionnaireId ? visibleSummaryRows.filter((r) => typeByUid.has(r.user.uid)).length : (summaryStats.avgScore ?? '—')}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">{questionnaireId ? 'ทำแบบประเมินแล้ว' : 'คะแนนเฉลี่ย'}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Search — ชื่อจริง / นามสกุล (ไทยหรืออังกฤษ) / ชื่อเล่น. Doesn't
-                    touch the overview stats above, which describe the whole
-                    course's audience, not a filtered search result. */}
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                    <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z" />
-                    </svg>
-                  </span>
-                  <input
-                    type="text"
-                    value={summarySearch}
-                    onChange={(e) => setSummarySearch(e.target.value)}
-                    placeholder="ค้นหาจากชื่อจริง นามสกุล หรือชื่อเล่น..."
-                    className="w-full pl-10 pr-10 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-400"
-                  />
-                  {summarySearch && (
-                    <button type="button" onClick={() => setSummarySearch('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
-                      <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-
-                {/* Learner table */}
-                <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
-                  <div className="max-h-[28rem] overflow-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-gray-100 sticky top-0 bg-white">
-                          <SortableTh label="Name" sortKey="name" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
-                          <SortableTh label="Position" sortKey="position" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
-                          <SortableTh label="Department" sortKey="department" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
-                          <SortableTh label="Start Date" sortKey="tenure" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
-                          <SortableTh label="Progress" sortKey="progress" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />
-                          {hasPreTest && <SortableTh label="Pre-Test" sortKey="preTest" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
-                          {hasPostTest && <SortableTh label="Post-Test" sortKey="postTest" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />}
-                          {!hasPreTest && !hasPostTest && (questionnaireId
-                            ? <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Type</th>
-                            : <SortableTh label="Score" sortKey="score" activeSortKey={summarySort.sortKey} sortDir={summarySort.sortDir} onSort={summarySort.handleSort} />)}
-                          <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Employee Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortedSummaryRows.length === 0 ? (
-                          <tr><td colSpan={6 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0) + (!hasPreTest && !hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">
-                            {summarySearch ? `ไม่พบผู้เรียนที่ตรงกับ "${summarySearch}"` : 'ยังไม่มีผู้เรียนที่กำหนด'}
-                          </td></tr>
-                        ) : sortedSummaryRows.map(({ user: u, record, status }) => {
-                          const pct = approxProgressPct(status, record)
-                          return (
-                            <tr key={u.uid} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60 transition-colors">
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2.5">
-                                  <div className="size-8 rounded-full bg-gray-100 shrink-0 overflow-hidden flex items-center justify-center">
-                                    {u.photoURL
-                                      ? <img src={u.photoURL} alt={u.displayName} className="size-full object-cover" />
-                                      : <span className="text-xs font-bold text-gray-500">{u.displayName[0]}</span>}
-                                  </div>
-                                  <p className="text-xs font-bold text-gray-800 truncate">{formatPersonName(u)}</p>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.position} /></td>
-                              <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.department} /></td>
-                              <td className="px-4 py-3 text-xs text-gray-600"><StartDateCell startDate={u.startDate} /></td>
-                              <td className="px-4 py-3 whitespace-nowrap">
-                                <div className="flex items-center gap-2 w-28">
-                                  <div className="h-1.5 flex-1 bg-gray-100 rounded-full overflow-hidden">
-                                    <div className="h-full rounded-full bg-freshket-500 transition-all" style={{ width: `${pct}%` }} />
-                                  </div>
-                                  <span className="text-xs text-gray-400 shrink-0">{pct}%</span>
-                                </div>
-                              </td>
-                              {hasPreTest && (
-                                <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{record?.preTestScore ?? '—'}</td>
-                              )}
-                              {hasPostTest && (
-                                <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{record?.postTestScore ?? '—'}</td>
-                              )}
-                              {!hasPreTest && !hasPostTest && (
-                                <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
-                                  {questionnaireId
-                                    ? <QuestionnaireResultCell definitionId={questionnaireId} code={typeByUid.get(u.uid)} ownerName={formatPersonName(u)} />
-                                    : (record?.score != null ? `${record.score}${record.passScore != null ? `/${record.passScore}` : ''}` : '—')}
-                                </td>
-                              )}
-                              <td className="px-4 py-3 whitespace-nowrap">
-                                {isActiveEmployee(u) ? (
-                                  <span className="text-xs text-gray-400">Active</span>
-                                ) : (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-600">
-                                    {u.employmentStatus}
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-              )}
-
             </div>
           </div>
         </div>
@@ -4269,211 +3471,14 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
               className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-all">
               ยกเลิก
             </button>
-            <button type="button" onClick={handleSaveDraft} disabled={saving}
-              className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-all disabled:opacity-60">
-              บันทึกร่าง
-            </button>
             <button type="submit" disabled={saving}
               className="px-6 py-2 rounded-xl bg-freshket-500 text-white text-sm font-bold hover:bg-freshket-600 transition-all disabled:opacity-60 flex items-center gap-2">
-              {isEdit ? 'บันทึกการแก้ไข' : 'สร้างหลักสูตร'}
+              {isEdit ? 'บันทึกการแก้ไข' : 'บันทึกเป็นร่าง'}
             </button>
           </div>
         </div>
         )}
       </form>
-
-      {showCond && condMasterOn && openPanel === null && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowCond(false)}>
-          <div className="w-full max-w-lg max-h-[85vh] flex flex-col bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
-              <div>
-                <p className="text-sm font-bold text-gray-900">มอบหมายตามเงื่อนไข</p>
-                <p className="text-xs text-gray-400">เลือกเงื่อนไข แล้วกด ตกลง เพื่อใช้กับรายชื่อผู้เรียน</p>
-              </div>
-              <button type="button" onClick={() => setShowCond(false)} aria-label="ปิด"
-                className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
-                <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-                  <div className="border-t border-gray-100 divide-y divide-gray-50">
-                    {([
-                      { key: 'department' as const, label: 'สังกัด' },
-                      { key: 'rank' as const, label: 'ระดับตำแหน่ง' },
-                      { key: 'position' as const, label: 'ตำแหน่ง' },
-                      { key: 'tenure' as const, label: 'อายุงาน' },
-                    ]).map((row) => {
-                      // Only "สังกัด" has a saved-condition summary today — see
-                      // deptConditionSaved above for why rank/position/tenure
-                      // don't yet.
-                      const isSaved = row.key === 'department' && deptConditionSaved
-                      return (
-                      <div key={row.key} className="px-4 py-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-gray-700 font-normal">{row.label}</span>
-                            {condToggles[row.key] && (
-                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                                isSaved ? 'bg-freshket-100 text-freshket-700' : 'bg-amber-100 text-amber-700'
-                              }`}>
-                                {isSaved ? 'บันทึกแล้ว' : 'Standby — ยังไม่ได้ตั้งค่า'}
-                              </span>
-                            )}
-                          </div>
-                          <button type="button" onClick={() => setCondToggles((p) => ({ ...p, [row.key]: !p[row.key] }))}
-                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${condToggles[row.key] ? 'bg-freshket-500' : 'bg-gray-200'}`}>
-                            <span className={`inline-block size-3.5 transform rounded-full bg-white shadow transition-transform duration-200 ease-out ${condToggles[row.key] ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
-                          </button>
-                        </div>
-                        {condToggles[row.key] && (
-                          isSaved ? (
-                            <div className="mt-2 flex items-start justify-between gap-2">
-                              {/* One block per department (not a single
-                                  comma-joined line, which "truncate" was
-                                  cutting off silently whenever two names
-                                  didn't fit — Portfolio Management, Key
-                                  Account Management showed as just the
-                                  first). Team names underneath are what's
-                                  actually included: every team for a WHOLE
-                                  department (assignedDepartments), or the
-                                  specific team(s) picked when only part of
-                                  a department was checked (assignedTeamIds,
-                                  e.g. "just the Chain team"). */}
-                              <div className="min-w-0 space-y-1.5">
-                                {form.assignedDepartments.map((deptName) => {
-                                  const dept = deptTree.find((d) => d.name === deptName)
-                                  return (
-                                    <div key={deptName}>
-                                      <p className="text-xs font-bold text-gray-700 truncate">{deptName}</p>
-                                      {dept && dept.teams.length > 0 && (
-                                        <p className="text-xs text-gray-400 truncate">
-                                          {dept.teams.map((t) => t.name).join(', ')}
-                                        </p>
-                                      )}
-                                    </div>
-                                  )
-                                })}
-                                {assignedTeamsByDept.map((g) => (
-                                  <div key={g.deptName}>
-                                    <p className="text-xs font-bold text-gray-700 truncate">{g.deptName}</p>
-                                    <p className="text-xs text-gray-400 truncate">{g.teamNames.join(', ')}</p>
-                                  </div>
-                                ))}
-                              </div>
-                              <button type="button" onClick={() => setOpenPanel(row.key)}
-                                title={`แก้ไข${row.label}`}
-                                className="shrink-0 size-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-freshket-500 hover:text-white hover:border-freshket-500 transition-all">
-                                <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-                                </svg>
-                              </button>
-                            </div>
-                          ) : (
-                            <button type="button" onClick={() => setOpenPanel(row.key)}
-                              className="mt-2 flex items-center gap-1 text-xs font-bold text-freshket-600 hover:text-freshket-700 transition-colors">
-                              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                              </svg>
-                              เลือก{row.label}
-                            </button>
-                          )
-                        )}
-                      </div>
-                      )
-                    })}
-                  </div>
-            </div>
-            <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-gray-100 shrink-0">
-              <p className="text-xs text-gray-500">รายชื่อผู้เรียนตอนนี้ <span className="font-bold text-gray-800">{form.assignedUserIds.length - hiddenAssignedCount}</span> คน</p>
-              <button type="button" onClick={() => setShowCond(false)}
-                className="px-6 py-2 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-sm font-bold transition-colors">
-                ตกลง
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {openPanel === 'individual' && (
-        <IndividualAssignmentPanel
-          users={assignableUsers}
-          assignedIds={form.assignedUserIds}
-          enrolledUserIds={enrolledUserIds}
-          onConfirm={(ids) => set('assignedUserIds', ids)}
-          onClose={() => setOpenPanel(null)}
-        />
-      )}
-      {openPanel === 'department' && (
-        <DepartmentTeamPicker
-          deptTree={deptTree}
-          assignedIds={form.assignedUserIds}
-          enrolledUserIds={enrolledUserIds}
-          onConfirm={(ids, departments, teamIds) => {
-            set('assignedUserIds', ids)
-            setForm((p) => ({ ...p, assignedDepartments: departments, assignedTeamIds: teamIds }))
-          }}
-          onClose={() => setOpenPanel(null)}
-        />
-      )}
-      {openPanel === 'rank' && (
-        <ConditionGroupPicker
-          title="เลือกระดับตำแหน่ง"
-          groups={rankGroups}
-          assignedIds={form.assignedUserIds}
-          enrolledUserIds={enrolledUserIds}
-          onConfirm={(ids) => set('assignedUserIds', ids)}
-          onClose={() => setOpenPanel(null)}
-        />
-      )}
-      {openPanel === 'position' && (
-        <ConditionGroupPicker
-          title="เลือกตำแหน่ง"
-          groups={positionGroups}
-          assignedIds={form.assignedUserIds}
-          enrolledUserIds={enrolledUserIds}
-          onConfirm={(ids) => set('assignedUserIds', ids)}
-          onClose={() => setOpenPanel(null)}
-        />
-      )}
-      {openPanel === 'tenure' && (
-        <ConditionGroupPicker
-          title="เลือกอายุงาน"
-          groups={tenureGroups}
-          assignedIds={form.assignedUserIds}
-          enrolledUserIds={enrolledUserIds}
-          onConfirm={(ids) => set('assignedUserIds', ids)}
-          onClose={() => setOpenPanel(null)}
-        />
-      )}
-
-      {showAssignedTable && (
-        <AssignedLearnersTableModal
-          assignedUserIds={form.assignedUserIds}
-          allUsers={allUsers}
-          allTrainingRecords={allTrainingRecords}
-          enrolledUserIds={enrolledUserIds}
-          courseId={editCourse?.id}
-          courseTitle={form.title}
-          hasPreTest={hasPreTest}
-          hasPostTest={hasPostTest}
-          isSuperAdmin={isSuperAdmin}
-          onRemove={removeAssignedUser}
-          onRemoveMany={removeAssignedUsers}
-          onClose={() => setShowAssignedTable(false)}
-        />
-      )}
-
-      {showConfirm && (
-        <SaveConfirmationModal
-          recipientCount={form.assignedUserIds.filter((id) => !enrolledUserIds.has(id)).length}
-          skippedCount={form.assignedUserIds.filter((id) => enrolledUserIds.has(id)).length}
-          saving={saving}
-          onBack={() => setShowConfirm(false)}
-          onConfirm={performSave}
-        />
-      )}
 
       {showLessonPreview && (
         <LessonPreviewModal
