@@ -2541,13 +2541,66 @@ function toFormEmbedUrl(url: string): string | null {
   return null
 }
 
+// What a learner sees at the Key Take Away step, for the admin to read: the question the course puts to them and
+// the box they write in. Typing here is only to see how it feels; nothing is saved and nobody is told.
+function TakeAwayPreview({ prompt }: { prompt?: string }) {
+  const [text, setText] = useState('')
+  const question = prompt?.trim() || 'สรุปสิ่งที่คุณได้เรียนรู้จากหลักสูตรนี้'
+  return (
+    <div className="max-w-lg space-y-5">
+      <div className="flex items-center gap-3">
+        <div className="size-10 rounded-xl flex items-center justify-center bg-purple-50 text-purple-500">
+          <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-base font-bold text-gray-900">Key Take Away</h3>
+          <p className="text-xs text-gray-400">สรุปสิ่งที่ได้เรียนรู้หลังจบหลักสูตร</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+        <div>
+          <label className="text-xs font-bold text-gray-700 block mb-2">{question}</label>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={6}
+            placeholder="เขียนสิ่งที่คุณได้เรียนรู้ สิ่งที่จะนำไปปรับใช้กับงาน หรือข้อสังเกตที่น่าสนใจ..."
+            className="w-full px-4 py-3 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 resize-none leading-relaxed"
+          />
+          <p className="text-xs text-gray-400 mt-1.5 text-right">{text.trim().length} ตัวอักษร (ขั้นต่ำ 10)</p>
+        </div>
+        <button type="button" disabled
+          className="w-full py-2.5 rounded-xl text-sm font-bold bg-freshket-500 text-white opacity-40 cursor-not-allowed flex items-center justify-center gap-2">
+          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+          บันทึก Key Take Away
+        </button>
+      </div>
+
+      <p className="text-xs text-amber-600">ตัวอย่างมุมมองผู้เรียน: ข้อความที่พิมพ์ไม่ถูกบันทึกและไม่แจ้งเตือนใคร</p>
+    </div>
+  )
+}
+
 // Full course preview: browse every topic/lesson exactly as a learner's lesson
 // list is laid out. Takes the full assessments list (not one resolved
 // assessment) because "เริ่มทำแบบฝึกหัด" on a quiz-type lesson needs THAT
 // lesson's own assessmentId — each quiz-type lesson can link a different
 // question set.
-function LessonPreviewModal({ topics, assessments, courseId, onClose }: {
+// The Key Take Away step is not a lesson, so the preview gives it a fixed id of its own.
+const TAKEAWAY_PREVIEW_ID = '__key_take_away__'
+// So is the last step, "จบการเรียน" (the page where a learner finishes the course).
+const FINISH_PREVIEW_ID = '__finish__'
+
+function LessonPreviewModal({ topics, assessments, courseId, hasKeyTakeAway, keyTakeAwayPrompt, onClose }: {
   topics: CourseTopic[]; assessments: Assessment[]
+  /** Whether the course asks learners for a Key Take Away after the lessons, and the question it puts to them. */
+  hasKeyTakeAway?: boolean
+  keyTakeAwayPrompt?: string
   /** The saved course, so a quiz or questionnaire can really be tried. None for a course not saved yet. */
   courseId?: string
   onClose: () => void
@@ -2556,6 +2609,8 @@ function LessonPreviewModal({ topics, assessments, courseId, onClose }: {
   const sortedTopics = topics.slice().sort((a, b) => a.order - b.order)
   const firstLesson = sortedTopics.find((t) => t.lessons.length > 0)?.lessons[0]
   const [selectedId, setSelectedId] = useState<string | undefined>(firstLesson?.id)
+  // Pressing จบการเรียน here only shows what a learner would see; nothing is saved.
+  const [finishPressed, setFinishPressed] = useState(false)
 
   const selectedLesson = sortedTopics
     .flatMap((t) => t.lessons)
@@ -2596,7 +2651,7 @@ function LessonPreviewModal({ topics, assessments, courseId, onClose }: {
           </button>
         </div>
 
-        {sortedTopics.every((t) => t.lessons.length === 0) ? (
+        {sortedTopics.every((t) => t.lessons.length === 0) && !hasKeyTakeAway ? (
           <div className="flex-1 flex items-center justify-center text-sm text-gray-400">ยังไม่มีบทเรียน — เพิ่มหัวข้อและบทเรียนก่อนเพื่อดูตัวอย่าง</div>
         ) : (
           <div className="flex-1 flex overflow-hidden">
@@ -2616,6 +2671,29 @@ function LessonPreviewModal({ topics, assessments, courseId, onClose }: {
                   </div>
                 </div>
               ))}
+
+              {hasKeyTakeAway && (
+                <div>
+                  <p className="text-xs font-bold text-gray-400 px-1.5 mb-1 truncate">หลังเรียนจบ</p>
+                  <button type="button" onClick={() => setSelectedId(TAKEAWAY_PREVIEW_ID)}
+                    className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-xs transition-all ${selectedId === TAKEAWAY_PREVIEW_ID ? 'bg-freshket-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
+                    <svg className="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                    </svg>
+                    <span className="flex-1 truncate">Key Take Away</span>
+                  </button>
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-gray-100">
+                <button type="button" onClick={() => { setSelectedId(FINISH_PREVIEW_ID); setFinishPressed(false) }}
+                  className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-xs transition-all ${selectedId === FINISH_PREVIEW_ID ? 'bg-freshket-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
+                  <svg className="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v1.5M3 21v-6m0 0l2.77-.693a9 9 0 016.208.682l.108.054a9 9 0 006.086.71l3.114-.732a48.524 48.524 0 01-.005-10.499l-3.11.732a9 9 0 01-6.085-.711l-.108-.054a9 9 0 00-6.208-.682L3 4.5M3 15V4.5" />
+                  </svg>
+                  <span className="flex-1 truncate">จบการเรียน</span>
+                </button>
+              </div>
             </div>
 
             {/* Right: content viewer. A quiz lesson gets the full height of the
@@ -2623,7 +2701,53 @@ function LessonPreviewModal({ topics, assessments, courseId, onClose }: {
                 the size a learner actually sees, instead of scrolling inside a
                 short box. Every other lesson type keeps the reading column. */}
             <div className={`flex-1 p-6 ${selectedLesson?.type === 'quiz' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'}`}>
-              {!selectedLesson ? (
+              {selectedId === TAKEAWAY_PREVIEW_ID ? (
+                <TakeAwayPreview prompt={keyTakeAwayPrompt} />
+              ) : selectedId === FINISH_PREVIEW_ID ? (
+                <div className="space-y-4 max-w-2xl">
+                  <h3 className="text-base font-bold text-gray-900">จบการเรียน</h3>
+                  <p className="text-xs text-gray-500">
+                    {finishPressed
+                      ? 'ผู้เรียนจะเห็นว่าเรียนจบหลักสูตรแล้ว'
+                      : 'ผู้เรียนต้องผ่านครบทุกบทเรียนก่อน จึงกดปุ่มด้านล่างเพื่อจบการเรียนได้'}
+                  </p>
+                  <div className="rounded-xl border border-gray-100 divide-y divide-gray-100">
+                    {sortedTopics.flatMap((t, ti) => t.lessons.slice().sort((a, b) => a.order - b.order).map((l, li) => (
+                      <button key={`${t.id}:${l.id}`} type="button" onClick={() => setSelectedId(l.id)}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors">
+                        <span className={`size-5 rounded-full flex items-center justify-center shrink-0 ${finishPressed ? 'bg-freshket-500' : 'border-2 border-gray-200'}`}>
+                          {finishPressed && (
+                            <svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                          )}
+                        </span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-sm text-gray-900 truncate">{lessonLabel(l.title, li)}</span>
+                          <span className="block text-xs text-gray-400 truncate">{topicLabel(t.title, ti)}</span>
+                        </span>
+                      </button>
+                    )))}
+                  </div>
+                  {finishPressed ? (
+                    <p className="inline-flex items-center gap-2 text-sm font-bold text-freshket-700">
+                      <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                      เรียนจบหลักสูตรแล้ว
+                    </p>
+                  ) : (
+                    <button type="button" onClick={() => setFinishPressed(true)}
+                      className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-bold bg-freshket-500 text-white hover:bg-freshket-600 transition-all shadow-sm">
+                      <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                      จบการเรียน
+                    </button>
+                  )}
+                  <p className="text-xs text-amber-600">ตัวอย่างมุมมองผู้เรียน: กดแล้วไม่บันทึกอะไร ไม่นับว่าเรียนจบ และไม่แจ้งเตือนใคร</p>
+                </div>
+              ) : !selectedLesson ? (
                 <div className="h-full flex items-center justify-center text-gray-400 text-sm">เลือกบทเรียนทางซ้าย</div>
               ) : (
                 <div className={`space-y-4 ${selectedLesson.type === 'quiz' ? 'flex-1 min-h-0 flex flex-col' : 'max-w-2xl'}`}>
@@ -5451,6 +5575,8 @@ function CourseFormModal({ assessments, allUsers, allTrainingRecords, department
           topics={form.topics}
           assessments={assessments}
           courseId={editCourse?.id}
+          hasKeyTakeAway={form.hasKeyTakeAway}
+          keyTakeAwayPrompt={form.keyTakeAwayPrompt}
           onClose={() => setShowLessonPreview(false)}
         />
       )}
