@@ -502,7 +502,6 @@ export function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemov
           <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Position</th>
           <SortableTh label="Department" sortKey="department" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <SortableTh label="Start Date" sortKey="hireDate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-          <SortableTh label="Tenure" sortKey="tenure" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <SortableTh label="Course Started" sortKey="startDate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <SortableTh label="Last Activity" sortKey="lastActivity" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <SortableTh label="Progress" sortKey="progress" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
@@ -515,7 +514,7 @@ export function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemov
       </thead>
       <tbody>
         {sorted.length === 0 ? (
-          <tr><td colSpan={11 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">
+          <tr><td colSpan={10 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">
             {/* Distinguish "genuinely nobody assigned" from "everyone
                 assigned here has resigned" — otherwise this read as the
                 assignment being empty when it wasn't. */}
@@ -558,8 +557,11 @@ export function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemov
               </td>
               <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.position} /></td>
               <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.department} /></td>
-              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(u.startDate)}</td>
-              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatTenure(u.startDate)}</td>
+              {/* The day they joined, with their length of service under it */}
+              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
+                <span className="block">{fmtDate(u.startDate)}</span>
+                <span className="block text-gray-400 mt-0.5">{formatTenure(u.startDate)}</span>
+              </td>
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(row.startedAt ?? record?.startedAt)}</td>
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(lastActivity)}</td>
               <td className="px-4 py-3 whitespace-nowrap">
