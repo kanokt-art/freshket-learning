@@ -198,7 +198,9 @@ export default function CourseDetailPage() {
   const search = useSearchParams()
   const isSuperAdmin = user?.role === 'super_admin'
   const isLead = user?.role === 'team_lead' || user?.role === 'manager'
-  const isAdmin = isSuperAdmin || (isLead && search.get('view') === 'report')
+  // A super_admin opens the course as its dashboard, unless they came to learn it (?view=learn: "ดูแบบผู้เรียน" on a
+  // Course Design), which shows the course exactly as a learner takes it.
+  const isAdmin = (isSuperAdmin && search.get('view') !== 'learn') || (isLead && search.get('view') === 'report')
 
   // These three are consumed ONLY by <CourseResultsDashboard>, which renders just
   // for admins. Ungated, every learner opening any course pulled the entire users
@@ -516,7 +518,7 @@ export default function CourseDetailPage() {
           <h1 className="text-sm font-bold text-gray-900 truncate">{course.title}</h1>
         </div>
         {/* Only a super_admin reads what learners wrote about the course */}
-        {isSuperAdmin && (
+        {isAdmin && isSuperAdmin && (
           <button
             type="button"
             onClick={() => setFeedbackSheet('read')}

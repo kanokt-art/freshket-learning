@@ -76,7 +76,6 @@ export function AdministrationTabs() {
           { href: '/tools/cuisine-guide', label: 'Cuisine Guide', active: pathname.startsWith('/tools/cuisine-guide') },
           { href: '/tools#qa', label: 'Q&A', active: pathname === '/tools' && hash === 'qa', onClick: (e) => switchHash(e, 'qa') },
           { href: '/tools/mandatory', label: 'Merchandise Mandatory', active: pathname.startsWith('/tools/mandatory') },
-          { href: '/tools/new-joiner', label: 'New Joiner Hub', active: pathname.startsWith('/tools/new-joiner') },
           { href: '/tools#merch', label: 'Merchandise Contact', active: pathname === '/tools' && hash === 'merch', onClick: (e) => switchHash(e, 'merch') },
         ]
       : isSystem

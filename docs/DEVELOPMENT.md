@@ -121,7 +121,7 @@ means: migration + `docMap.ts` field + type + (if the browser may write it) `pol
 | `courses/`, `assessment/` | Course library, player, quiz, results | |
 | `courses/design/` (+ `[id]`) | **Course Design = the step where courses are launched.** A super_admin gathers courses into an ordered package, sets the learners (กำหนดผู้เรียน), start/end dates and publishes; the builder also has the แดชบอร์ด and สรุปผลการเรียน tabs. Learners see it on My Course and at `/courses/design/<id>` | `coursePackages` table (migrations 011 + 012). A **course** is only a draft of content (lessons, quiz, Key Take Away): its audience, dates and `isPublished` are a **projection** of the live Course Designs holding it (`lib/courses/designProjection.ts`, written by `lib/server/courseDesigns.ts` via `POST /api/course-designs/sync` after every package save/publish/delete). `POST /api/course-designs/convert` wraps each already-live course in a Course Design of its own (admin banner on the Course Design page). The optional "sequential" lock is enforced on the package page only |
 | `users/` | Employees page (admin) | Its member "Training" tab still has the older layout (see §10) |
-| `tools/` | `mandatory`, `cuisine-guide`, `new-joiner` | Mandatory Reading lives under Tools |
+| `tools/` | `mandatory`, `cuisine-guide` | Mandatory Reading lives under Tools |
 | `admin/` | `announcements`, `activity`, `guide`, `rewards`, `settings`, `spotlight` | `spotlight` = pin/hide items shown in "Latest" |
 | `notifications/`, `profile/`, `points/`, `personality/`, `log/` | | |
 

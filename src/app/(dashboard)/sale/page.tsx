@@ -20,7 +20,6 @@ import type { UserStats } from '@/types/stats'
 import { CATEGORY_LABELS, type Course, type CourseCategory } from '@/types/course'
 import { type TrainingRecord, type TrainingStatus } from '@/types/tracking'
 import { canAccess, type UserProfile } from '@/types/user'
-import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
 import { LearnerCourseGridCard } from '@/components/features/LearnerCourseDashboard'
 import { TeamLeadHome } from '@/components/features/TeamLeadHome'
 import { useUnseenFeedback } from '@/hooks/useUnseenFeedback'
@@ -112,10 +111,6 @@ export default function SaleDashboardPage() {
     setSidebarOpen((v) => !v)
   }
   const firstName = user?.nickname ?? user?.displayName?.split(' ')[0] ?? 'คุณ'
-  const daysSince = getDaysSince(user?.startDate)
-  const isNewJoiner = !isAdmin && daysSince < NEW_JOINER_DAYS
-  const daysLeft = Math.max(0, NEW_JOINER_DAYS - daysSince)
-  const njPct = Math.min(100, Math.round((daysSince / NEW_JOINER_DAYS) * 100))
 
   const courseMap = useMemo(() => Object.fromEntries(courses.map((c) => [c.id, c])), [courses])
   const completedRecords = useMemo(() => myRecords.filter((r) => r.status === 'completed'), [myRecords])
@@ -333,42 +328,6 @@ export default function SaleDashboardPage() {
                 onOpenCourse={(id) => router.push(`/courses/${id}`)}
                 onSeeAll={() => router.push('/courses')}
               />
-            </div>
-          )}
-
-          {/* New Joiner banner */}
-          {isNewJoiner && (
-            <div className="bg-white rounded-2xl border border-freshket-200 overflow-hidden">
-              <div className="flex items-center gap-4 px-5 py-4">
-                <div className="shrink-0 relative size-14">
-                  <svg className="size-14 -rotate-90" viewBox="0 0 56 56">
-                    <circle cx="28" cy="28" r="22" fill="none" stroke="#d6fdf0" strokeWidth="6" />
-                    <circle cx="28" cy="28" r="22" fill="none" stroke="#00ce7c" strokeWidth="6"
-                      strokeLinecap="round"
-                      strokeDasharray={`${2 * Math.PI * 22}`}
-                      strokeDashoffset={`${2 * Math.PI * 22 * (1 - njPct / 100)}`} />
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-sm font-black text-freshket-700">{njPct}%</span>
-                  </div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-xs font-bold text-freshket-700 bg-freshket-100 px-2 py-0.5 rounded-full">🌱 New Joiner</span>
-                    <span className="text-xs text-gray-400">วันที่ {daysSince} / {NEW_JOINER_DAYS}</span>
-                  </div>
-                  <p className="text-sm font-bold text-gray-900">เหลืออีก {daysLeft} วันในช่วง Onboarding</p>
-                  <p className="text-xs text-gray-400 mt-0.5">เช็กคู่มือ New Joiner เพื่อเรียนรู้ทีมและเครื่องมือสำคัญ</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => router.push('/tools/new-joiner')}
-                  className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-freshket-500 hover:bg-freshket-600 text-white text-xs font-bold transition-colors shadow-sm"
-                >
-                  ดูคู่มือ
-                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
-                </button>
-              </div>
             </div>
           )}
 

@@ -127,7 +127,7 @@ export default function CoursePackagePage() {
                             )}
                           </p>
                         </div>
-                        <button type="button" disabled={disabled} onClick={() => router.push(`/courses/${c.id}`)}
+                        <button type="button" disabled={disabled} onClick={() => router.push(isAdmin ? `/courses/${c.id}?view=learn` : `/courses/${c.id}`)}
                           className={`shrink-0 px-4 py-2 rounded-xl text-xs font-bold transition-all ${disabled ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : isNext ? 'bg-freshket-500 text-white hover:bg-freshket-600' : 'border border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
                           {it.status === 'completed' ? 'ทบทวน' : it.status === 'in_progress' ? 'เรียนต่อ' : 'เริ่มเรียน'}
                         </button>

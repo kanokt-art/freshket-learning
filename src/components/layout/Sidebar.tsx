@@ -2,14 +2,13 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { BookMarked, BookOpen, GraduationCap, House, LibraryBig, LogOut, MessagesSquare, Sparkles, Target, Undo2, UserCog, Users, Wrench } from 'lucide-react'
+import { BookMarked, BookOpen, GraduationCap, House, LibraryBig, LogOut, MessagesSquare, Target, Undo2, UserCog, Users, Wrench } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { useUnseenFeedback } from '@/hooks/useUnseenFeedback'
 import { canAccess, ROLE_HIERARCHY, type UserRole } from '@/types/user'
 import { FRESHKET_LOGO_URL } from '@/lib/demo/demoMode'
-import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
 import { MbtiBadge } from '@/components/features/MbtiBadge'
 import { englishName } from '@/lib/users/displayName'
 import type { ModuleId } from '@/lib/modules'
@@ -22,7 +21,6 @@ interface SubNavItem {
   moduleId?: ModuleId        // hide when module not allowed for user's department
   icon?: React.ReactNode
   badge?: string
-  newJoinerOnly?: boolean
   exact?: boolean
 }
 
@@ -117,13 +115,13 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
   {
-    // Flat link — sub-nav (Tools / Mandatory / New Joiner Hub) now lives as
+    // Flat link — sub-nav (Tools / Mandatory) now lives as
     // a tab bar on the page (FreshketToolTabs). children[] kept only for gating.
     href: '/tools',
     label: 'Tools',
     requiredRole: 'sale',
     group: 'main',
-    matchPaths: ['/tools/new-joiner', '/courses/mandatory'],
+    matchPaths: ['/courses/mandatory'],
     // No top-level moduleId — parent shown when any child is visible
     icon: <Wrench className="size-5 shrink-0" strokeWidth={1.8} />,
     children: [
@@ -134,15 +132,6 @@ const NAV_ITEMS: NavItem[] = [
         moduleId: 'sale_tools',
         exact: true,
         icon: <Wrench className="size-3.5 shrink-0" strokeWidth={2} />,
-      },
-      {
-        href: '/tools/new-joiner',
-        label: 'New Joiner Hub',
-        requiredRole: 'sale',
-        moduleId: 'sale_tools',
-        newJoinerOnly: true,
-        badge: 'NEW',
-        icon: <Sparkles className="size-3.5 shrink-0" strokeWidth={2} />,
       },
     ],
   },
@@ -204,8 +193,6 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
 
   const { allowedModules } = useModuleAccess(user?.role, user?.department)
 
-  const isNewJoiner = useMemo(() => getDaysSince(user?.startDate) < NEW_JOINER_DAYS, [user?.startDate])
-  const isSuperAdmin = user?.role === 'super_admin'
 
   useEffect(() => {
     const saved = localStorage.getItem('sidebar_collapsed')
@@ -227,7 +214,6 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
   function filterChildren(children: SubNavItem[]) {
     return children.filter(c => {
       if (!user || !canAccess(user.role, c.requiredRole)) return false
-      if (c.newJoinerOnly && !isNewJoiner && !isSuperAdmin) return false
       if (!isModuleAllowed(c.moduleId)) return false
       return true
     })

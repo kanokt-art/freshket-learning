@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
-import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
 
 // Regular-user sub-nav for the "Tools" area (Tools / Mandatory /
 // New Joiner Hub), replacing the old sidebar accordion. Self-gating: renders
@@ -30,7 +29,6 @@ export function FreshketToolTabs() {
   if (!user || user.role === 'super_admin') return null
   if (!allowedModules.has('sale_tools')) return null
 
-  const isNewJoiner = getDaysSince(user.startDate) < NEW_JOINER_DAYS
   const onTools = pathname === '/tools'
   const isMerch = onTools && hash === '#merch'
   const isQA = onTools && hash === '#qa'
@@ -57,7 +55,6 @@ export function FreshketToolTabs() {
     { href: '/tools#qa', label: 'Q&A', active: isQA, show: true, onClick: (e) => switchHash(e, 'qa') },
     // A learner's Mandatory Reading: the page that shows only what their department may read.
     { href: '/courses/mandatory', label: 'Merchandise Mandatory', active: pathname === '/tools/mandatory' || pathname.startsWith('/courses/mandatory'), show: true },
-    { href: '/tools/new-joiner', label: 'New Joiner Hub', badge: 'NEW', active: pathname.startsWith('/tools/new-joiner'), show: isNewJoiner },
     // Moved to the end per request — was the second tab.
     { href: '/tools#merch', label: 'Merchandise Contact', active: isMerch, show: true, onClick: (e) => switchHash(e, 'merch') },
   ]
