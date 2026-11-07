@@ -82,7 +82,8 @@ export function LearningJourneySheet({
   finished: boolean
   person?: { name: string; photoURL?: string | null }
   onWriteTakeAway?: () => void
-  onRateCourse: () => void
+  /** Absent when rating is not offered (a super_admin trying the course as a learner leaves nothing behind). */
+  onRateCourse?: () => void
   onClose: () => void
   /** In the page (a computer): comments shown in full, no card over the page. */
   inline?: boolean
@@ -136,9 +137,11 @@ export function LearningJourneySheet({
     <FeedbackSheetFrame
       inline={inline}
       onClose={onClose}
-      footer={finished
-        ? <SheetButton onClick={onRateCourse}>ให้คะแนนหลักสูตรนี้</SheetButton>
-        : <p className="text-center text-xs text-gray-400">ให้คะแนนหลักสูตรได้หลังเรียนจบ</p>}
+      footer={!onRateCourse
+        ? undefined
+        : finished
+          ? <SheetButton onClick={onRateCourse}>ให้คะแนนหลักสูตรนี้</SheetButton>
+          : <p className="text-center text-xs text-gray-400">ให้คะแนนหลักสูตรได้หลังเรียนจบ</p>}
     >
       <div className="text-left">
         <p className="text-sm text-gray-500 pr-8">ความคืบหน้าของคุณ</p>

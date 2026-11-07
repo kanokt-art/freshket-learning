@@ -421,6 +421,11 @@ export default function TakeAssessmentPage() {
           correctLabel: source.find((q) => q.id === a.questionId)?.choices?.find((c) => c.isCorrect)?.text ?? '',
         })), normalizeRevealMode(previewSource?.revealMode)),
       })
+      // A super_admin trying a course as a learner continues down the course: the lesson is ticked in their
+      // throwaway copy (the course page keeps it apart from their real progress).
+      if (returnCtx?.lessonId) {
+        try { sessionStorage.setItem('assessment_graded_lesson', JSON.stringify({ courseId: returnCtx.courseId, lessonId: returnCtx.lessonId })) } catch { /* ignore */ }
+      }
       if (returnCtx) sessionStorage.removeItem('assessment_return')
       setSubmitted(true)
       setSubmitting(false)

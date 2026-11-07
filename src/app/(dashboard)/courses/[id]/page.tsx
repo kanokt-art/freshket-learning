@@ -57,6 +57,15 @@ function loadProgress(uid: string, courseId: string): Progress {
   }
 }
 
+/** The id this learner's local copies (progress, take away, video position) are keyed by. A super_admin trying the
+ *  course as a learner (?view=learn) gets a throwaway one, so nothing they do touches their real record. */
+function useLearnUid(): string | undefined {
+  const { user } = useAuth()
+  const search = useSearchParams()
+  if (!user?.uid) return undefined
+  return user.role === 'super_admin' && search.get('view') === 'learn' ? `trial_${user.uid}` : user.uid
+}
+
 function saveProgress(uid: string, courseId: string, prog: Progress) {
   if (!uid) return
   localStorage.setItem(progKey(uid, courseId), JSON.stringify(prog))
@@ -201,6 +210,11 @@ export default function CourseDetailPage() {
   // A super_admin opens the course as its dashboard, unless they came to learn it (?view=learn: "ดูแบบผู้เรียน" on a
   // Course Design), which shows the course exactly as a learner takes it.
   const isAdmin = (isSuperAdmin && search.get('view') !== 'learn') || (isLead && search.get('view') === 'report')
+  // A super_admin trying the course as a learner (?view=learn) is only looking: nothing is recorded. Their progress
+  // lives in a throwaway local copy under another key (so it never touches their real one), no training record,
+  // Key Take Away, Slack post or quiz attempt is written, and quizzes open as a try-out that grades in the browser.
+  const trial = isSuperAdmin && search.get('view') === 'learn'
+  const learnUid = user?.uid ? (trial ? `trial_${user.uid}` : user.uid) : undefined
 
   // These three are consumed ONLY by <CourseResultsDashboard>, which renders just
   // for admins. Ungated, every learner opening any course pulled the entire users
@@ -281,12 +295,25 @@ export default function CourseDetailPage() {
   }, [feedbackSheet, newestReview, feedbackUid, id, feedbackSeen])
   const [activeStep, setActiveStep] = useState<StepId>('slide')
 
+  // A trial starts from nothing, once per browser tab, and keeps its own progress while the tab stays open.
+  useEffect(() => {
+    if (!trial || !learnUid) return
+    const flag = `fk_trial_started_${id}`
+    try {
+      if (sessionStorage.getItem(flag)) return
+      sessionStorage.setItem(flag, '1')
+      localStorage.removeItem(progKey(learnUid, id))
+      localStorage.removeItem(statusKey(learnUid, id))
+      localStorage.removeItem(takeawayKey(learnUid, id))
+    } catch { /* no storage: the trial just keeps what it has */ }
+  }, [trial, learnUid, id])
+
   // Load progress from localStorage on mount. Keyed by uid, so it has to wait
   // for auth to resolve — an anonymous first paint would read nothing.
   useEffect(() => {
-    if (!user?.uid) return
-    setProgress(loadProgress(user.uid, id))
-  }, [id, user?.uid])
+    if (!learnUid) return
+    setProgress(loadProgress(learnUid, id))
+  }, [id, learnUid])
 
   // What the server holds for this learner joins the local progress, so this page neither misses it nor
   // writes a shorter list back over it: a questionnaire ticks its own lesson on submit, and a quiz sat in
@@ -295,7 +322,8 @@ export default function CourseDetailPage() {
   // up without a reload.
   const uid = user?.uid
   useEffect(() => {
-    if (!uid) return
+    // A trial reads nothing from the server either: it starts empty.
+    if (!uid || trial) return
     const me: string = uid
     let cancelled = false
     async function pull() {
@@ -328,13 +356,13 @@ export default function CourseDetailPage() {
       window.removeEventListener('focus', pull)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [id, uid])
+  }, [id, uid, trial])
 
   // Re-read progress when user navigates back (window focus / visibility)
   const refreshProgress = useCallback(() => {
-    if (!user?.uid) return
-    setProgress(loadProgress(user.uid, id))
-  }, [id, user?.uid])
+    if (!learnUid) return
+    setProgress(loadProgress(learnUid, id))
+  }, [id, learnUid])
 
   useEffect(() => {
     window.addEventListener('focus', refreshProgress)
@@ -347,14 +375,14 @@ export default function CourseDetailPage() {
 
   // Set initial active step to first unlocked incomplete step
   useEffect(() => {
-    if (!course || !user?.uid) return
+    if (!course || !learnUid) return
     const steps = buildSteps(course)
-    const prog = loadProgress(user.uid, id)
+    const prog = loadProgress(learnUid, id)
     const firstPending = steps.find((s) => !isDone(s.id, prog))
     if (firstPending) setActiveStep(firstPending.id)
     else setActiveStep(steps[steps.length - 1]?.id ?? 'slide')
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [course, id, user?.uid])
+  }, [course, id, learnUid])
 
   // A graded (pre/post-tagged) quiz lesson is completed by SUBMITTING it, not
   // by opening it — the assessment page leaves this note on a successful
@@ -372,11 +400,11 @@ export default function CourseDetailPage() {
         const done = prev.completedLessonIds ?? []
         if (done.includes(lessonId)) return prev
         const next = { ...prev, completedLessonIds: [...done, lessonId] }
-        saveProgress(user.uid, course.id, next)
+        saveProgress(learnUid ?? user.uid, course.id, next)
         return next
       })
     } catch { /* malformed note — ignore, the learner can retake */ }
-  }, [course, user?.uid])
+  }, [course, user?.uid, learnUid])
 
   // ── Mirror progress to Firestore (the admin ↔ user link) ────────────────────
   // Single sync point: covers step completions, per-lesson completions, and the
@@ -385,7 +413,7 @@ export default function CourseDetailPage() {
   // course — or an admin previewing it — doesn't create an empty record.
   const progressKey = JSON.stringify(progress)
   useEffect(() => {
-    if (!course || !user?.uid) return
+    if (!course || !user?.uid || trial) return
     const prog: Progress = JSON.parse(progressKey)
     const started = prog.slideDone || prog.takeawayDone
       || (prog.completedLessonIds?.length ?? 0) > 0
@@ -400,7 +428,7 @@ export default function CourseDetailPage() {
       completedLessonIds: realLessonIds,
       totalLessons: countCourseLessons(course),
     })
-  }, [course, user?.uid, user?.displayName, progressKey])
+  }, [course, user?.uid, user?.displayName, progressKey, trial])
 
   if (loading || moduleLoading) {
     return (
@@ -463,9 +491,9 @@ export default function CourseDetailPage() {
   // by the sync effect above, which also covers progress written by the
   // assessment page (scores) and picked up on window focus.
   function persist(next: Progress) {
-    if (!user?.uid) return
-    saveProgress(user.uid, id, next)
-    checkAndSaveStatus(user.uid, id, course!, next)
+    if (!learnUid) return
+    saveProgress(learnUid, id, next)
+    checkAndSaveStatus(learnUid, id, course!, next)
     setProgress(next)
   }
 
@@ -484,7 +512,7 @@ export default function CourseDetailPage() {
   }
 
   function markTakeAwayDone(text: string) {
-    saveTakeAway(id, text, user?.uid, course?.title)
+    if (trial && learnUid) { try { localStorage.setItem(takeawayKey(learnUid, id), text) } catch { /* ignore */ } } else saveTakeAway(id, text, user?.uid, course?.title)
     persist({ ...progress, takeawayDone: true })
   }
 
@@ -597,7 +625,7 @@ export default function CourseDetailPage() {
           finished={progress.slideDone || serverStatus === 'completed' || DEMO_MODE}
           person={{ name: formatPersonName(user), photoURL: user.photoURL }}
           onWriteTakeAway={course.hasKeyTakeAway && !isLocked('takeaway') ? () => { setFeedbackSheet(null); setActiveStep('takeaway') } : undefined}
-          onRateCourse={() => setFeedbackSheet('give')}
+          onRateCourse={trial ? undefined : () => setFeedbackSheet('give')}
           onClose={() => setFeedbackSheet(null)}
         />
       )}
@@ -736,7 +764,7 @@ export default function CourseDetailPage() {
               finished={progress.slideDone || serverStatus === 'completed' || DEMO_MODE}
               person={{ name: formatPersonName(user), photoURL: user.photoURL }}
               onWriteTakeAway={course.hasKeyTakeAway && !isLocked('takeaway') ? () => { setFeedbackSheet(null); setActiveStep('takeaway') } : undefined}
-              onRateCourse={() => setFeedbackSheet('give')}
+              onRateCourse={trial ? undefined : () => setFeedbackSheet('give')}
               onClose={() => setFeedbackSheet(null)}
             />
           ) : wide && feedbackSheet === 'give' && user ? (
@@ -1074,24 +1102,24 @@ function LessonBrowserStep({
   completedLessonIds: string[]; onLessonComplete: (lessonId: string) => void; retakeLocked: boolean
 }) {
   const router = useRouter()
-  const { user: viewer } = useAuth()
+  const learnUid = useLearnUid()
   const topics = course.topics ?? []
   // How far each YouTube lesson has been watched (browser-side; display and resume only).
   const [videoProgress, setVideoProgress] = useState<Record<string, VideoProgress>>({})
   useEffect(() => {
-    if (!viewer?.uid) return
+    if (!learnUid) return
     const loaded: Record<string, VideoProgress> = {}
     for (const t of course.topics ?? []) for (const l of t.lessons) {
       if (l.type === 'video' && youtubeVideoId(l.videoUrl)) {
-        loaded[l.id] = readVideoProgress(localStorage, videoProgressKey(viewer.uid, course.id, l.id))
+        loaded[l.id] = readVideoProgress(localStorage, videoProgressKey(learnUid, course.id, l.id))
       }
     }
     setVideoProgress(loaded)
-  }, [viewer?.uid, course.id, course.topics])
+  }, [learnUid, course.id, course.topics])
   function recordVideoProgress(lessonId: string, p: VideoProgress) {
-    if (!viewer?.uid) return
+    if (!learnUid) return
     setVideoProgress((prev) => ({ ...prev, [lessonId]: furthest(prev[lessonId], p) }))
-    try { localStorage.setItem(videoProgressKey(viewer.uid, course.id, lessonId), JSON.stringify(p)) } catch { /* private mode: the bar still moves */ }
+    try { localStorage.setItem(videoProgressKey(learnUid, course.id, lessonId), JSON.stringify(p)) } catch { /* private mode: the bar still moves */ }
   }
   /** 0–100 for a YouTube lesson; null for anything whose progress cannot be measured. */
   function lessonPct(l: CourseLesson): number | null {
@@ -1210,6 +1238,8 @@ function LessonBrowserStep({
       courseId: course.id,
       ...(step ? { step, lessonId: quizCompletionKey(lesson, step) } : {}),
     }))
+    // A trial opens the quiz as a try-out: graded in the browser, no attempt kept, nobody told.
+    if (learnUid?.startsWith('trial_')) { router.push(`/assessment/${lesson.assessmentId}?preview=1`); return }
     router.push(`/assessment/${lesson.assessmentId}?courseId=${encodeURIComponent(course.id)}${step ? `&step=${step}` : ''}`)
   }
 
@@ -1531,13 +1561,13 @@ function TakeAwayStep({
   hasNext: boolean
 }) {
   const prompt = course.keyTakeAwayPrompt?.trim() || 'สรุปสิ่งที่คุณได้เรียนรู้จากหลักสูตรนี้'
-  const { user } = useAuth()
+  const learnUid = useLearnUid()
   const [text, setText] = useState('')
   // Seeded in an effect rather than useState's initializer because the draft is
   // keyed by uid, which isn't resolved yet on the first render.
   useEffect(() => {
-    if (user?.uid) setText(loadTakeAway(user.uid, courseId))
-  }, [user?.uid, courseId])
+    if (learnUid) setText(loadTakeAway(learnUid, courseId))
+  }, [learnUid, courseId])
   const canSubmit = text.trim().length >= 10
 
   return (
