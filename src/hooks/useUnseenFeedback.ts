@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
-import { useFirestoreList } from '@/hooks/useFirestore'
+import { useCourses, useFirestoreList } from '@/hooks/useFirestore'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import type { LeadReview } from '@/lib/feedback/leadReviews'
 import { FEEDBACK_SEEN_EVENT, readFeedbackSeen, unseenFeedbackCounts } from '@/lib/feedback/unseen'
@@ -21,6 +21,9 @@ export function useUnseenFeedback(): Map<string, number> {
     [{ type: 'where', field: 'memberUid', op: '==', value: uid }],
     !DEMO_MODE && !!uid,
   )
+  // Feedback goes with a Key Take Away: a course without one never shows a badge.
+  const { data: courses } = useCourses()
+  const withTakeAway = useMemo(() => new Set(courses.filter((c) => c.hasKeyTakeAway).map((c) => c.id)), [courses])
   // Bumped when the learner reads a course's feedback (here or in another tab), so the dots recompute.
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -30,8 +33,8 @@ export function useUnseenFeedback(): Map<string, number> {
     return () => { window.removeEventListener(FEEDBACK_SEEN_EVENT, bump); window.removeEventListener('storage', bump) }
   }, [])
   return useMemo(
-    () => (uid ? unseenFeedbackCounts(data, (courseId) => readFeedbackSeen(uid, courseId)) : new Map<string, number>()),
+    () => (uid ? unseenFeedbackCounts(data.filter((r) => !!r.courseId && withTakeAway.has(r.courseId)), (courseId) => readFeedbackSeen(uid, courseId)) : new Map<string, number>()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, uid, tick],
+    [data, uid, tick, withTakeAway],
   )
 }

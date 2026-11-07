@@ -150,11 +150,13 @@ export function MemberCourseDrawer({ memberUid, memberName, courseId, courseTitl
         <div className="flex-1 overflow-y-auto px-6 py-6">
           {loading ? (
             <p className="text-sm text-gray-400 text-center py-10">กำลังโหลด…</p>
+          ) : !hasTakeAway ? (
+            <p className="text-sm text-gray-400 text-center py-10">หลักสูตรนี้ไม่มี Key Take Away จึงไม่มี Feedback</p>
           ) : (
             <JourneyList>
-              {hasTakeAway && <JourneyStep state={states[0]} title="Key Take Away" meta={takeaway ? 'จากพนักงาน' : 'พนักงานยังไม่ได้เขียน'}>
+              <JourneyStep state={states[0]} title="Key Take Away" meta={takeaway ? 'จากพนักงาน' : 'พนักงานยังไม่ได้เขียน'}>
                 {takeaway && <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{takeaway}</p>}
-              </JourneyStep>}
+              </JourneyStep>
               {reviewStep('team_lead', 1)}
               {reviewStep('manager', 2)}
             </JourneyList>

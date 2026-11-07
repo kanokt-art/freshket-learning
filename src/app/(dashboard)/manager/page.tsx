@@ -1188,11 +1188,14 @@ function FeedbackJourney({ courseId, takeaway, reviews, viewerUid, viewerSlot, c
     )
   }
 
+  // Feedback goes with the Key Take Away: a course without one has no feedback to give or read.
+  if (!hasTakeAway) return null
+
   return (
     <JourneyList className="mt-3">
-      {hasTakeAway && <JourneyStep state={states[0]} title="Key Take Away" meta={wrote ? 'จากพนักงาน' : 'พนักงานยังไม่ได้เขียน'}>
+      <JourneyStep state={states[0]} title="Key Take Away" meta={wrote ? 'จากพนักงาน' : 'พนักงานยังไม่ได้เขียน'}>
         {wrote && <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{takeaway.trim()}</p>}
-      </JourneyStep>}
+      </JourneyStep>
       {reviewStep('team_lead', 1)}
       {reviewStep('manager', 2)}
     </JourneyList>

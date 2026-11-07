@@ -593,7 +593,7 @@ export default function CourseDetailPage() {
         </div>
       )}
 
-      {!isAdmin && newestReview > 0 && feedbackSheet === null && (() => {
+      {!isAdmin && course.hasKeyTakeAway && newestReview > 0 && feedbackSheet === null && (() => {
         const isNew = newestReview > feedbackSeen
         const newCount = unseenFeedbackCounts(leadReviews.map((r) => ({ ...r, courseId: id })), () => feedbackSeen).get(id) ?? 0
         return (
@@ -616,7 +616,7 @@ export default function CourseDetailPage() {
         )
       })()}
 
-      {!wide && feedbackSheet === 'journey' && user && (
+      {!wide && feedbackSheet === 'journey' && user && course.hasKeyTakeAway && (
         <LearningJourneySheet
           courseTitle={course.title}
           takeaway={takeawayText}
@@ -723,7 +723,7 @@ export default function CourseDetailPage() {
           })}
 
           {/* Feedback หลักสูตร: the learner's path — their Key Take Away, the Team Lead's and the Manager's feedback */}
-          {!isAdmin && user && (() => {
+          {!isAdmin && user && course.hasKeyTakeAway && (() => {
             const finished = true
             return (
               <button
@@ -754,7 +754,7 @@ export default function CourseDetailPage() {
 
         {/* ── Content area (less padding for slide view) ───────────────── */}
         <main className={`flex-1 overflow-auto ${currentStep?.id === 'slide' && !(wide && (feedbackSheet === 'journey' || feedbackSheet === 'give')) ? 'p-4' : 'p-6'}`}>
-          {wide && feedbackSheet === 'journey' && user ? (
+          {wide && feedbackSheet === 'journey' && user && course.hasKeyTakeAway ? (
             <LearningJourneySheet
               inline
               courseTitle={course.title}
