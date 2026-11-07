@@ -148,7 +148,8 @@ export function LearningJourneySheet({
         <h2 className="text-2xl font-extrabold text-gray-900 leading-snug mt-0.5 pr-8">{courseTitle}</h2>
 
         <JourneyList className="mt-6">
-          <JourneyStep
+          {/* A course without a Key Take Away has no such step to show */}
+          {hasTakeAwayStep && <JourneyStep
             state={stateOf(0)}
             title="Key Take Away ของคุณ"
             meta={!hasTakeAwayStep ? 'หลักสูตรนี้ไม่มี Key Take Away' : wrote ? 'เขียนแล้ว' : 'ยังไม่ได้เขียน'}
@@ -159,7 +160,7 @@ export function LearningJourneySheet({
             ) : undefined}
           >
             {wrote && <p className={`text-sm text-gray-700 leading-relaxed whitespace-pre-wrap ${inline ? '' : 'line-clamp-3'}`}>{takeaway.trim()}</p>}
-          </JourneyStep>
+          </JourneyStep>}
           {reviewStep('team_lead', 1)}
           {reviewStep('manager', 2)}
         </JourneyList>

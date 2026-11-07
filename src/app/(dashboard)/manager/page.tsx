@@ -1113,7 +1113,10 @@ function FeedbackJourney({ courseId, takeaway, reviews, viewerUid, viewerSlot, c
   const mine = reviews.find((r) => r.leadUid === viewerUid)
   const latest = latestBySlot(reviews)
   const wrote = !!takeaway.trim()
-  const states = journeyStates({ takeaway: wrote, teamLead: !!latest.team_lead, manager: !!latest.manager })
+  // A course without a Key Take Away has no such step.
+  const { data: allCourses } = useCourses()
+  const hasTakeAway = !!allCourses.find((c) => c.id === courseId)?.hasKeyTakeAway
+  const states = journeyStates({ takeaway: hasTakeAway ? wrote : true, teamLead: !!latest.team_lead, manager: !!latest.manager })
   const [editing, setEditing] = useState(false)
   const [comment, setComment] = useState(mine?.comment ?? '')
   const [stars, setStars] = useState<number | null>(toStars(mine?.score))
@@ -1187,9 +1190,9 @@ function FeedbackJourney({ courseId, takeaway, reviews, viewerUid, viewerSlot, c
 
   return (
     <JourneyList className="mt-3">
-      <JourneyStep state={states[0]} title="Key Take Away" meta={wrote ? 'จากพนักงาน' : 'พนักงานยังไม่ได้เขียน'}>
+      {hasTakeAway && <JourneyStep state={states[0]} title="Key Take Away" meta={wrote ? 'จากพนักงาน' : 'พนักงานยังไม่ได้เขียน'}>
         {wrote && <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{takeaway.trim()}</p>}
-      </JourneyStep>
+      </JourneyStep>}
       {reviewStep('team_lead', 1)}
       {reviewStep('manager', 2)}
     </JourneyList>

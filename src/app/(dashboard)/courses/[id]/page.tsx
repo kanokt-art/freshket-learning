@@ -737,7 +737,7 @@ export default function CourseDetailPage() {
                 </span>
                 <span className="min-w-0">
                   <span className="block text-xs font-bold truncate">Feedback หลักสูตร</span>
-                  <span className="block text-xs text-gray-400 truncate">Key Take Away และความเห็นหัวหน้า</span>
+                  <span className="block text-xs text-gray-400 truncate">{course.hasKeyTakeAway ? 'Key Take Away และความเห็นหัวหน้า' : 'ความเห็นหัวหน้า'}</span>
                 </span>
               </button>
             )

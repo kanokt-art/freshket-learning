@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createPortal } from 'react-dom'
 import { StarsDisplay } from '@/components/common/Stars'
 import { JourneyList, JourneyStep } from '@/components/features/LearningJourneySheet'
-import { useFirestoreList } from '@/hooks/useFirestore'
+import { useCourses, useFirestoreList } from '@/hooks/useFirestore'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { formatElapsed } from '@/lib/assessment/briefing'
 import { getDemoMode } from '@/lib/demo/demoMode'
@@ -94,7 +94,10 @@ export function MemberCourseDrawer({ memberUid, memberName, courseId, courseTitl
   }, [live, memberUid, courseId])
 
   const latest = latestBySlot(reviews)
-  const states = journeyStates({ takeaway: !!takeaway, teamLead: !!latest.team_lead, manager: !!latest.manager })
+  // A course without a Key Take Away has no such step.
+  const { data: allCourses } = useCourses()
+  const hasTakeAway = !!allCourses.find((c) => c.id === courseId)?.hasKeyTakeAway
+  const states = journeyStates({ takeaway: hasTakeAway ? !!takeaway : true, teamLead: !!latest.team_lead, manager: !!latest.manager })
   const loading = live && (takeawayDocs.loading || reviewDocs.loading)
 
   const reviewStep = (slot: LeadSlot, i: number) => {
@@ -149,9 +152,9 @@ export function MemberCourseDrawer({ memberUid, memberName, courseId, courseTitl
             <p className="text-sm text-gray-400 text-center py-10">กำลังโหลด…</p>
           ) : (
             <JourneyList>
-              <JourneyStep state={states[0]} title="Key Take Away" meta={takeaway ? 'จากพนักงาน' : 'พนักงานยังไม่ได้เขียน'}>
+              {hasTakeAway && <JourneyStep state={states[0]} title="Key Take Away" meta={takeaway ? 'จากพนักงาน' : 'พนักงานยังไม่ได้เขียน'}>
                 {takeaway && <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{takeaway}</p>}
-              </JourneyStep>
+              </JourneyStep>}
               {reviewStep('team_lead', 1)}
               {reviewStep('manager', 2)}
             </JourneyList>
