@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import {
   AssignedLearnersTable, AssignedLearnersTableModal, IndividualAssignmentPanel, DepartmentTeamPicker, ConditionGroupPicker,
-  computeAssignedRows, TENURE_BUCKETS, tenureYears, type DeptTreeNode,
+  computePackageRows, TENURE_BUCKETS, tenureYears, type DeptTreeNode,
 } from '@/components/features/LearnerAssignment'
 import type { TrainingRecord } from '@/types/tracking'
 import { getTeamLeadIds, getTeamManagerIds, type UserProfile, type Department, type Team } from '@/types/user'
@@ -85,8 +85,8 @@ export function LearnerAssignmentTab({ value, onChange, allUsers, departments, t
   })), [assignableUsers])
 
   const assignedRows = useMemo(
-    () => computeAssignedRows(value.assignedUserIds, allUsers, records, undefined),
-    [value.assignedUserIds, allUsers, records],
+    () => computePackageRows(value.assignedUserIds, allUsers, records, courseIds),
+    [value.assignedUserIds, allUsers, records, courseIds],
   )
   // The table hides people who resigned or are outside the target departments; they stay in the list until cleared.
   const activeAssignedIds = useMemo(
@@ -331,6 +331,7 @@ export function LearnerAssignmentTab({ value, onChange, allUsers, departments, t
           assignedUserIds={value.assignedUserIds}
           allUsers={allUsers}
           allTrainingRecords={records}
+          packageCourseIds={courseIds}
           enrolledUserIds={enrolledUserIds}
           isSuperAdmin={isSuperAdmin}
           onRemove={(uid) => removeAssigned([uid])}

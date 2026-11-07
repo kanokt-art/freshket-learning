@@ -14,6 +14,7 @@ import { alertError, confirmAction } from '@/lib/ui/alert'
 import { formatTenure } from '@/lib/users/tenure'
 import { CopyableText, StartDateCell } from '@/components/common/EmployeeCells'
 import { formatPersonName } from '@/lib/users/displayName'
+import { packageStanding } from '@/lib/courses/packageRecords'
 import { onlyCurrentOrIncoming, isCurrentOrIncoming, isActiveEmployee } from '@/lib/users/active'
 import { PHASE1_DEPARTMENTS, isTargetDepartment } from '@/lib/modules'
 import { getDemoMode } from '@/lib/demo/demoMode'
@@ -45,6 +46,17 @@ export interface AssignedLearnerRow {
   record?: TrainingRecord
   status: TrainingStatus
   lastActivity?: Date
+  /** A Course Design's roster: how many of its courses this learner has passed, of how many. */
+  packageProgress?: { done: number; total: number }
+  /** The first day they started any course of the Course Design (instead of record.startedAt). */
+  startedAt?: Date
+}
+
+/** How far along a row is, 0–100: courses passed out of the Course Design's courses, or the one course's progress. */
+export function rowProgressPct(row: Pick<AssignedLearnerRow, 'status' | 'record' | 'packageProgress'>): number {
+  const p = row.packageProgress
+  if (p) return p.total > 0 ? Math.round((p.done / p.total) * 100) : 0
+  return approxProgressPct(row.status, row.record)
 }
 
 // Super_admin manual correction of one learner's status/score(s) — the only
@@ -204,6 +216,30 @@ export function computeAssignedRows(assignedUserIds: string[], allUsers: UserPro
     })
 }
 
+/**
+ * The roster of a Course Design: each learner's progress is the courses they have passed out of all the courses in
+ * the package. When every one is passed they have passed the Course Design.
+ */
+export function computePackageRows(assignedUserIds: string[], allUsers: UserProfile[], allTrainingRecords: TrainingRecord[], courseIds: string[]): AssignedLearnerRow[] {
+  const inPackage = new Set(courseIds)
+  return assignedUserIds
+    .map((uid) => allUsers.find((u) => u.uid === uid))
+    .filter((u): u is UserProfile => !!u)
+    .map((u) => {
+      const recs = allTrainingRecords.filter((r) => r.userId === u.uid && inPackage.has(r.courseId))
+      const standing = packageStanding(recs, courseIds.length)
+      const ends = recs.map((r) => r.completedAt ?? r.startedAt).filter((d): d is Date => !!d)
+      const lastActivity = standing.completedAt ?? (ends.length ? new Date(Math.max(...ends.map((d) => new Date(d).getTime()))) : undefined)
+      return {
+        user: u,
+        status: standing.status,
+        lastActivity,
+        startedAt: standing.startedAt,
+        packageProgress: { done: standing.done, total: courseIds.length },
+      } satisfies AssignedLearnerRow
+    })
+}
+
 // Every column both learner tables can sort by. The assigned-learners table
 // and the 165-row summary table share this so a column added to one is
 // sortable in the other without a second comparator.
@@ -218,6 +254,8 @@ export type SortableLearnerRow = {
   record?: TrainingRecord
   status: TrainingStatus
   lastActivity?: Date
+  packageProgress?: { done: number; total: number }
+  startedAt?: Date
 }
 
 export function sortLearnerRows<T extends SortableLearnerRow>(
@@ -249,17 +287,14 @@ export function sortLearnerRows<T extends SortableLearnerRow>(
       case 'department':   return byText(a.user.department, b.user.department)
       case 'position':     return byText(a.user.position, b.user.position)
       case 'status':       return byText(a.status, b.status)
-      case 'startDate':    return byDate(a.record?.startedAt, b.record?.startedAt)
+      case 'startDate':    return byDate(a.startedAt ?? a.record?.startedAt, b.startedAt ?? b.record?.startedAt)
       // The day they joined the company (not when they started this course).
       case 'hireDate':     return byDate(a.user.startDate, b.user.startDate)
       case 'lastActivity': return byDate(a.lastActivity, b.lastActivity)
       // Longest tenure first when descending: an earlier start date means more
       // time served, so this sorts on the date itself.
       case 'tenure':       return byDate(a.user.startDate, b.user.startDate)
-      case 'progress':     return byNumber(
-        approxProgressPct(a.status, a.record),
-        approxProgressPct(b.status, b.record),
-      )
+      case 'progress':     return byNumber(rowProgressPct(a), rowProgressPct(b))
       case 'score':        return byNumber(a.record?.score, b.record?.score)
       case 'preTest':      return byNumber(a.record?.preTestScore, b.record?.preTestScore)
       case 'postTest':     return byNumber(a.record?.postTestScore, b.record?.postTestScore)
@@ -492,7 +527,7 @@ export function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemov
           </td></tr>
         ) : sorted.map((row) => {
           const { user: u, record, status, lastActivity } = row
-          const pct = approxProgressPct(status, record)
+          const pct = rowProgressPct(row)
           const isEnrolled = enrolledUserIds.has(u.uid)
           const isSelected = selected.has(u.uid)
           return (
@@ -525,7 +560,7 @@ export function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemov
               <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.department} /></td>
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(u.startDate)}</td>
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatTenure(u.startDate)}</td>
-              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(record?.startedAt)}</td>
+              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(row.startedAt ?? record?.startedAt)}</td>
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(lastActivity)}</td>
               <td className="px-4 py-3 whitespace-nowrap">
                 <div className="flex items-center gap-2 w-24">
@@ -534,6 +569,13 @@ export function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemov
                   </div>
                   <span className="text-xs text-gray-400 shrink-0">{pct}%</span>
                 </div>
+                {/* A Course Design: how many courses are passed, and how many are left */}
+                {row.packageProgress && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    ผ่าน {row.packageProgress.done}/{row.packageProgress.total}
+                    {row.packageProgress.done < row.packageProgress.total ? ` · เหลือ ${row.packageProgress.total - row.packageProgress.done}` : ' · ครบ'}
+                  </p>
+                )}
               </td>
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
                 {record?.score != null ? `${record.score}${record.passScore != null ? `/${record.passScore}` : ''}` : '—'}
@@ -586,12 +628,17 @@ export function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemov
   )
 }
 
-export function AssignedLearnersTableModal({ assignedUserIds, allUsers, allTrainingRecords, enrolledUserIds, courseId, courseTitle, hasPreTest, hasPostTest, isSuperAdmin, onRemove, onRemoveMany, onClose }: {
+export function AssignedLearnersTableModal({ assignedUserIds, allUsers, allTrainingRecords, enrolledUserIds, courseId, packageCourseIds, courseTitle, hasPreTest, hasPostTest, isSuperAdmin, onRemove, onRemoveMany, onClose }: {
   assignedUserIds: string[]; allUsers: UserProfile[]; allTrainingRecords: TrainingRecord[]; enrolledUserIds: Set<string>
+  /** A Course Design's courses: the roster then shows courses passed out of these. */
+  packageCourseIds?: string[]
   courseId?: string; courseTitle?: string; hasPreTest?: boolean; hasPostTest?: boolean; isSuperAdmin?: boolean
   onRemove: (uid: string) => void; onRemoveMany?: (uids: string[]) => void; onClose: () => void
 }) {
-  const rows = useMemo(() => computeAssignedRows(assignedUserIds, allUsers, allTrainingRecords, courseId), [assignedUserIds, allUsers, allTrainingRecords, courseId])
+  const rows = useMemo(
+    () => (packageCourseIds ? computePackageRows(assignedUserIds, allUsers, allTrainingRecords, packageCourseIds) : computeAssignedRows(assignedUserIds, allUsers, allTrainingRecords, courseId)),
+    [assignedUserIds, allUsers, allTrainingRecords, courseId, packageCourseIds],
+  )
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
