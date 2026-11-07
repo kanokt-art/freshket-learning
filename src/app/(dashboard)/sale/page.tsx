@@ -24,6 +24,8 @@ import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
 import { LearnerCourseGridCard } from '@/components/features/LearnerCourseDashboard'
 import { TeamLeadHome } from '@/components/features/TeamLeadHome'
 import { useUnseenFeedback } from '@/hooks/useUnseenFeedback'
+import { PackageCard, useVisiblePackages } from '@/components/features/LearnerPackages'
+import { buildForYou } from '@/lib/courses/forYou'
 import { UserTable, UserSidePanel } from '@/components/features/MemberDirectory'
 
 const CAT_TEXT: Record<CourseCategory, string> = {
@@ -210,6 +212,13 @@ export default function SaleDashboardPage() {
   const listedForYou = useMemo(
     () => forYouCourses.filter((c) => !recordByCourse[c.id]?.dismissedAt),
     [forYouCourses, recordByCourse],
+  )
+  // For You: the five newest launches. A launched Course Design is one card of its own (its courses are not
+  // listed again beside it); a course that is in no Course Design shows on its own. The oldest drop off.
+  const visibleDesigns = useVisiblePackages()
+  const forYouItems = useMemo(
+    () => buildForYou(listedForYou, visibleDesigns.map((v) => ({ ...v, courseIds: v.pkg.courseIds, createdAt: v.pkg.createdAt, updatedAt: v.pkg.updatedAt }))),
+    [listedForYou, visibleDesigns],
   )
   const dismissCourse = async (courseId: string) => {
     try {
@@ -439,27 +448,31 @@ export default function SaleDashboardPage() {
               selectedUid={selectedUser?.uid}
             />
           ) : (
-            listedForYou.length > 0 && (
+            forYouItems.length > 0 && (
               <section>
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-sm font-bold text-gray-900">
-                    For You <span className="ml-2 text-xs font-normal text-gray-400">{listedForYou.length} หลักสูตร</span>
+                    For You <span className="ml-2 text-xs font-normal text-gray-400">ล่าสุด {forYouItems.length} รายการ</span>
                   </h2>
                   <button onClick={() => router.push('/courses')} className="text-xs font-bold text-indigo-500 hover:text-indigo-600 flex items-center gap-1">
                     My Course
                     <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
                   </button>
                 </div>
-                {/* Five to a row; more than five wrap onto the next row. */}
+                {/* The five newest launches, five to a row. */}
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-                  {listedForYou.map((course) => (
-                    <div key={course.id} className="min-w-0 flex">
+                  {forYouItems.map((item) => item.kind === 'design' ? (
+                    <div key={`design:${item.design.pkg.id}`} className="min-w-0 flex [&>button]:w-full">
+                      <PackageCard pkg={item.design.pkg} progress={item.design.progress} onOpen={() => router.push(`/courses/design/${item.design.pkg.id}`)} />
+                    </div>
+                  ) : (
+                    <div key={item.course.id} className="min-w-0 flex">
                       <LearnerCourseGridCard
-                        course={course}
-                        newFeedback={unseenFeedback.has(course.id)}
-                        record={recordByCourse[course.id]}
-                        onClick={() => router.push(`/courses/${course.id}`)}
-                        onDismiss={() => void dismissCourse(course.id)}
+                        course={item.course}
+                        newFeedback={unseenFeedback.has(item.course.id)}
+                        record={recordByCourse[item.course.id]}
+                        onClick={() => router.push(`/courses/${item.course.id}`)}
+                        onDismiss={() => void dismissCourse(item.course.id)}
                       />
                     </div>
                   ))}
