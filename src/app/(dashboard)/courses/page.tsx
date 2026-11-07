@@ -561,21 +561,14 @@ function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMa
         <thead>
           <tr className="border-b border-gray-100">
             <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Course</th>
-            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Score</th>
             <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Category</th>
             <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Published</th>
             <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Last Updated</th>
-            <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Learners</th>
             <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Status</th>
           </tr>
         </thead>
         <tbody>
           {courses.map((course) => {
-            const lessonQuizAssessmentIds = new Set(
-              (course.topics ?? []).flatMap((t) => t.lessons.filter((l) => l.type === 'quiz' && l.assessmentId).map((l) => l.assessmentId as string)),
-            )
-            const linkedAssessments = allAssessments.filter((a) => lessonQuizAssessmentIds.has(a.id))
-            const maxScore = linkedAssessments.reduce((sum, a) => sum + a.questions.reduce((s, q) => s + (q.points ?? 0), 0), 0)
             const creatorName = allUsers.find((u) => u.uid === course.createdBy)?.displayName ?? '—'
             const rec = enrollmentByCourseid[course.id] ?? { enrolled: 0, completed: 0, in_progress: 0 }
             return (
@@ -593,7 +586,6 @@ function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMa
                     </div>
                   </button>
                 </td>
-                <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{maxScore > 0 ? maxScore : '—'}</td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">{CATEGORY_LABELS[course.category]}</span>
                 </td>
@@ -603,14 +595,6 @@ function CourseTable({ courses, allAssessments, allUsers, isSuperAdmin, recordMa
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <p className="text-xs text-gray-700">{fmtDate(course.updatedAt)}</p>
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <span className="flex items-center gap-1 text-xs text-gray-600">
-                    <svg className="size-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-                    </svg>
-                    {rec.enrolled}
-                  </span>
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <div className="flex items-center gap-1.5">
