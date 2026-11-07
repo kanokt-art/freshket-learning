@@ -54,7 +54,7 @@ Anything that touches security — auth and sign-in, roles and access rules (`po
 ## Development Rules
 
 ### Icons
-Always use **inline SVG** icons — do NOT use icon libraries (lucide-react, heroicons, etc.) unless already installed. When adding a new icon, write it as a `<svg>` element directly in JSX.
+Use **lucide-react** (installed) for new icons: `import { House } from 'lucide-react'` then `<House className="size-5" strokeWidth={1.8} />`. Pick the icon that matches the meaning at lucide.dev; keep `size-*` Tailwind sizing and let colour come from `currentColor`. No other icon libraries (heroicons etc.). Older screens still hold hand-written inline `<svg>` icons; they are being moved to Lucide a screen at a time, so leave one alone unless you are already editing that screen. Sidebar and the mobile bottom bar are done.
 
 ### Font
 Use **Noto Sans Thai** as the font. Do not use Inter.
