@@ -23,6 +23,8 @@ import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
 import { duplicateKeys, hasDuplicateAnswers, normalizeText } from '@/lib/assessment/authoring'
 import { REVEAL_MODES, revealResults, type QuestionVerdict, type RevealMode } from '@/lib/assessment/reveal'
 import { clampMinutes, loadQuizDefaults, saveQuizDefaults, startingSettings } from '@/lib/assessment/quizDefaults'
+import { reviseAssessment, versionOf } from '@/lib/assessment/versions'
+import { formatPersonName } from '@/lib/users/displayName'
 
 const DEMO_MODE = getDemoMode()
 
@@ -33,6 +35,45 @@ function fmtDate(d: Date | string | undefined) {
 }
 
 const PAGE_SIZE = 10
+
+// The versions of a quiz: where it stands now and every revision that got it there, newest first.
+function VersionHistoryPanel({ assessment }: { assessment: Assessment }) {
+  const current = versionOf(assessment)
+  const revisions = [...(assessment.revisions ?? [])].sort((a, b) => b.version - a.version)
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-3xl mx-auto p-6 space-y-5">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+          <p className="text-xs font-bold text-gray-500">เวอร์ชันปัจจุบัน</p>
+          <p className="text-2xl font-extrabold text-gray-900 mt-1">Ver {current}</p>
+          <p className="text-sm text-gray-500 mt-1.5 leading-relaxed">
+            เวอร์ชันจะเพิ่มขึ้นเองเมื่อมีการแก้คำถามหรือเกณฑ์ผ่านแล้วกดบันทึก ผลสอบทุกครั้งจะบันทึกเลขเวอร์ชันไว้ จึงแยกดูใน dashboard ได้ว่าใครทำข้อสอบชุดไหน
+            (ผลสอบที่ทำก่อนมีระบบนี้นับเป็น Ver 1)
+          </p>
+        </div>
+
+        <ol className="space-y-3">
+          {revisions.map((r) => (
+            <li key={r.version} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-start gap-4">
+              <span className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-full bg-purple-100 text-purple-700 border border-purple-200">Ver {r.version}</span>
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-gray-900">{fmtDate(r.at)}{r.byName ? <span className="font-normal text-gray-500"> · แก้ไขโดย {r.byName}</span> : null}</p>
+                <p className="text-sm text-gray-600 mt-0.5">{r.summary || 'แก้ไขแบบทดสอบ'}</p>
+              </div>
+            </li>
+          ))}
+          <li className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-start gap-4">
+            <span className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Ver 1</span>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-gray-900">{fmtDate(assessment.createdAt)}</p>
+              <p className="text-sm text-gray-600 mt-0.5">สร้างแบบทดสอบ</p>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </div>
+  )
+}
 
 // Previous / numbered / next, with a window of page numbers around the current one.
 function Pagination({ page, pageCount, total, onChange }: { page: number; pageCount: number; total: number; onChange: (p: number) => void }) {
@@ -187,6 +228,7 @@ export default function AssessmentPage() {
                   <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Questions</th>
                   <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Max Score</th>
                   <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Passing Score</th>
+                  <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Version</th>
                   <th className="text-center text-xs font-bold text-gray-500 px-3 py-3">Status</th>
                   <th className="text-left text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Created</th>
                   <th className="w-10" />
@@ -387,6 +429,18 @@ function AssessmentRow({
         <span className="text-sm font-normal text-gray-600">{assessment.passingScore}%</span>
       </td>
 
+      {/* Version, and when it was last revised */}
+      <td className="px-3 py-3 text-center whitespace-nowrap">
+        {isForm ? <span className="text-sm text-gray-300">—</span> : (
+          <>
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">Ver {versionOf(assessment)}</span>
+            {(assessment.revisions?.length ?? 0) > 0 && (
+              <p className="text-xs text-gray-400 mt-1">{fmtDate(assessment.revisions![assessment.revisions!.length - 1].at)}</p>
+            )}
+          </>
+        )}
+      </td>
+
       {/* Status badge */}
       <td className="px-3 py-3 text-center">
         <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full border ${
@@ -507,6 +561,9 @@ function AssessmentEditor({
   onClose: () => void
   userId: string
 }) {
+  const { user: editor } = useAuth()
+  // A quiz that already exists has a second tab: its versions.
+  const [editorTab, setEditorTab] = useState<'questions' | 'versions'>('questions')
   const [mode, setMode] = useState<AssessmentMode>(initial?.googleFormUrl ? 'google_form' : 'builder')
   const [title, setTitle] = useState(initial?.title ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
@@ -655,17 +712,28 @@ function AssessmentEditor({
         timeLimitMinutes: clampMinutes(timeLimit),
         createdBy: userId,
       }
+      // Changing the questions or the pass mark of an existing quiz makes the next version (and logs what changed).
+      const revised = initial?.id && mode === 'builder'
+        ? reviseAssessment(
+            { questions: initial.questions, passingScore: initial.passingScore, version: initial.version, revisions: initial.revisions },
+            { questions, passingScore: payload.passingScore },
+            { uid: userId, name: editor ? formatPersonName(editor) : undefined },
+            now,
+          )
+        : null
+      const versionFields = revised ? { version: revised.version, revisions: revised.revisions } : {}
       if (DEMO_MODE) {
         onSave({
           id: initial?.id ?? `local-${Date.now()}`,
           ...payload,
+          ...versionFields,
           createdAt: initial?.createdAt ?? now,
           updatedAt: now,
         })
       } else {
         if (initial?.id) {
-          await save('assessments', { ...payload, id: initial.id, updatedAt: now })
-          onSave({ ...initial, ...payload, updatedAt: now })
+          await save('assessments', { ...payload, ...versionFields, id: initial.id, updatedAt: now })
+          onSave({ ...initial, ...payload, ...versionFields, updatedAt: now })
         } else {
           await save('assessments', { ...payload, id: '', createdAt: now, updatedAt: now })
           onSave()
@@ -674,7 +742,7 @@ function AssessmentEditor({
     } finally {
       setSaving(false)
     }
-  }, [title, description, passingScore, timeLimit, allowRetakeOnFail, revealMode, isPublished, questions, googleFormUrl, mode, userId, initial, onSave])
+  }, [title, description, passingScore, timeLimit, allowRetakeOnFail, revealMode, isPublished, questions, googleFormUrl, mode, userId, initial, onSave, editor])
 
   const dupQuestionCount = mode === 'builder' ? questions.filter(hasDuplicateAnswers).length : 0
 
@@ -691,6 +759,16 @@ function AssessmentEditor({
               </svg>
             </button>
             <h2 className="font-bold text-gray-900 truncate">{initial ? 'แก้ไขแบบทดสอบ' : 'สร้างแบบทดสอบใหม่'}</h2>
+            {initial && mode === 'builder' && (
+              <div role="tablist" aria-label="ส่วนของแบบทดสอบ" className="flex items-center gap-1 ml-2">
+                {([['questions', 'คำถาม'], ['versions', `Version · Ver ${versionOf(initial)}`]] as const).map(([key, label]) => (
+                  <button key={key} type="button" role="tab" aria-selected={editorTab === key} onClick={() => setEditorTab(key)}
+                    className={`px-3.5 py-1.5 rounded-full text-sm border transition-colors duration-150 whitespace-nowrap ${editorTab === key ? 'bg-purple-100 text-purple-700 border-purple-200 font-bold' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <div className="flex items-center gap-1.5">
@@ -782,7 +860,8 @@ function AssessmentEditor({
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        {initial && editorTab === 'versions' && <VersionHistoryPanel assessment={initial} />}
+        <div className={`flex-1 overflow-y-auto ${editorTab === 'versions' ? 'hidden' : ''}`}>
         <div className="max-w-5xl mx-auto p-6 space-y-5">
 
           {/* Meta */}

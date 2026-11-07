@@ -300,6 +300,8 @@ export async function POST(req: NextRequest) {
       uid,
       assessmentId,
       assessmentTitle: assessment.title ?? '',
+      // The quiz's version at the time (1 until it has been revised), so a dashboard can tell old questions from new.
+      assessmentVersion: typeof assessment.version === 'number' && assessment.version >= 1 ? assessment.version : 1,
       ...(typeof courseId === 'string' ? { courseId } : {}),
       ...(step ? { step } : {}),
       score: graded.score,

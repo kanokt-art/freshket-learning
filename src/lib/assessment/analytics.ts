@@ -8,6 +8,8 @@
 export interface AttemptRow {
   uid: string
   assessmentId: string
+  /** The quiz's version when this try was made; a try from before versions existed counts as 1. */
+  assessmentVersion?: number
   step?: string
   score?: number
   passed?: boolean
@@ -60,6 +62,8 @@ export interface QuestionBreakdown {
 }
 
 export interface AttemptAnalytics {
+  /** The quiz versions these tries span, ascending (the dashboard offers a filter when there is more than one). */
+  versions: number[]
   /** Every try, including those that ran out of time. */
   attempts: number
   /** People who made at least one try. */
@@ -76,6 +80,10 @@ export interface AttemptAnalytics {
   /** Every graded question that was answered, in quiz order (the screen can re-sort). */
   questions: QuestionBreakdown[]
 }
+
+/** The version a try was made on: 1 for tries from before versions were recorded. */
+export const attemptVersion = (a: Pick<AttemptRow, 'assessmentVersion'>): number =>
+  typeof a.assessmentVersion === 'number' && a.assessmentVersion >= 1 ? a.assessmentVersion : 1
 
 const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
 const round1 = (n: number | null): number | null => (n === null ? null : Math.round(n * 10) / 10)
@@ -149,7 +157,9 @@ export function analyzeAttempts(
   })
 
   const avgMs = mean(times)
+  const versions = Array.from(new Set(attempts.map((a) => attemptVersion(a)))).sort((x, y) => x - y)
   return {
+    versions,
     attempts: attempts.length,
     learners: people.size,
     avgAttemptsPerLearner: people.size ? round1(attempts.length / people.size) : null,

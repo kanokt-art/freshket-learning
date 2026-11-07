@@ -50,6 +50,15 @@ export const QUESTION_TYPE_COLORS: Record<QuestionType, string> = {
   drag_drop:       'bg-amber-100 text-amber-700',
 }
 
+/** One revision of a quiz: which version it made, when, by whom, and what changed (counts only: no answers, so it is safe to read). */
+export interface AssessmentRevision {
+  version: number
+  at: Date | string
+  by?: string
+  byName?: string
+  summary: string
+}
+
 export interface Assessment {
   id: string
   title: string
@@ -65,6 +74,10 @@ export interface Assessment {
   /** What a learner sees of their answers after submitting; absent = every question (see lib/assessment/reveal.ts). */
   revealMode?: 'none' | 'correct' | 'wrong' | 'all'
   answerViewMode?: QuizAnswerViewMode
+  /** The quiz's version, from 1: it goes up each time the questions or the pass mark change (lib/assessment/versions.ts). */
+  version?: number
+  /** What each revision changed, newest last. Version 1 is the quiz as first made, so it has no entry. */
+  revisions?: AssessmentRevision[]
   createdAt: Date
   updatedAt: Date
   createdBy: string

@@ -55,6 +55,8 @@ export function CourseDashboard({ courseIds, rows }: { courseIds: string[]; rows
   const courseIdsKey = courseIds.join(',')
   const [range, setRange] = useState<RangeId>('90d')
   const [questionSort, setQuestionSort] = useState<'order' | 'wrong'>('order')
+  // Which version of the quiz to look at (0 = all). A quiz that was revised has Ver 1, Ver 2… and its tries are told apart by it.
+  const [quizVersion, setQuizVersion] = useState(0)
   const scoped = useMemo(() => rowsInRange(rows, range), [rows, range])
   const trend = useMemo(() => trendOf(scoped, range), [scoped, range])
   const status = useMemo(() => statusCounts(scoped), [scoped])
@@ -70,14 +72,14 @@ export function CourseDashboard({ courseIds, rows }: { courseIds: string[]; rows
     let cancelled = false
     setQuizLoading(true)
     const since = rangeStart(range)
-    authedFetch(`/api/assessment/analytics?courseIds=${encodeURIComponent(courseIds.join(','))}${since ? `&since=${encodeURIComponent(since.toISOString())}` : ''}`)
+    authedFetch(`/api/assessment/analytics?courseIds=${encodeURIComponent(courseIds.join(','))}${since ? `&since=${encodeURIComponent(since.toISOString())}` : ''}${quizVersion ? `&version=${quizVersion}` : ''}`)
       .then(async (res) => (res.ok ? ((await res.json()) as AttemptAnalytics) : null))
       .then((data) => { if (!cancelled) setQuiz(data) })
       .catch(() => { if (!cancelled) setQuiz(null) })
       .finally(() => { if (!cancelled) setQuizLoading(false) })
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [courseIdsKey, range])
+  }, [courseIdsKey, range, quizVersion])
 
   const joined = scoped.filter((r) => !!r.record && r.record.status !== 'not_started').length
   const finishedPct = joined > 0 ? Math.round((status.completed / joined) * 100) : null
@@ -102,6 +104,17 @@ export function CourseDashboard({ courseIds, rows }: { courseIds: string[]; rows
           ))}
         </div>
         <p className="text-xs text-gray-400">นับผู้เรียนที่เริ่มเรียนในช่วงนี้ · {nf.format(scoped.length)} คน</p>
+        {/* Shown once the quiz has been revised: look at the tries of one version, or all of them */}
+        {quiz && quiz.versions.length > 1 && (
+          <label className="flex items-center gap-2 text-xs font-bold text-gray-600">
+            เวอร์ชันแบบทดสอบ
+            <select value={quizVersion} onChange={(e) => setQuizVersion(Number(e.target.value))}
+              className="px-3 py-1.5 text-xs font-normal rounded-xl border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-freshket-300">
+              <option value={0}>ทุกเวอร์ชัน</option>
+              {quiz.versions.map((v) => <option key={v} value={v}>Ver {v}</option>)}
+            </select>
+          </label>
+        )}
       </div>
 
       {/* Headline numbers */}

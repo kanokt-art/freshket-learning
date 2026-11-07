@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/server/store'
 import { requireStaff } from '@/lib/server/auth'
 import { managedMembers } from '@/lib/users/managedMembers'
-import { analyzeAttempts, type AttemptRow, type AssessmentDef } from '@/lib/assessment/analytics'
+import { analyzeAttempts, attemptVersion, type AttemptRow, type AssessmentDef } from '@/lib/assessment/analytics'
 import type { Question } from '@/types/assessment'
 import type { Team, UserProfile } from '@/types/user'
 
@@ -29,6 +29,11 @@ export async function GET(req: NextRequest) {
   const sinceRaw = req.nextUrl.searchParams.get('since')
   const since = sinceRaw ? new Date(sinceRaw) : null
   if (sinceRaw && (!since || isNaN(since.getTime()))) return NextResponse.json({ error: 'Invalid since' }, { status: 400 })
+
+  // Optional: only tries made on this quiz version (a quiz that was revised has Ver 1, Ver 2…).
+  const versionRaw = req.nextUrl.searchParams.get('version')
+  const version = versionRaw ? Number(versionRaw) : null
+  if (versionRaw && (!Number.isInteger(version) || (version as number) < 1)) return NextResponse.json({ error: 'Invalid version' }, { status: 400 })
 
   try {
     const store = getStore()
@@ -59,7 +64,10 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    return NextResponse.json(analyzeAttempts(attempts, defs))
+    // The versions on offer come from every try in range, before the version filter narrows them.
+    const versions = Array.from(new Set(attempts.map((a) => attemptVersion(a)))).sort((x, y) => x - y)
+    const shown = version ? attempts.filter((a) => attemptVersion(a) === version) : attempts
+    return NextResponse.json({ ...analyzeAttempts(shown, defs), versions })
   } catch (err) {
     console.error('assessment/analytics failed', err)
     return NextResponse.json({ error: 'โหลดสถิติแบบทดสอบไม่สำเร็จ' }, { status: 500 })
