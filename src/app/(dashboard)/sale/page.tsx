@@ -428,7 +428,7 @@ export default function SaleDashboardPage() {
                     <div key={item.course.id} className="min-w-0 flex">
                       <LearnerCourseGridCard
                         course={item.course}
-                        newFeedback={unseenFeedback.has(item.course.id)}
+                        newFeedback={unseenFeedback.get(item.course.id)}
                         record={recordByCourse[item.course.id]}
                         onClick={() => router.push(`/courses/${item.course.id}`)}
                         onDismiss={() => void dismissCourse(item.course.id)}

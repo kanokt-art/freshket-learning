@@ -16,7 +16,8 @@ import { formatPersonName } from '@/lib/users/displayName'
 import { LearnerFeedbackSheet, FeedbackReaderSheet } from '@/components/features/CourseFeedbackSheets'
 import { LearningJourneySheet } from '@/components/features/LearningJourneySheet'
 import { newestReviewTime, type LeadReview } from '@/lib/feedback/leadReviews'
-import { feedbackSeenKey, markFeedbackSeen } from '@/lib/feedback/unseen'
+import { feedbackSeenKey, markFeedbackSeen, unseenFeedbackCounts } from '@/lib/feedback/unseen'
+import { NotifBadge } from '@/components/common/NotifBadge'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import { useAuth } from '@/hooks/useAuth'
@@ -594,6 +595,7 @@ export default function CourseDetailPage() {
 
       {!isAdmin && newestReview > 0 && feedbackSheet === null && (() => {
         const isNew = newestReview > feedbackSeen
+        const newCount = unseenFeedbackCounts(leadReviews.map((r) => ({ ...r, courseId: id })), () => feedbackSeen).get(id) ?? 0
         return (
           <button
             type="button"
@@ -608,9 +610,7 @@ export default function CourseDetailPage() {
               {isNew ? 'มีความเห็นใหม่จากหัวหน้า' : 'ความเห็นจากหัวหน้า'}
             </span>
             {isNew && (
-              <span className="absolute -top-1.5 -left-1.5 size-3.5 rounded-full bg-rose-500">
-                <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping" />
-              </span>
+              <NotifBadge count={newCount} label={`มีความเห็นใหม่จากหัวหน้า ${newCount} รายการ`} className="absolute -top-2 -left-2" />
             )}
           </button>
         )

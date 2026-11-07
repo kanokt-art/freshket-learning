@@ -7,6 +7,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { useUnseenFeedback } from '@/hooks/useUnseenFeedback'
+import { NotifBadge } from '@/components/common/NotifBadge'
 import { canAccess, ROLE_HIERARCHY, type UserRole } from '@/types/user'
 import { FRESHKET_LOGO_URL } from '@/lib/demo/demoMode'
 import { MbtiBadge } from '@/components/features/MbtiBadge'
@@ -326,7 +327,7 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
             item={item}
             pathname={pathname}
             collapsed={!expanded}
-            dot={item.label === 'My Course' && unseenFeedback.size > 0}
+            badge={item.label === 'My Course' ? Array.from(unseenFeedback.values()).reduce((a, b) => a + b, 0) : 0}
           />
         ))}
         {/* A super_admin learns like anyone else: this opens the app as a learner (same account,
@@ -395,13 +396,13 @@ function NavLink({
   item,
   pathname,
   collapsed,
-  dot = false,
+  badge = 0,
 }: {
   item: NavItem
   pathname: string
   collapsed: boolean
-  /** A red dot: there is something new to read behind this item. */
-  dot?: boolean
+  /** A red number: how many new things there are to read behind this item. */
+  badge?: number
 }) {
   const active =
     !item.noActive &&
@@ -450,7 +451,7 @@ function NavLink({
     >
       <span className="relative shrink-0 flex">
         {item.icon}
-        {dot && <span aria-label="มีความเห็นใหม่จากหัวหน้า" className="absolute -top-1 -right-1 size-2.5 rounded-full bg-rose-500 ring-2 ring-white" />}
+        <NotifBadge count={badge} label={`มีความเห็นใหม่จากหัวหน้า ${badge} รายการ`} className="absolute -top-2.5 -right-3" />
       </span>
       <SidebarLabel expanded={expanded} className="flex-1">{item.label}</SidebarLabel>
     </Link>

@@ -5,15 +5,15 @@ import { useAuth } from '@/hooks/useAuth'
 import { useFirestoreList } from '@/hooks/useFirestore'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import type { LeadReview } from '@/lib/feedback/leadReviews'
-import { FEEDBACK_SEEN_EVENT, readFeedbackSeen, unseenFeedbackCourses } from '@/lib/feedback/unseen'
+import { FEEDBACK_SEEN_EVENT, readFeedbackSeen, unseenFeedbackCounts } from '@/lib/feedback/unseen'
 
 const DEMO_MODE = getDemoMode()
 
 /**
- * The courses where the signed-in learner has feedback from their team lead or manager that they have not
- * opened yet. Drives the red dot that leads from the sidebar to the course card to the course itself.
+ * How many unread pieces of feedback from their team lead or manager the signed-in learner has, per course.
+ * Drives the red number that leads from the sidebar to the course card to the course itself.
  */
-export function useUnseenFeedback(): Set<string> {
+export function useUnseenFeedback(): Map<string, number> {
   const { user } = useAuth()
   const uid = user?.uid ?? ''
   const { data } = useFirestoreList<LeadReview & { courseId?: string }>(
@@ -30,7 +30,7 @@ export function useUnseenFeedback(): Set<string> {
     return () => { window.removeEventListener(FEEDBACK_SEEN_EVENT, bump); window.removeEventListener('storage', bump) }
   }, [])
   return useMemo(
-    () => new Set(uid ? unseenFeedbackCourses(data, (courseId) => readFeedbackSeen(uid, courseId)) : []),
+    () => (uid ? unseenFeedbackCounts(data, (courseId) => readFeedbackSeen(uid, courseId)) : new Map<string, number>()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [data, uid, tick],
   )
