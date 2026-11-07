@@ -34,7 +34,8 @@ import { readVideoProgress, furthest, videoProgressKey, NO_VIDEO_PROGRESS, type 
 import { progKey, statusKey, takeawayKey, readScoped } from '@/lib/courseProgressKeys'
 import { get, save } from '@/lib/data/collection'
 import { retakeBlocked, RETAKE_REFUSAL } from '@/lib/courses/retake'
-import { alertError } from '@/lib/ui/alert'
+import { alertError, alertSuccess } from '@/lib/ui/alert'
+import { OverrideRecordModal, type AssignedLearnerRow } from '@/components/features/LearnerAssignment'
 
 // ── Progress tracking via localStorage (mirrored to Firestore, see persist()) ──
 // preDone/postDone/preScore/postScore were dropped along with the course-level
@@ -639,6 +640,7 @@ export default function CourseDetailPage() {
       {/* ── Results dashboard tab ───────────────────────────────────────── */}
       {isAdmin && tab === 'results' && (
         <CourseResultsDashboard
+          isSuperAdmin={isSuperAdmin}
           courseId={id}
           course={course}
           allRecords={allRecords}
@@ -1255,6 +1257,19 @@ function LessonBrowserStep({
     : completedLessonIds.includes(l.id))
   const passedCount = allLessons.filter(({ lesson }) => lessonPassed(lesson)).length
 
+  // Learners forget to press จบการเรียน, so the course finishes by itself the moment every condition is met (every
+  // content lesson opened, every video watched, every graded quiz sat, a personality lesson answered): the same
+  // test that enables the button. It only ever runs once per opening, and a course with no lessons never counts.
+  const onDoneRef = useRef(onDone)
+  useEffect(() => { onDoneRef.current = onDone })
+  const autoFinishedRef = useRef(false)
+  useEffect(() => {
+    if (!canFinish || done || allLessons.length === 0 || autoFinishedRef.current) return
+    autoFinishedRef.current = true
+    onDoneRef.current()
+    void alertSuccess('เรียนครบแล้ว', 'ระบบบันทึกว่าคุณเรียนจบหลักสูตรนี้ให้เรียบร้อยแล้ว')
+  }, [canFinish, done, allLessons.length])
+
   return (
     <div className="flex flex-col gap-4 h-full">
       <div className="flex items-center gap-3">
@@ -1717,6 +1732,7 @@ function SortTh({ label, k, sortKey, sortDir, onSort, className = '' }: {
 }
 
 function CourseResultsDashboard({
+  isSuperAdmin,
   courseId,
   course,
   allRecords,
@@ -1724,6 +1740,8 @@ function CourseResultsDashboard({
   teams,
   departments,
 }: {
+  /** A super_admin can set a learner's status and scores by hand (finish the course for someone who forgot). */
+  isSuperAdmin: boolean
   courseId: string
   course: Course | null
   allRecords: TrainingRecord[]
@@ -1810,6 +1828,12 @@ function CourseResultsDashboard({
       return true
     })
   }, [rows, filterDept, filterTeam, filterStatus, search])
+
+  // The admin's hand-set status / scores for one learner.
+  const [editingRow, setEditingRow] = useState<AssignedLearnerRow | null>(null)
+  const lessonsOfCourse = (course?.topics ?? []).flatMap((t) => t.lessons)
+  const hasPreTest = lessonsOfCourse.some((l) => l.type === 'quiz' && l.quizRole === 'pre_test')
+  const hasPostTest = lessonsOfCourse.some((l) => l.type === 'quiz' && (l.quizRole === 'post_test' || l.quizRole === 'pre_test'))
 
   // Column sort: click a header to sort ascending, again for descending, a third time to clear.
   const [sortKey, setSortKey] = useState<ResultSortKey | null>(null)
@@ -2002,6 +2026,17 @@ function CourseResultsDashboard({
         </div>
       </div>
 
+      {editingRow && (
+        <OverrideRecordModal
+          row={editingRow}
+          courseId={courseId}
+          courseTitle={course?.title ?? ''}
+          hasPreTest={hasPreTest}
+          hasPostTest={hasPostTest}
+          onClose={() => setEditingRow(null)}
+        />
+      )}
+
       {/* ── User table ─────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         {filtered.length === 0 ? (
@@ -2019,6 +2054,7 @@ function CourseResultsDashboard({
                   <SortTh label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortTh label={questionnaireId ? 'Type' : 'Score'} k="score" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortTh label="Completed" k="completed" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" />
+                  {isSuperAdmin && <th className="px-3 py-3" />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -2114,6 +2150,16 @@ function CourseResultsDashboard({
                           {formatDate(row.record?.completedAt)}
                         </span>
                       </td>
+
+                      {/* Admin: set the status / scores by hand — e.g. finish the course for someone who forgot to press it */}
+                      {isSuperAdmin && (
+                        <td className="px-3 py-3.5 text-right">
+                          <button type="button" onClick={() => setEditingRow({ user: row.user, record: row.record ?? undefined, status })}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-600 border border-gray-200 hover:bg-gray-50 whitespace-nowrap transition-colors duration-150">
+                            แก้ไขสถานะ
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
