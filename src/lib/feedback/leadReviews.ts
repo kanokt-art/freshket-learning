@@ -47,6 +47,16 @@ export function latestBySlot(reviews: readonly LeadReview[]): Record<LeadSlot, L
   return out
 }
 
+/**
+ * The three steps of a learner's path on a course — their own Key Take Away, the Team Lead's feedback, the
+ * Manager's — as done / waiting. The Team Lead and the Manager do not wait for each other (nor for the
+ * learner): whoever gives feedback first, theirs is done and the other is simply still waiting, so
+ * neither reads as locked behind the other.
+ */
+export function journeyStates(done: { takeaway: boolean; teamLead: boolean; manager: boolean }): ('done' | 'next')[] {
+  return [done.takeaway, done.teamLead, done.manager].map((d) => (d ? 'done' : 'next'))
+}
+
 /** The newest moment any review was saved (0 when there is none): what a "new feedback" signal compares. */
 export function newestReviewTime(reviews: readonly LeadReview[]): number {
   return reviews.filter(hasContent).reduce((m, r) => Math.max(m, time(r.updatedAt) || 1), 0)

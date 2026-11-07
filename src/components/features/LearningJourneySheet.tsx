@@ -5,7 +5,7 @@ import { StarsDisplay } from '@/components/common/Stars'
 import { FeedbackSheetFrame, SheetButton } from '@/components/features/FeedbackSheetFrame'
 import { FeedbackReadSheet } from '@/components/features/FeedbackReadSheet'
 import { toStars } from '@/lib/feedback/stars'
-import { latestBySlot, slotOfReview, type LeadReview, type LeadSlot } from '@/lib/feedback/leadReviews'
+import { journeyStates, latestBySlot, slotOfReview, type LeadReview, type LeadSlot } from '@/lib/feedback/leadReviews'
 
 // What a learner sees when they open "Feedback หลักสูตร": their course as a path of three steps, one below
 // the other on a dotted line — their own Key Take Away, then their Team Lead's feedback, then their
@@ -91,7 +91,7 @@ export function LearningJourneySheet({
   const latest = latestBySlot(reviews)
   const wrote = !!takeaway.trim()
 
-  const states = stepStates([hasTakeAwayStep ? wrote : true, !!latest.team_lead, !!latest.manager])
+  const states = journeyStates({ takeaway: hasTakeAwayStep ? wrote : true, teamLead: !!latest.team_lead, manager: !!latest.manager })
   const stateOf = (i: number) => states[i]
 
   const reviewStep = (slot: LeadSlot, i: number) => {

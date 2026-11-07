@@ -23,6 +23,7 @@ import { canAccess, type UserProfile } from '@/types/user'
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
 import { LearnerCourseGridCard } from '@/components/features/LearnerCourseDashboard'
 import { TeamLeadHome } from '@/components/features/TeamLeadHome'
+import { useUnseenFeedback } from '@/hooks/useUnseenFeedback'
 import { UserTable, UserSidePanel } from '@/components/features/MemberDirectory'
 
 const CAT_TEXT: Record<CourseCategory, string> = {
@@ -75,6 +76,8 @@ export default function SaleDashboardPage() {
   // reads `allUsers` on this page, so subscribing them to the whole roster was
   // a full-collection read paid by every learner on the app's landing page.
   const isAdmin = user?.role ? canAccess(user.role, 'team_lead') : false
+  // Courses with feedback from a team lead or manager the learner has not read yet: a red dot on the card.
+  const unseenFeedback = useUnseenFeedback()
   const { data: allUsers } = useAllUsers(isAdmin)
   // "Latest": what's new for this learner, as a super_admin pinned it (or the newest few).
   const highlights = useHomeHighlights(user)
@@ -453,6 +456,7 @@ export default function SaleDashboardPage() {
                     <div key={course.id} className="min-w-0 flex">
                       <LearnerCourseGridCard
                         course={course}
+                        newFeedback={unseenFeedback.has(course.id)}
                         record={recordByCourse[course.id]}
                         onClick={() => router.push(`/courses/${course.id}`)}
                         onDismiss={() => void dismissCourse(course.id)}

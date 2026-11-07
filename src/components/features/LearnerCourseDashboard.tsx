@@ -7,6 +7,7 @@ import {
   type Course, type CourseCategory,
 } from '@/types/course'
 import { LearnerPackages } from '@/components/features/LearnerPackages'
+import { useUnseenFeedback } from '@/hooks/useUnseenFeedback'
 import {
   STATUS_LABELS, STATUS_COLORS, recordProgressPercent,
   type TrainingRecord, type TrainingStatus,
@@ -58,6 +59,8 @@ export function LearnerCourseDashboard({
   myRecords: TrainingRecord[]    // this learner's own training records
 }) {
   const router = useRouter()
+  // Courses with feedback from a team lead or manager the learner has not read yet: a red dot on the card.
+  const unseenFeedback = useUnseenFeedback()
 
   const recordByCourse = useMemo(() => {
     const m: Record<string, TrainingRecord> = {}
@@ -214,6 +217,7 @@ export function LearnerCourseDashboard({
           <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {tabCourses.map((c) => (
               <LearnerCourseGridCard
+                newFeedback={unseenFeedback.has(c.id)}
                 key={c.id}
                 course={c}
                 record={recordByCourse[c.id]}
@@ -287,8 +291,10 @@ export interface LibraryCardOptions {
   action?: { label: string; onClick?: () => void; primary?: boolean; disabled?: boolean; busy?: boolean }
 }
 
-export function LearnerCourseGridCard({ course, record, onClick, onDismiss, library }: {
+export function LearnerCourseGridCard({ course, record, onClick, onDismiss, library, newFeedback }: {
   course: Course; record?: TrainingRecord; onClick: () => void
+  /** A team lead or manager left feedback on this course that the learner has not read: a red dot on the card. */
+  newFeedback?: boolean
   /** Take a finished course off the learner's list. Offered only on a finished course. */
   onDismiss?: () => void
   /** Library variant: no progress bar, an optional tag, and an action button in the footer. */
@@ -321,10 +327,17 @@ export function LearnerCourseGridCard({ course, record, onClick, onDismiss, libr
         onClick={onDismiss}
         title="ซ่อนหลักสูตรนี้จากรายการ"
         aria-label="ซ่อนหลักสูตรนี้จากรายการ"
-        className="absolute top-2 right-2 z-10 size-7 flex items-center justify-center rounded-full bg-white/90 border border-gray-200 text-gray-500 hover:text-rose-600 hover:border-rose-200 transition-all duration-150"
+        className="absolute top-2 right-2 z-10 size-7 flex items-center justify-center rounded-full bg-white/90 border border-gray-200 text-gray-500 hover:text-freshket-600 hover:border-freshket-200 transition-all duration-150"
       >
-        <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        {/* An eye: press it to hide the course from the list */}
+        <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
       </button>
+    )}
+    {newFeedback && (
+      <span role="status" aria-label="มีความเห็นใหม่จากหัวหน้า" title="มีความเห็นใหม่จากหัวหน้า"
+        className="absolute top-2 left-2 z-10 size-3.5 rounded-full bg-rose-500 ring-2 ring-white">
+        <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping" />
+      </span>
     )}
     <button
       onClick={onClick}

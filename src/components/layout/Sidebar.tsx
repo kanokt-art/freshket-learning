@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
+import { useUnseenFeedback } from '@/hooks/useUnseenFeedback'
 import { canAccess, ROLE_HIERARCHY, type UserRole } from '@/types/user'
 import { FRESHKET_LOGO_URL } from '@/lib/demo/demoMode'
 import { getDaysSince, NEW_JOINER_DAYS } from '@/lib/utils/newJoiner'
@@ -240,6 +241,8 @@ function SidebarLabel({ expanded, children, className = '' }: { expanded: boolea
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export function Sidebar({ className = 'flex' }: { className?: string }) {
+  // Feedback from a team lead or manager the learner has not read: a red dot on My Course leads to the course.
+  const unseenFeedback = useUnseenFeedback()
   const pathname = usePathname()
   const { user, signOut, realRole, roleOverride, userOverride, setRoleOverride } = useAuth()
   const router = useRouter()
@@ -386,6 +389,7 @@ export function Sidebar({ className = 'flex' }: { className?: string }) {
             item={item}
             pathname={pathname}
             collapsed={!expanded}
+            dot={item.label === 'My Course' && unseenFeedback.size > 0}
           />
         ))}
         {/* A super_admin learns like anyone else: this opens the app as a learner (same account,
@@ -460,10 +464,13 @@ function NavLink({
   item,
   pathname,
   collapsed,
+  dot = false,
 }: {
   item: NavItem
   pathname: string
   collapsed: boolean
+  /** A red dot: there is something new to read behind this item. */
+  dot?: boolean
 }) {
   const active =
     !item.noActive &&
@@ -510,8 +517,9 @@ function NavLink({
         }
       `}
     >
-      <span className="shrink-0 flex">
+      <span className="relative shrink-0 flex">
         {item.icon}
+        {dot && <span aria-label="มีความเห็นใหม่จากหัวหน้า" className="absolute -top-1 -right-1 size-2.5 rounded-full bg-rose-500 ring-2 ring-white" />}
       </span>
       <SidebarLabel expanded={expanded} className="flex-1">{item.label}</SidebarLabel>
     </Link>

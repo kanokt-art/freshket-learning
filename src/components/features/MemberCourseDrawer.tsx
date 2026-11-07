@@ -4,13 +4,13 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { createPortal } from 'react-dom'
 import { StarsDisplay } from '@/components/common/Stars'
-import { JourneyList, JourneyStep, stepStates } from '@/components/features/LearningJourneySheet'
+import { JourneyList, JourneyStep } from '@/components/features/LearningJourneySheet'
 import { useFirestoreList } from '@/hooks/useFirestore'
 import { authedFetch } from '@/lib/api/authedFetch'
 import { formatElapsed } from '@/lib/assessment/briefing'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { toStars } from '@/lib/feedback/stars'
-import { latestBySlot, type LeadReview, type LeadSlot } from '@/lib/feedback/leadReviews'
+import { journeyStates, latestBySlot, type LeadReview, type LeadSlot } from '@/lib/feedback/leadReviews'
 import { MOCK_TAKEAWAYS } from '@/lib/utils/mockData'
 
 // A member's course, read from the side by their Team Lead, Manager or a super_admin: what the member wrote as
@@ -94,7 +94,7 @@ export function MemberCourseDrawer({ memberUid, memberName, courseId, courseTitl
   }, [live, memberUid, courseId])
 
   const latest = latestBySlot(reviews)
-  const states = stepStates([!!takeaway, !!latest.team_lead, !!latest.manager])
+  const states = journeyStates({ takeaway: !!takeaway, teamLead: !!latest.team_lead, manager: !!latest.manager })
   const loading = live && (takeawayDocs.loading || reviewDocs.loading)
 
   const reviewStep = (slot: LeadSlot, i: number) => {

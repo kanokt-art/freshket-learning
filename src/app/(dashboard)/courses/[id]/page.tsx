@@ -16,6 +16,7 @@ import { formatPersonName } from '@/lib/users/displayName'
 import { LearnerFeedbackSheet, FeedbackReaderSheet } from '@/components/features/CourseFeedbackSheets'
 import { LearningJourneySheet } from '@/components/features/LearningJourneySheet'
 import { newestReviewTime, type LeadReview } from '@/lib/feedback/leadReviews'
+import { feedbackSeenKey, markFeedbackSeen } from '@/lib/feedback/unseen'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { QuestionnaireResultCell } from '@/components/features/QuestionnaireResultCell'
 import { useAuth } from '@/hooks/useAuth'
@@ -247,7 +248,7 @@ export default function CourseDetailPage() {
   const [feedbackSheet, setFeedbackSheet] = useState<'journey' | 'give' | 'read' | null>(search.get('feedback') === '1' ? 'journey' : null)
   // Whether they have opened it since the newest feedback: the signal on the handle goes once they have.
   const [feedbackSeen, setFeedbackSeen] = useState(0)
-  const seenKey = `fk_lead_feedback_seen_${feedbackUid ?? ''}_${id}`
+  const seenKey = feedbackSeenKey(feedbackUid ?? '', id)
   useEffect(() => {
     try { setFeedbackSeen(Number(localStorage.getItem(seenKey) ?? 0)) } catch { /* no storage: shown as new */ }
   }, [seenKey])
@@ -266,9 +267,16 @@ export default function CourseDetailPage() {
     setFeedbackSheet('journey')
     if (newestReview > 0) {
       setFeedbackSeen(newestReview)
-      try { localStorage.setItem(seenKey, String(newestReview)) } catch { /* ignore */ }
+      if (feedbackUid) markFeedbackSeen(feedbackUid, id, newestReview)
     }
   }
+  // Opened another way (a notification link, ?feedback=1): that is a read too, so every red dot clears.
+  useEffect(() => {
+    if (feedbackSheet === 'journey' && newestReview > 0 && feedbackUid && newestReview > feedbackSeen) {
+      setFeedbackSeen(newestReview)
+      markFeedbackSeen(feedbackUid, id, newestReview)
+    }
+  }, [feedbackSheet, newestReview, feedbackUid, id, feedbackSeen])
   const [activeStep, setActiveStep] = useState<StepId>('slide')
 
   // Load progress from localStorage on mount. Keyed by uid, so it has to wait

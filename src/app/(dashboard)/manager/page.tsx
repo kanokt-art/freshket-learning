@@ -25,8 +25,8 @@ import { getMbtiProfile } from '@/lib/bucketAssessments/mbtiProfiles'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
 import { RoleplayRadar } from '@/components/features/RoleplayRadar'
 import { RoleplayAssessCard } from '@/components/features/RoleplayAssessCard'
-import { JourneyList, JourneyStep, stepStates } from '@/components/features/LearningJourneySheet'
-import { hasContent, latestBySlot, leadReviewId, slotOfReview, type LeadReview, type LeadSlot } from '@/lib/feedback/leadReviews'
+import { JourneyList, JourneyStep } from '@/components/features/LearningJourneySheet'
+import { hasContent, journeyStates, latestBySlot, leadReviewId, slotOfReview, type LeadReview, type LeadSlot } from '@/lib/feedback/leadReviews'
 import { canAssessRoleplay as canAssessRoleplayOf } from '@/lib/roleplay/assessForm'
 import { announce } from '@/lib/notifications/announce'
 import { STATUS_LABELS, type TrainingStatus, type TrainingRecord } from '@/types/tracking'
@@ -1113,7 +1113,7 @@ function FeedbackJourney({ courseId, takeaway, reviews, viewerUid, viewerSlot, c
   const mine = reviews.find((r) => r.leadUid === viewerUid)
   const latest = latestBySlot(reviews)
   const wrote = !!takeaway.trim()
-  const states = stepStates([wrote, !!latest.team_lead, !!latest.manager])
+  const states = journeyStates({ takeaway: wrote, teamLead: !!latest.team_lead, manager: !!latest.manager })
   const [editing, setEditing] = useState(false)
   const [comment, setComment] = useState(mine?.comment ?? '')
   const [stars, setStars] = useState<number | null>(toStars(mine?.score))
