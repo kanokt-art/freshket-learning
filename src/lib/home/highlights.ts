@@ -11,6 +11,8 @@ export interface HighlightItem {
   title: string
   subtitle?: string
   imageUrl?: string
+  /** A Google Slides deck: the card shows its first slide as the picture (Mandatory reading). */
+  slidesUrl?: string
   href: string
   at: Date
   /** Live for learners. A draft can be spotlighted ahead of time; learners see it once it is published. */
@@ -44,7 +46,7 @@ const toDate = (w: When): Date | null => {
 
 /** Everything that could be shown, already cut to what this person may see, newest first. */
 export function highlightCandidates(src: {
-  mandatory: readonly { id: string; title: string; weekLabel?: string; publishedAt?: When; createdAt?: When; isPublished?: boolean }[]
+  mandatory: readonly { id: string; title: string; weekLabel?: string; slidesUrl?: string; publishedAt?: When; createdAt?: When; isPublished?: boolean }[]
   tools: readonly { id: string; title: string; description?: string; imageUrl?: string; createdAt?: When; isPublished?: boolean }[]
   courses: readonly { id: string; title: string; description?: string; thumbnailUrl?: string; createdAt?: When; updatedAt?: When; isPublished?: boolean }[]
   announcements: readonly { id: string; title: string; body?: string; imageUrl?: string; createdAt?: When; isPublished?: boolean }[]
@@ -55,7 +57,7 @@ export function highlightCandidates(src: {
     out.push({ ...item, at: d ?? new Date(0), published: isPublished !== false })
   }
   for (const m of src.mandatory) {
-    push({ key: `mandatory:${m.id}`, kind: 'mandatory', title: m.title, subtitle: m.weekLabel, href: '/courses/mandatory' }, m.publishedAt ?? m.createdAt, m.isPublished)
+    push({ key: `mandatory:${m.id}`, kind: 'mandatory', title: m.title, subtitle: m.weekLabel, slidesUrl: m.slidesUrl || undefined, href: '/courses/mandatory' }, m.publishedAt ?? m.createdAt, m.isPublished)
   }
   for (const t of src.tools) {
     push({ key: `tool:${t.id}`, kind: 'tool', title: t.title, subtitle: t.description, imageUrl: t.imageUrl || undefined, href: '/tools' }, t.createdAt, t.isPublished)

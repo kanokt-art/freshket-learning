@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { SlidePreviewArea } from '@/components/features/MandatoryPreview'
 import { FeedbackSheetFrame, SheetButton } from '@/components/features/FeedbackSheetFrame'
 import {
   KIND_LABEL, hasUnseen, pickHighlights, tabOf,
@@ -34,12 +35,19 @@ function Card({ item, pinned, onOpen }: { item: HighlightItem; pinned: boolean; 
   const style = KIND_STYLE[item.kind]
   const body = (
     <>
+      {item.slidesUrl ? (
+        // A Google Slides deck shows as its first slide, like the Mandatory reading page
+        <div className="p-2 pb-0">
+          <SlidePreviewArea isPublished weekLabel={item.title} slidesUrl={item.slidesUrl} hideBadges />
+        </div>
+      ) : (
       <div className={`h-28 flex items-center justify-center ${item.imageUrl ? 'bg-gray-100' : style.tile}`}>
         {item.imageUrl
           // eslint-disable-next-line @next/next/no-img-element
           ? <img src={item.imageUrl} alt="" className="size-full object-cover" />
           : <svg className="size-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><path d={KIND_ICON[item.kind]} /></svg>}
       </div>
+      )}
       <div className="p-3.5">
         <div className="flex items-center gap-2">
           <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${style.pill}`}>{KIND_LABEL[item.kind]}</span>
@@ -58,8 +66,8 @@ function Card({ item, pinned, onOpen }: { item: HighlightItem; pinned: boolean; 
 }
 
 const TABS: { id: HighlightTab; label: string; empty: string }[] = [
-  { id: 'course', label: 'Latest Course', empty: 'ยังไม่มีหลักสูตรใหม่' },
   { id: 'activity', label: 'Activity', empty: 'ยังไม่มีความเคลื่อนไหว' },
+  { id: 'course', label: 'Latest Course', empty: 'ยังไม่มีหลักสูตรใหม่' },
 ]
 
 // When this person last opened each tab, kept in this browser: a red dot shows on a tab until they open it.
@@ -85,7 +93,8 @@ export function HomeHighlightsRow({ uid, candidates, pins, hidden, bodies }: {
   bodies?: ReadonlyMap<string, string>
 }) {
   const [reading, setReading] = useState<HighlightItem | null>(null)
-  const [tab, setTab] = useState<HighlightTab>('course')
+  // Opens on Activity (news, Mandatory reading, tools), the busier of the two tabs.
+  const [tab, setTab] = useState<HighlightTab>('activity')
   const [seen, setSeen] = useState<Record<HighlightTab, string | null>>({ course: null, activity: null })
   useEffect(() => { if (uid) setSeen({ course: readSeen(uid, 'course'), activity: readSeen(uid, 'activity') }) }, [uid])
 
