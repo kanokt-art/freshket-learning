@@ -29,9 +29,13 @@ export function SlidePreviewArea({ isPublished, weekLabel, slidesUrl, hideBadges
       style={{ paddingTop: '56.25%' }}
     >
       {embedUrl ? (
+        // The deck is only a picture: no scroll bars. scrolling="no" hides the frame's own, and the frame is
+        // drawn a little larger than the box (which clips it), so the embed's inner bars fall outside the picture.
         <iframe
           src={embedUrl}
-          className="absolute inset-0 w-full h-full border-0 pointer-events-none"
+          scrolling="no"
+          className="absolute top-0 left-0 border-0 pointer-events-none"
+          style={{ width: 'calc(100% + 24px)', height: 'calc(100% + 24px)' }}
           tabIndex={-1}
           title={weekLabel}
         />
