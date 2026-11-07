@@ -208,7 +208,7 @@ export function computeAssignedRows(assignedUserIds: string[], allUsers: UserPro
 // and the 165-row summary table share this so a column added to one is
 // sortable in the other without a second comparator.
 export type AssignedSortKey =
-  | 'name' | 'department' | 'startDate' | 'status'
+  | 'name' | 'department' | 'startDate' | 'hireDate' | 'status'
   | 'position' | 'tenure' | 'progress' | 'score' | 'lastActivity'
   | 'preTest' | 'postTest'
 
@@ -250,6 +250,8 @@ export function sortLearnerRows<T extends SortableLearnerRow>(
       case 'position':     return byText(a.user.position, b.user.position)
       case 'status':       return byText(a.status, b.status)
       case 'startDate':    return byDate(a.record?.startedAt, b.record?.startedAt)
+      // The day they joined the company (not when they started this course).
+      case 'hireDate':     return byDate(a.user.startDate, b.user.startDate)
       case 'lastActivity': return byDate(a.lastActivity, b.lastActivity)
       // Longest tenure first when descending: an earlier start date means more
       // time served, so this sorts on the date itself.
@@ -464,7 +466,9 @@ export function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemov
           <SortableTh label="Name" sortKey="name" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <th className="text-left text-xs font-bold text-gray-400 px-4 py-3 whitespace-nowrap">Position</th>
           <SortableTh label="Department" sortKey="department" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-          <SortableTh label="Started" sortKey="startDate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <SortableTh label="Start Date" sortKey="hireDate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <SortableTh label="Tenure" sortKey="tenure" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+          <SortableTh label="Course Started" sortKey="startDate" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <SortableTh label="Last Activity" sortKey="lastActivity" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <SortableTh label="Progress" sortKey="progress" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
           <SortableTh label="Score" sortKey="score" activeSortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
@@ -476,7 +480,7 @@ export function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemov
       </thead>
       <tbody>
         {sorted.length === 0 ? (
-          <tr><td colSpan={9 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">
+          <tr><td colSpan={11 + (hasPreTest ? 1 : 0) + (hasPostTest ? 1 : 0)} className="text-center text-gray-400 text-sm py-10">
             {/* Distinguish "genuinely nobody assigned" from "everyone
                 assigned here has resigned" — otherwise this read as the
                 assignment being empty when it wasn't. */}
@@ -519,6 +523,8 @@ export function AssignedLearnersTable({ rows, enrolledUserIds, onRemove, onRemov
               </td>
               <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.position} /></td>
               <td className="px-4 py-3 text-xs text-gray-600"><CopyableText text={u.department} /></td>
+              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(u.startDate)}</td>
+              <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatTenure(u.startDate)}</td>
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(record?.startedAt)}</td>
               <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{fmtDate(lastActivity)}</td>
               <td className="px-4 py-3 whitespace-nowrap">
