@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { CourseDashboard } from '@/components/features/CourseDashboard'
 import { courseAudience, type AudienceCourse } from '@/lib/courses/audience'
 import { packageStanding } from '@/lib/courses/packageRecords'
+import { courseQuizzes } from '@/lib/courses/courseQuizzes'
 import { isCurrentOrIncoming } from '@/lib/users/active'
 import { formatPersonName } from '@/lib/users/displayName'
 import type { DashRow } from '@/lib/courses/dashboardData'
@@ -135,6 +136,18 @@ export function PackageSummaryTab({ pkg, courses, users, records }: Props) {
     })
   }, [table, search, sort])
 
+  // Which of the package's courses carry a before / after test. A course with a pre-test is also sat again after it,
+  // so it counts for both. A column only exists when at least one course has that test.
+  const preCourses = useMemo(() => inPackage.filter((c) => courseQuizzes(c).pre), [inPackage])
+  const postCourses = useMemo(() => inPackage.filter((c) => courseQuizzes(c).post), [inPackage])
+  // ✓ once the learner has a score for that test in every course that has it, ✗ otherwise.
+  const taken = (uid: string, courseList: Course[], field: 'preTestScore' | 'postTestScore') =>
+    courseList.every((c) => typeof recordOf.get(`${uid}:${c.id}`)?.[field] === 'number')
+  const mark = (ok: boolean) => ok
+    ? <span className="text-freshket-700 font-bold" aria-label="ทำแล้ว">✓</span>
+    : <span className="text-rose-500 font-bold" aria-label="ยังไม่ได้ทำ">✗</span>
+  const extraCols = (preCourses.length > 0 ? 1 : 0) + (postCourses.length > 0 ? 1 : 0)
+
   const sortBy = (key: SortKey) => setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'progress' ? 'desc' : 'asc' }))
   const Th = ({ k, children, className = '' }: { k: SortKey; children: React.ReactNode; className?: string }) => (
     <th className={`px-4 py-3 text-xs font-bold text-gray-500 text-left whitespace-nowrap ${className}`}>
@@ -195,12 +208,14 @@ export function PackageSummaryTab({ pkg, courses, users, records }: Props) {
                     <span className="block truncate">{i + 1}. {c.title}</span>
                   </th>
                 ))}
+                {preCourses.length > 0 && <th className="px-4 py-3 text-xs font-bold text-gray-500 text-center whitespace-nowrap">Pre-assessment</th>}
+                {postCourses.length > 0 && <th className="px-4 py-3 text-xs font-bold text-gray-500 text-center whitespace-nowrap">Post-assessment</th>}
                 <th className="px-4 py-3 text-xs font-bold text-gray-500 text-left whitespace-nowrap">Pre / Post</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {shown.length === 0 ? (
-                <tr><td colSpan={4 + inPackage.length} className="px-4 py-12 text-center text-sm text-gray-400">ยังไม่มีผู้เรียน — ไปที่แท็บ กำหนดผู้เรียน</td></tr>
+                <tr><td colSpan={4 + extraCols + inPackage.length} className="px-4 py-12 text-center text-sm text-gray-400">ยังไม่มีผู้เรียน — ไปที่แท็บ กำหนดผู้เรียน</td></tr>
               ) : shown.map(({ user: u, standing }) => {
                 const pct = Math.round((standing.done / inPackage.length) * 100)
                 return (
@@ -214,6 +229,8 @@ export function PackageSummaryTab({ pkg, courses, users, records }: Props) {
                       </div>
                     </td>
                     {inPackage.map((c) => <td key={c.id} className="px-4 py-3 text-xs whitespace-nowrap">{cell(recordOf.get(`${u.uid}:${c.id}`))}</td>)}
+                    {preCourses.length > 0 && <td className="px-4 py-3 text-sm text-center">{mark(taken(u.uid, preCourses, 'preTestScore'))}</td>}
+                    {postCourses.length > 0 && <td className="px-4 py-3 text-sm text-center">{mark(taken(u.uid, postCourses, 'postTestScore'))}</td>}
                     <td className="px-4 py-3 text-xs text-gray-600 tabular-nums whitespace-nowrap">
                       {standing.preTestScore ?? '—'} → {standing.postTestScore ?? '—'}
                     </td>

@@ -14,6 +14,7 @@ import { designRecipients, notifyDesignLaunch } from '@/lib/notifications/design
 import { isInCourseTarget } from '@/lib/courses/audience'
 import { getDemoMode } from '@/lib/demo/demoMode'
 import { MOCK_COURSE_PACKAGES } from '@/lib/utils/mockData'
+import { courseQuizzes } from '@/lib/courses/courseQuizzes'
 import type { Course } from '@/types/course'
 import type { CoursePackage } from '@/types/coursePackage'
 
@@ -244,6 +245,8 @@ export default function CourseDesignPage() {
                   <tr>
                     <th className="text-left text-xs font-bold text-gray-500 px-4 py-3">Course Design</th>
                     <th className="text-left text-xs font-bold text-gray-500 px-3 py-3">Courses (in order)</th>
+                    <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Pre-assessment</th>
+                    <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Post-assessment</th>
                     <th className="text-center text-xs font-bold text-gray-500 px-3 py-3">Learners</th>
                     <th className="text-left text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Start Date</th>
                     <th className="text-center text-xs font-bold text-gray-500 px-3 py-3 whitespace-nowrap">Sequential</th>
@@ -286,6 +289,22 @@ export default function CourseDesignPage() {
                           )}
                           <p className="text-xs text-gray-400 mt-1.5">{p.courseIds.length} หลักสูตร</p>
                         </td>
+                        {/* One mark per course, on the same line as that course in the list: does it have the test? */}
+                        {(['pre', 'post'] as const).map((k) => (
+                          <td key={k} className="px-3 py-3">
+                            {inside.length > 0 && (
+                              <ul className="space-y-1" aria-label={k === 'pre' ? 'Pre-assessment' : 'Post-assessment'}>
+                                {inside.slice(0, 4).map((c) => (
+                                  <li key={c.id} className="h-5 flex items-center justify-center text-sm">
+                                    {courseQuizzes(c)[k]
+                                      ? <span className="text-freshket-700 font-bold" aria-label="มี">✓</span>
+                                      : <span className="text-rose-500 font-bold" aria-label="ไม่มี">✗</span>}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </td>
+                        ))}
                         <td className="px-3 py-3 text-center text-sm font-bold text-gray-700 tabular-nums">
                           {learners > 0 ? learners : <span className="text-gray-300 font-normal">—</span>}
                         </td>

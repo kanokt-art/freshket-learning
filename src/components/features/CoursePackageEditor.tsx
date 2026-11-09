@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { LearnerAssignmentTab } from '@/components/features/LearnerAssignmentTab'
+import { CourseStructureDrawer } from '@/components/features/CourseStructureDrawer'
 import { CoverImagePicker } from '@/components/features/CoverImagePicker'
 import { COURSE_IMAGE_CATALOG } from '@/lib/utils/mockData'
 import { PackageDashboardTab, PackageSummaryTab } from '@/components/features/PackageReportTabs'
@@ -107,6 +108,8 @@ export function CoursePackageEditor({ initial, courses, allUsers, departments, t
   const [titleErr, setTitleErr] = useState('')
   const [dateErr, setDateErr] = useState('')
   const [dragIndex, setDragIndex] = useState<number | null>(null)
+  // The course whose structure is open in the side panel.
+  const [viewingId, setViewingId] = useState<string | null>(null)
   const [overIndex, setOverIndex] = useState<number | null>(null)
 
   const byId = useMemo(() => new Map(courses.map((c) => [c.id, c])), [courses])
@@ -145,8 +148,11 @@ export function CoursePackageEditor({ initial, courses, allUsers, departments, t
     onSave({ ...draft, title: draft.title.trim(), description: draft.description.trim() })
   }
 
+  const viewing = viewingId ? byId.get(viewingId) : undefined
+
   return (
     <div className="fixed inset-0 z-50 bg-white flex flex-col">
+      {viewing && <CourseStructureDrawer course={viewing} onClose={() => setViewingId(null)} />}
       <div className="animate-pop-in flex flex-col flex-1 min-h-0">
 
         <div className="flex items-center justify-between gap-3 px-6 py-3 bg-white border-b border-gray-100 shrink-0">
@@ -321,11 +327,15 @@ export function CoursePackageEditor({ initial, courses, allUsers, departments, t
                                   </svg>
                                 </button>
                                 <span className="size-6 rounded-full bg-freshket-100 text-freshket-700 text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
-                                {c ? <Cover course={c} className="size-10" /> : <span className="size-10 rounded-xl bg-gray-100 shrink-0" />}
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-sm font-bold text-gray-900 truncate">{c?.title ?? '(ไม่พบหลักสูตรนี้แล้ว)'}</p>
-                                  <p className="text-xs text-gray-400 truncate">{c ? (CATEGORY_LABELS[c.category] ?? c.category) : 'จะถูกข้ามเมื่อผู้เรียนเปิดดู'}</p>
-                                </div>
+                                {/* Opens the course's structure in a side panel */}
+                                <button type="button" disabled={!c} onClick={() => setViewingId(id)} title={c ? 'ดูโครงสร้างหลักสูตร' : undefined}
+                                  className="flex items-center gap-3 min-w-0 flex-1 text-left rounded-lg hover:bg-gray-50 transition-colors disabled:cursor-default disabled:hover:bg-transparent">
+                                  {c ? <Cover course={c} className="size-10" /> : <span className="size-10 rounded-xl bg-gray-100 shrink-0" />}
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block text-sm font-bold text-gray-900 truncate">{c?.title ?? '(ไม่พบหลักสูตรนี้แล้ว)'}</span>
+                                    <span className="block text-xs text-gray-400 truncate">{c ? (CATEGORY_LABELS[c.category] ?? c.category) : 'จะถูกข้ามเมื่อผู้เรียนเปิดดู'}</span>
+                                  </span>
+                                </button>
                                 <div className="flex items-center gap-0.5 shrink-0">
                                   <button type="button" disabled={i === 0} onClick={() => set('courseIds', moveCourse(chosen, i, i - 1))} aria-label="เลื่อนขึ้น" title="เลื่อนขึ้น"
                                     className="size-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">

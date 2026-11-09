@@ -2786,7 +2786,12 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
     onChangeAll(out.map((t) => ({ ...t, lessons: t.lessons.map((l, i) => ({ ...l, order: i })) })))
   }
 
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // Opens on lesson 1 (the first lesson of the first topic that has one), so the right pane is never blank
+  // for a course that already has lessons.
+  const [selectedKey, setSelectedKey] = useState<string | null>(() => {
+    const t = topics.find((x) => x.lessons.length > 0)
+    return t ? `${t.id}:${t.lessons[0].id}` : null
+  })
   // Which quiz strip (if any) is open for read-only preview — selecting
   // one clears the normal lesson selection and vice versa, since the right
   // pane shows either a lesson editor or a quiz preview, never both.
