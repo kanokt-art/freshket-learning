@@ -1,12 +1,16 @@
 'use client'
 
 import { useState, useMemo, useCallback, useEffect } from 'react'
+import { ChevronDown, Search, X } from 'lucide-react'
+import { isActiveEmployee } from '@/lib/users/active'
+import { isTargetDepartment } from '@/lib/modules'
+import { COMMERCIAL_FAMILY } from '@/lib/users/teamsOfDepartment'
 import { Header } from '@/components/layout/Header'
 import { AdministrationTabs } from '@/components/layout/AdministrationTabs'
 import { FreshketToolTabs } from '@/components/layout/FreshketToolTabs'
 import { useAuth } from '@/hooks/useAuth'
 import { useModuleAccess } from '@/hooks/useModuleAccess'
-import { useTools, useDepartments, useKnowledgeDecks, DEFAULT_KNOWLEDGE_DECKS, type KnowledgeDeck } from '@/hooks/useFirestore'
+import { useTools, useAllUsers, useKnowledgeDecks, DEFAULT_KNOWLEDGE_DECKS, type KnowledgeDeck } from '@/hooks/useFirestore'
 import { getDemoMode, FRESHKET_LOGO_URL } from '@/lib/demo/demoMode'
 import { SEED_TOOLS, isToolVisibleTo, type SaleTool } from '@/lib/tools'
 import { markToolSeen } from '@/hooks/useUnseenTools'
@@ -303,7 +307,9 @@ export default function ToolsPage() {
   // startDate, lineManager…) on every visit to /tools, purely to fill the department
   // checkbox list inside ToolEditModal — which only a super_admin can open, and which
   // is closed by default. Gated to super_admin so learners never pay for it.
-  const { data: departmentDocs } = useDepartments(isSuperAdmin)
+  // The departments to pick from follow Team Management: a department in the current rollout that still has
+  // at least one active employee. (useAllUsers shares the one users listener and already keeps to the rollout.)
+  const { data: allUsers } = useAllUsers(isSuperAdmin)
 
   // Department knowledge decks — Firestore-backed, super_admin editable. Until the
   // collection is seeded we show DEFAULT_KNOWLEDGE_DECKS read-only (import to edit).
@@ -347,7 +353,14 @@ export default function ToolsPage() {
       setDeckSeeding(false)
     }
   }, [])
-  const allDepartments = useMemo(() => departmentDocs.map(d => d.name).sort(), [departmentDocs])
+  const allDepartments = useMemo(() => {
+    const names = new Set<string>()
+    for (const u of allUsers) {
+      const d = u.department?.trim()
+      if (d && isActiveEmployee(u) && isTargetDepartment(d)) names.add(d)
+    }
+    return Array.from(names).sort()
+  }, [allUsers])
 
   const isSeedFallback = !DEMO_MODE && !toolsLoading && firestoreTools.length === 0
   const allTools = isSeedFallback ? SEED_TOOLS : firestoreTools
@@ -360,6 +373,32 @@ export default function ToolsPage() {
 
   const [editTarget, setEditTarget] = useState<{ tool: SaleTool; isNew: boolean } | null>(null)
   const [seeding, setSeeding] = useState(false)
+
+  // Published tools with no department set reach every department. One press gives them the sales departments
+  // (Sales Management, Portfolio, Commercial, Key Account) instead of editing each tool.
+  const untargeted = useMemo(
+    () => (isSeedFallback ? [] : firestoreTools.filter((t) => t.isPublished && (t.departments?.length ?? 0) === 0)),
+    [isSeedFallback, firestoreTools],
+  )
+  const [targeting, setTargeting] = useState(false)
+  const targetUntargeted = useCallback(async () => {
+    const ok = await confirmAction({
+      title: `ตั้งแผนกให้ ${untargeted.length} Tool?`,
+      text: `Tool ที่ publish แล้วและยังไม่ได้ระบุแผนก จะเห็นเฉพาะ ${COMMERCIAL_FAMILY.join(', ')} — แผนกอื่น (เช่น People Experience) จะไม่เห็นอีก`,
+      confirmText: 'ตั้งแผนก',
+      cancelText: 'ยกเลิก',
+    })
+    if (!ok) return
+    setTargeting(true)
+    try {
+      await Promise.all(untargeted.map((t) => patch('tools', t.id, { departments: [...COMMERCIAL_FAMILY] })))
+    } catch (err) {
+      console.error('targetUntargeted failed', err)
+      await alertError('ตั้งแผนกไม่สำเร็จ', 'บาง Tool อาจยังไม่ถูกบันทึก กรุณาลองใหม่อีกครั้ง')
+    } finally {
+      setTargeting(false)
+    }
+  }, [untargeted])
 
   // The modal used to close on the FIRST line, before the write was even
   // attempted, so a rejected save looked exactly like a successful one and the
@@ -834,6 +873,14 @@ export default function ToolsPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
               สร้าง Tool
+            </button>
+          )}
+
+          {isSuperAdmin && untargeted.length > 0 && (
+            <button type="button" onClick={() => void targetUntargeted()} disabled={targeting}
+              title="Tool ที่ publish แล้วแต่ยังไม่ระบุแผนก ตอนนี้ทุกแผนกเห็น"
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold rounded-xl border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-all duration-150 shrink-0 disabled:opacity-60 disabled:cursor-not-allowed">
+              {targeting ? 'กำลังตั้งแผนก...' : `ตั้งแผนก Sales ให้ ${untargeted.length} Tool`}
             </button>
           )}
 
@@ -1332,7 +1379,14 @@ function ToolEditModal({
   onSave: (tool: SaleTool, isNew: boolean) => Promise<void>
   onClose: () => void
 }) {
-  const [draft, setDraft] = useState<SaleTool>(tool)
+  // A tool already out there with no department set was reaching everyone by accident. Editing it starts from the
+  // sales departments (Commercial, Key Account, Portfolio, Sales Management); a brand-new tool starts with none,
+  // so the admin picks. Nothing is stored until the tool is saved.
+  const [draft, setDraft] = useState<SaleTool>(() => {
+    if (isNew || tool.departments.length > 0) return tool
+    const sales = COMMERCIAL_FAMILY.filter((d) => allDepartments.length === 0 || allDepartments.includes(d))
+    return { ...tool, departments: sales }
+  })
 
   const set = (k: keyof SaleTool, v: string) => setDraft(prev => ({ ...prev, [k]: v }))
   const canSave = draft.title.trim() && draft.url.trim() && draft.category
@@ -1349,17 +1403,9 @@ function ToolEditModal({
     }
   }
 
-  const toggleDepartment = (dept: string) =>
-    setDraft(prev => ({
-      ...prev,
-      departments: prev.departments.includes(dept)
-        ? prev.departments.filter(d => d !== dept)
-        : [...prev.departments, dept],
-    }))
-
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/60 backdrop-blur-sm">
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl max-h-[92vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
           <h2 className="text-base font-bold text-gray-900">{isNew ? 'สร้าง Tool ใหม่' : 'แก้ไข Tool'}</h2>
@@ -1451,25 +1497,11 @@ function ToolEditModal({
             {allDepartments.length === 0 ? (
               <p className="text-sm font-normal text-gray-400">ยังไม่มีข้อมูลแผนกในระบบ</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                {allDepartments.map(dept => {
-                  const on = draft.departments.includes(dept)
-                  return (
-                    <button
-                      key={dept}
-                      type="button"
-                      onClick={() => toggleDepartment(dept)}
-                      className={`text-sm font-bold px-3 py-1.5 rounded-full transition-all duration-150 ${
-                        on
-                          ? 'bg-freshket-100 text-freshket-700'
-                          : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
-                      }`}
-                    >
-                      {dept}
-                    </button>
-                  )
-                })}
-              </div>
+              <DepartmentPicker
+                all={allDepartments}
+                value={draft.departments}
+                onConfirm={(departments) => setDraft(prev => ({ ...prev, departments }))}
+              />
             )}
           </div>
 
@@ -1619,6 +1651,95 @@ function DeckEditModal({
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Who can see a tool: a closed summary; opening it shows a searchable checklist, and the choice only
+// applies when ยืนยัน is pressed. Only the chosen departments are shown as pills.
+function DepartmentPicker({ all, value, onConfirm }: {
+  all: string[]
+  value: string[]
+  onConfirm: (departments: string[]) => void
+}) {
+  // Open from the start, so the current targets are listed (ticked) the moment the form opens.
+  const [open, setOpen] = useState(true)
+  const [search, setSearch] = useState('')
+  const [pending, setPending] = useState<string[]>(value)
+
+  const q = search.trim().toLowerCase()
+  // No target saved means everyone sees it, so the list starts as every department (they are the current targets);
+  // ticking narrows it. With targets saved, the list starts as just those. Typing searches the whole list.
+  const everyone = value.length === 0
+  const shown = q ? all.filter((d) => d.toLowerCase().includes(q)) : everyone ? all : all.filter((d) => pending.includes(d))
+  const toggle = (d: string) => setPending((p) => (p.includes(d) ? p.filter((x) => x !== d) : [...p, d]))
+
+  function openPanel() { setPending(value); setSearch(''); setOpen(true) }
+  function confirm() { onConfirm(pending); setOpen(false) }
+
+  return (
+    <div className="space-y-2">
+      <button type="button" onClick={() => (open ? setOpen(false) : openPanel())} aria-expanded={open}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white hover:border-freshket-500 transition-all duration-150">
+        <span className={value.length === 0 ? 'text-gray-700 font-bold' : 'text-gray-700'}>
+          {value.length === 0 ? 'ทุกแผนก' : `เลือกแล้ว ${value.length} แผนก`}
+        </span>
+        <ChevronDown className={`size-4 text-gray-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} strokeWidth={2} />
+      </button>
+
+      {open && (
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="p-3 border-b border-gray-100">
+            <div className="relative">
+              <Search className="size-4 text-gray-300 absolute left-3 top-1/2 -translate-y-1/2" strokeWidth={2} />
+              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาแผนก..."
+                className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300" />
+            </div>
+          </div>
+          {everyone && !q && (
+            <p className="px-4 pt-3 text-xs text-gray-500">ตอนนี้ทุกแผนกเห็น Tool นี้ — ติ๊กแผนกเพื่อจำกัดให้เห็นเฉพาะแผนกที่เลือก</p>
+          )}
+          <div className="max-h-64 overflow-y-auto p-1.5">
+            {shown.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-6">ไม่พบแผนก</p>
+            ) : shown.map((d) => {
+              const on = pending.includes(d)
+              return (
+                <label key={d} className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer text-sm transition-all duration-150 ${on ? 'bg-freshket-50 text-freshket-700 font-bold' : 'text-gray-700 hover:bg-gray-50'}`}>
+                  <input type="checkbox" checked={on} onChange={() => toggle(d)} className="size-4 rounded accent-freshket-500" />
+                  <span className="flex-1 truncate">{d}</span>
+                </label>
+              )
+            })}
+          </div>
+          <div className="flex items-center justify-between gap-2 p-3 border-t border-gray-100">
+            <button type="button" onClick={() => setPending([])} disabled={pending.length === 0}
+              className="text-xs font-bold text-gray-500 hover:text-gray-700 disabled:opacity-60 disabled:cursor-not-allowed">
+              ล้างที่เลือก ({pending.length})
+            </button>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setOpen(false)}
+                className="px-4 py-2 text-sm text-gray-600 rounded-xl hover:bg-gray-100 transition-all duration-150">ยกเลิก</button>
+              <button type="button" onClick={confirm}
+                className="px-5 py-2 text-sm font-bold bg-freshket-500 text-white rounded-xl hover:bg-freshket-600 transition-all duration-150">ยืนยัน</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!open && value.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {value.map((d) => (
+            <span key={d} className="inline-flex items-center gap-1 text-sm font-bold pl-3 pr-1.5 py-1 rounded-full bg-freshket-100 text-freshket-700">
+              {d}
+              <button type="button" onClick={() => onConfirm(value.filter((x) => x !== d))} aria-label={`เอา ${d} ออก`}
+                className="size-5 rounded-full flex items-center justify-center hover:bg-freshket-200 transition-all duration-150">
+                <X className="size-3" strokeWidth={2.5} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

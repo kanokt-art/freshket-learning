@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/Header'
 import { CourseManagementTabs } from '@/components/layout/CourseManagementTabs'
@@ -18,7 +18,8 @@ import {
 import { save, remove, patch } from '@/lib/data/collection'
 import { alertError, confirmAction } from '@/lib/ui/alert'
 import { getDemoMode } from '@/lib/demo/demoMode'
-import { parseFormJson, type ImportResult } from '@/lib/assessment/importFormJson'
+import { parseFormJson, downloadSampleQuizJson, type ImportResult } from '@/lib/assessment/importFormJson'
+import { Download, Upload } from 'lucide-react'
 import { BUCKET_ASSESSMENT_LIST } from '@/lib/bucketAssessments'
 import { duplicateKeys, hasDuplicateAnswers, normalizeText } from '@/lib/assessment/authoring'
 import { REVEAL_MODES, revealResults, type QuestionVerdict, type RevealMode } from '@/lib/assessment/reveal'
@@ -951,7 +952,7 @@ function AssessmentEditor({
                   <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
                   </svg>
-                  นำเข้าจาก Google Form
+                  นำเข้าจาก JSON
                 </button>
               </div>
 
@@ -1268,8 +1269,22 @@ function ImportFromFormModal({ onCancel, onImport }: {
   const [raw, setRaw] = useState('')
   const [result, setResult] = useState<ImportResult | null>(null)
 
+  const fileRef = useRef<HTMLInputElement>(null)
+
   function handlePreview() {
     setResult(parseFormJson(raw, genId))
+  }
+
+  // A chosen file is read into the box and checked at once, so the admin sees what it holds without a second click.
+  async function handleFile(file?: File) {
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) {
+      setResult({ ok: false, error: 'ไฟล์ใหญ่เกินไป (สูงสุด 2 MB)', warnings: [] })
+      return
+    }
+    const text = await file.text()
+    setRaw(text)
+    setResult(parseFormJson(text, genId))
   }
 
   const imported = result?.ok ? result.data! : null
@@ -1281,22 +1296,41 @@ function ImportFromFormModal({ onCancel, onImport }: {
         onClick={(e) => e.stopPropagation()}>
 
         <div className="px-6 py-4 border-b border-gray-100 shrink-0">
-          <h3 className="text-sm font-bold text-gray-900">นำเข้าคำถามจาก Google Form</h3>
-          <p className="text-xs text-gray-400 mt-0.5">คัดลอก JSON จาก Apps Script มาวางที่นี่</p>
+          <h3 className="text-sm font-bold text-gray-900">นำเข้าคำถามจาก JSON</h3>
+          <p className="text-xs text-gray-400 mt-0.5">คำถามปรนัย 4 ตัวเลือก — เลือกไฟล์ .json หรือวางข้อความ JSON</p>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-          {/* Steps — the script lives outside this app, so the path to it has to
-              be spelled out or the paste box is a dead end. */}
-          <ol className="text-xs text-gray-600 space-y-1.5 bg-slate-50 rounded-xl p-4 list-decimal list-inside">
-            <li>เปิด Google Form → เมนู ⋮ มุมขวาบน → <span className="font-bold">Apps Script</span></li>
-            <li>วางไฟล์ <span className="font-mono text-freshket-700">FormToQuestions.gs</span> (อยู่ใน docs/apps-script) แล้วบันทึก</li>
-            <li>กด Run ที่ฟังก์ชัน <span className="font-mono text-freshket-700">exportQuestions</span> แล้วอนุญาตสิทธิ์</li>
-            <li>เปิดลิงก์เอกสาร Google Docs ที่ปรากฏใน Log (ที่เก็บ JSON ไว้) แล้วกด Ctrl+A, Ctrl+C</li>
-          </ol>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={downloadSampleQuizJson}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-all duration-150">
+              <Download className="size-3.5" strokeWidth={2} />
+              ดาวน์โหลดไฟล์ตัวอย่าง
+            </button>
+            <button type="button" onClick={() => fileRef.current?.click()}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-freshket-700 bg-freshket-100 border border-freshket-200 hover:bg-freshket-200 transition-all duration-150">
+              <Upload className="size-3.5" strokeWidth={2} />
+              เลือกไฟล์ .json
+            </button>
+            <input ref={fileRef} type="file" accept=".json,application/json" className="hidden"
+              onChange={(e) => { void handleFile(e.target.files?.[0]); e.target.value = '' }} />
+          </div>
+          <p className="text-xs text-gray-500">
+            แต่ละข้อใส่ <span className="font-mono text-freshket-700">choices</span> 4 ตัวเลือก และตั้ง <span className="font-mono text-freshket-700">isCorrect: true</span> ให้ข้อที่ถูกเพียง 1 ตัวเลือก
+          </p>
+
+          <details className="text-xs text-gray-600 bg-slate-50 rounded-xl p-3">
+            <summary className="cursor-pointer font-bold">นำเข้าจาก Google Form (Apps Script)</summary>
+            <ol className="mt-2 space-y-1.5 list-decimal list-inside">
+              <li>เปิด Google Form → เมนู ⋮ มุมขวาบน → <span className="font-bold">Apps Script</span></li>
+              <li>วางไฟล์ <span className="font-mono text-freshket-700">FormToQuestions.gs</span> (อยู่ใน docs/apps-script) แล้วบันทึก</li>
+              <li>กด Run ที่ฟังก์ชัน <span className="font-mono text-freshket-700">exportQuestions</span> แล้วอนุญาตสิทธิ์</li>
+              <li>เปิดลิงก์เอกสาร Google Docs ที่ปรากฏใน Log (ที่เก็บ JSON ไว้) แล้วกด Ctrl+A, Ctrl+C</li>
+            </ol>
+          </details>
 
           <div>
-            <label className="text-xs font-bold text-gray-600 block mb-1.5">JSON จาก Apps Script</label>
+            <label className="text-xs font-bold text-gray-600 block mb-1.5">ข้อความ JSON</label>
             <textarea
               value={raw}
               onChange={(e) => { setRaw(e.target.value); setResult(null) }}

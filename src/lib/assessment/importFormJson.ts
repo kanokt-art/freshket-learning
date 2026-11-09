@@ -28,6 +28,49 @@ export interface ImportResult {
   warnings: string[]
 }
 
+/** The file an admin downloads, fills in and imports: two 4-choice questions, exactly one `isCorrect: true` each. */
+export const SAMPLE_QUIZ_JSON = JSON.stringify({
+  title: 'ชื่อแบบทดสอบ (ตัวอย่าง)',
+  description: 'คำอธิบายแบบทดสอบ (ไม่บังคับ)',
+  questions: [
+    {
+      type: 'multiple_choice',
+      text: 'สันในหมูอยู่ส่วนไหนของหมู',
+      points: 1,
+      choices: [
+        { text: 'ส่วนหลัง ใต้กระดูกสันหลัง', isCorrect: true },
+        { text: 'ส่วนขาหน้า', isCorrect: false },
+        { text: 'ส่วนท้อง', isCorrect: false },
+        { text: 'ส่วนคอ', isCorrect: false },
+      ],
+    },
+    {
+      type: 'multiple_choice',
+      text: 'อุณหภูมิที่เหมาะสมสำหรับเก็บเนื้อสด',
+      description: 'คำอธิบายใต้คำถาม (ไม่บังคับ)',
+      points: 1,
+      choices: [
+        { text: '0–4 °C', isCorrect: true },
+        { text: '10–15 °C', isCorrect: false },
+        { text: '20–25 °C', isCorrect: false },
+        { text: 'อุณหภูมิห้อง', isCorrect: false },
+      ],
+    },
+  ],
+}, null, 2)
+
+/** Hands the sample to the browser as a .json download. */
+export function downloadSampleQuizJson(): void {
+  const url = URL.createObjectURL(new Blob([SAMPLE_QUIZ_JSON], { type: 'application/json;charset=utf-8' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'quiz-import-sample.json'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 const MAX_QUESTIONS = 200
 const MAX_TEXT = 2000
 const MAX_CHOICES = 20

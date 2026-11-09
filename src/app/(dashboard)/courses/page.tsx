@@ -4,6 +4,7 @@ import { lessonLabel, topicLabel, isUnnamedLesson, isUnnamedTopic, defaultLesson
 import { isInCourseTarget } from '@/lib/courses/audience'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { Plus } from 'lucide-react'
 import dynamic from 'next/dynamic'
 
 // recharts is ~94 kB gzipped and this page only uses it for one admin-only,
@@ -2310,10 +2311,13 @@ function withQuizLessons(topics: CourseTopic[], withPreTest: boolean): CourseTop
   return out.map((t) => ({ ...t, lessons: t.lessons.map((l, i) => ({ ...l, order: i })) }))
 }
 
-function QuizSettingsTab({ enabled, topics, onChangeTopics, assessments }: {
+function QuizSettingsTab({ enabled, topics, onChangeTopics, onSaveAndCreateQuiz, saving, assessments }: {
   enabled: boolean
   topics: CourseTopic[]
   onChangeTopics: (t: CourseTopic[]) => void
+  /** Saves this course, then opens the page where a quiz is built. */
+  onSaveAndCreateQuiz: () => void
+  saving: boolean
   assessments: Assessment[]
 }) {
   // The course's quiz lessons are system-managed (see withQuizLessons): a
@@ -2360,6 +2364,8 @@ function QuizSettingsTab({ enabled, topics, onChangeTopics, assessments }: {
           hasPreTest={hasPreTest}
           onSetPreTest={setPreTestEnabled}
           onSetAssessment={setQuizAssessment}
+          onSaveAndCreateQuiz={onSaveAndCreateQuiz}
+          courseSaving={saving}
         />
       )}
     </div>
@@ -2368,7 +2374,7 @@ function QuizSettingsTab({ enabled, topics, onChangeTopics, assessments }: {
 
 function QuizLessonSettingsCard({
   topicTitle, lesson, assessments, hasPreTest,
-  onSetPreTest, onSetAssessment,
+  onSetPreTest, onSetAssessment, onSaveAndCreateQuiz, courseSaving,
 }: {
   topicTitle: string
   lesson: CourseLesson
@@ -2376,8 +2382,9 @@ function QuizLessonSettingsCard({
   hasPreTest: boolean
   onSetPreTest: (next: boolean) => void
   onSetAssessment: (assessmentId: string | undefined) => void
+  onSaveAndCreateQuiz: () => void
+  courseSaving: boolean
 }) {
-  const router = useRouter()
   const currentAssessment = assessments.find((a) => a.id === lesson.assessmentId)
   const [source, setSource] = useState<'self' | 'google_form'>(
     currentAssessment?.googleFormUrl ? 'google_form' : 'self',
@@ -2387,19 +2394,16 @@ function QuizLessonSettingsCard({
   // The quiz ticked in the card, applied only when ตกลง is pressed.
   const [pickId, setPickId] = useState<string | null>(null)
 
-  // /assessment is a full page, not a modal — navigating there leaves this
-  // course draft behind unsaved (CourseFormModal's form state isn't
-  // persisted). Confirm first so a stray click doesn't silently lose an
-  // in-progress edit.
+  // /assessment is a full page, not a modal, so this course is saved first
+  // (CourseFormModal's form state isn't persisted); then the learner is taken there.
   async function handleCreateNewAssessment() {
     const ok = await confirmAction({
-      title: 'ออกจากหน้าแก้ไขหลักสูตร?',
-      text: 'การเปลี่ยนแปลงที่ยังไม่ได้บันทึกในหลักสูตรนี้จะหายไป — สร้างแบบทดสอบเสร็จแล้วค่อยกลับมาเลือกได้',
-      confirmText: 'ไปสร้างแบบทดสอบ',
+      title: 'บันทึกหลักสูตรแล้วไปสร้างแบบทดสอบ?',
+      text: 'ระบบจะบันทึกหลักสูตรนี้ก่อน สร้างแบบทดสอบเสร็จแล้วค่อยกลับมาแก้ไขหลักสูตรเพื่อเลือกแบบทดสอบ',
+      confirmText: 'บันทึกและไปสร้าง',
       cancelText: 'อยู่หน้านี้ต่อ',
-      danger: true,
     })
-    if (ok) router.push('/assessment')
+    if (ok) onSaveAndCreateQuiz()
   }
 
   // Assessment-level settings, written straight to Firestore on save.
@@ -2639,7 +2643,16 @@ function QuizLessonSettingsCard({
               </button>
             </>
           ) : (
-            <p className="text-xs text-gray-400">เลือกแบบทดสอบก่อน จึงจะตั้งค่ารายละเอียดได้</p>
+            <div className="space-y-2">
+              <p className="text-xs text-gray-400">เลือกแบบทดสอบก่อน จึงจะตั้งค่ารายละเอียดได้</p>
+              <button type="button" onClick={() => void handleCreateNewAssessment()} disabled={courseSaving}
+                className="w-full py-2.5 rounded-xl border border-freshket-200 bg-white text-freshket-700 text-xs font-bold hover:bg-freshket-50 transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
+                {courseSaving
+                  ? <span className="size-3.5 border-2 border-freshket-500 border-t-transparent rounded-full animate-spin" />
+                  : <Plus className="size-4" strokeWidth={2} />}
+                {courseSaving ? 'กำลังบันทึกหลักสูตร...' : 'บันทึกหลักสูตรและไปสร้างแบบทดสอบ'}
+              </button>
+            </div>
           )}
       </div>
     </div>
@@ -3021,10 +3034,12 @@ function LessonsBuilder({ topics: allTopics, onChange: onChangeAll, assessments 
   )
 }
 
-function CourseFormModal({ assessments, allUsers, onDone, userId, editCourse }: {
+function CourseFormModal({ assessments, allUsers, onDone: onDoneProp, userId, editCourse }: {
   assessments: Assessment[]; allUsers: UserProfile[]
   onDone: (c?: Course) => void; userId: string; editCourse?: Course
 }) {
+  const router = useRouter()
+  const onDone = onDoneProp
   const isEdit = !!editCourse
 
   const [tab, setTab] = useState<BuilderTab>('details')
@@ -3099,9 +3114,14 @@ function CourseFormModal({ assessments, allUsers, onDone, userId, editCourse }: 
     void performSave()
   }
 
-  async function performSave() {
+  // Save the course, then (optionally) leave for another page. The course is saved first so nothing typed here is lost.
+  async function performSave(thenGo?: string) {
     setSaving(true)
     setSaveError(null)
+    const finish = (c?: Course) => {
+      onDone(c)
+      if (thenGo) router.push(thenGo)
+    }
     try {
       const now = new Date()
       // What this saves is the course's CONTENT. Who it is for, when it opens and whether it is live belong to the
@@ -3130,20 +3150,20 @@ function CourseFormModal({ assessments, allUsers, onDone, userId, editCourse }: 
         challengeMultiplier: form.isChallenge ? (Number(form.challengeMultiplier) || 2) : undefined,
       }
       if (DEMO_MODE) {
-        if (isEdit && editCourse) onDone({ ...editCourse, ...payload, updatedAt: now })
-        else onDone({ id: `local-${Date.now()}`, ...payload, isPublished: false, targetRoles: [], createdBy: userId, createdAt: now, updatedAt: now } as Course)
+        if (isEdit && editCourse) finish({ ...editCourse, ...payload, updatedAt: now })
+        else finish({ id: `local-${Date.now()}`, ...payload, isPublished: false, targetRoles: [], createdBy: userId, createdAt: now, updatedAt: now } as Course)
         return
       }
       if (isEdit && editCourse) {
         await save('courses', { ...payload, id: editCourse.id, updatedAt: now })
-        onDone({ ...editCourse, ...payload, updatedAt: now })
+        finish({ ...editCourse, ...payload, updatedAt: now })
       } else {
         // A new course is a draft: nobody is assigned and learners do not see it until a Course Design launches it.
         const { id } = await save('courses', {
           ...payload, id: '', isPublished: false, targetRoles: [], assignedUserIds: [], assignedDepartments: [], assignedTeamIds: [],
           createdBy: userId, createdAt: now, updatedAt: now,
         })
-        onDone({ id, ...payload, isPublished: false, targetRoles: [], createdBy: userId, createdAt: now, updatedAt: now } as Course)
+        finish({ id, ...payload, isPublished: false, targetRoles: [], createdBy: userId, createdAt: now, updatedAt: now } as Course)
       }
     } catch (e) {
       console.error('performSave:', e)
@@ -3418,6 +3438,8 @@ function CourseFormModal({ assessments, allUsers, onDone, userId, editCourse }: 
                   enabled={form.quizEnabled}
                   topics={form.topics}
                   onChangeTopics={(topics) => set('topics', topics)}
+                  onSaveAndCreateQuiz={() => { if (validate()) void performSave('/assessment') }}
+                  saving={saving}
                   assessments={assessments}
                 />
               )}
