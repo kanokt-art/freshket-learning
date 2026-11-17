@@ -503,7 +503,7 @@ export default function UsersPage() {
 
       <div className="flex-1 overflow-auto p-6">
         {/* View toggle */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl p-1">
             <button
               onClick={() => setView('list')}
@@ -1806,44 +1806,11 @@ function AddEmployeeModal({
   onClose: () => void
   onImport: (newUsers: UserProfile[], updatedCount: number, skipped: number, hiddenCount: number, missingCount: number) => void
 }) {
-  const [tab, setTab] = useState<'manual' | 'csv'>('manual')
   const fileRef = useRef<HTMLInputElement>(null)
   const missingCardRef = useRef<HTMLDivElement>(null)
-  const [form, setForm] = useState({
-    displayName: '', nickname: '', employeeId: '', email: '',
-    department: '', position: '', role: 'sale' as UserRole, startDate: '',
-  })
-  const [manualError, setManualError] = useState('')
   const [csvResult, setCsvResult] = useState<{ valid: UserProfile[]; updated: string[]; duplicates: string[]; hidden: number; missing: UserProfile[]; outside: number; outsideDepts: { name: string; count: number }[] } | null>(null)
   const [confirmMissing, setConfirmMissing] = useState(false)
   const [csvFileName, setCsvFileName] = useState('')
-
-  function handleManualSubmit() {
-    setManualError('')
-    if (!form.displayName.trim()) { setManualError('กรุณาระบุชื่อพนักงาน'); return }
-    if (form.employeeId && users.some(u => u.employeeId === form.employeeId.trim())) {
-      setManualError(`รหัสพนักงาน ${form.employeeId} มีอยู่ในระบบแล้ว`); return
-    }
-    if (form.email && users.some(u => u.email?.toLowerCase() === form.email.toLowerCase().trim())) {
-      setManualError(`อีเมล ${form.email} มีอยู่ในระบบแล้ว`); return
-    }
-    let startDate: Date | undefined
-    if (form.startDate) { const d = new Date(form.startDate); if (!isNaN(d.getTime())) startDate = d }
-    onImport([{
-      uid: `manual-${Date.now()}`,
-      email: form.email.trim() || `${form.employeeId || Date.now()}@freshket.co`,
-      displayName: form.displayName.trim(),
-      photoURL: null,
-      role: form.role,
-      nickname: form.nickname.trim() || undefined,
-      employeeId: form.employeeId.trim() || undefined,
-      department: form.department.trim() || undefined,
-      position: form.position.trim() || undefined,
-      startDate,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }], 0, 0, 0, 0)
-  }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -1865,71 +1832,17 @@ function AddEmployeeModal({
 
         {/* Header */}
         <div className="px-6 pt-6 pb-4 border-b border-gray-100">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-bold text-gray-900">เพิ่มพนักงาน</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-gray-900">นำเข้าพนักงาน (CSV)</h2>
             <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
               <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
-          <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-            <button onClick={() => setTab('manual')} className={`flex-1 py-1.5 text-sm font-normal rounded-lg transition-all ${tab === 'manual' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              กรอกด้วยตนเอง
-            </button>
-            <button onClick={() => setTab('csv')} className={`flex-1 py-1.5 text-sm font-normal rounded-lg transition-all ${tab === 'csv' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              นำเข้า CSV
-            </button>
-          </div>
         </div>
 
-        {tab === 'manual' && (
-          <div className="px-6 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <label className="block text-xs font-bold text-gray-600 mb-1">ชื่อ-นามสกุล <span className="text-rose-500">*</span></label>
-                <input type="text" value={form.displayName} onChange={e => setForm(f => ({ ...f, displayName: e.target.value }))} placeholder="เช่น Somchai Jaidee" className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">ชื่อเล่น</label>
-                <input type="text" value={form.nickname} onChange={e => setForm(f => ({ ...f, nickname: e.target.value }))} placeholder="เช่น โอ" className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">รหัสพนักงาน</label>
-                <input type="text" value={form.employeeId} onChange={e => setForm(f => ({ ...f, employeeId: e.target.value }))} placeholder="เช่น EMP001" className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300" />
-              </div>
-              <div className="col-span-2">
-                <label className="block text-xs font-bold text-gray-600 mb-1">Company Email</label>
-                <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="example@freshket.co" className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">แผนก</label>
-                <input type="text" value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))} placeholder="เช่น Sales Management" className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">ตำแหน่ง</label>
-                <input type="text" value={form.position} onChange={e => setForm(f => ({ ...f, position: e.target.value }))} placeholder="เช่น Sale Executive" className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">ระดับสิทธิ์</label>
-                <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as UserRole }))} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 bg-white">
-                  <option value="sale">Sale</option>
-                  <option value="team_lead">Team Lead</option>
-                  <option value="manager">Manager</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">วันเข้างาน</label>
-                <input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300" />
-              </div>
-            </div>
-            {manualError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-normal">{manualError}</div>
-            )}
-          </div>
-        )}
-
-        {tab === 'csv' && (
+        {(
           <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
             <input ref={fileRef} type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
             {!csvResult ? (
@@ -2088,7 +2001,7 @@ function AddEmployeeModal({
               which can be scrolled out of view by the time someone reaches
               the footer — so a disabled button with no visible explanation
               here just looked broken ("ทำไมกดไม่ได้"). */}
-          {tab === 'csv' && csvResult && csvResult.missing.length > 0 && !confirmMissing && (
+          {csvResult && csvResult.missing.length > 0 && !confirmMissing && (
             <button
               type="button"
               onClick={() => {
@@ -2113,11 +2026,7 @@ function AddEmployeeModal({
             <button onClick={onClose} className="flex-1 px-4 py-2 text-sm font-bold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-all">
               ยกเลิก
             </button>
-            {tab === 'manual' ? (
-              <button onClick={handleManualSubmit} disabled={!form.displayName.trim()} className="flex-1 px-4 py-2 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
-                เพิ่มพนักงาน
-              </button>
-            ) : (
+            {(
               <button
                 onClick={() => {
                   if (!csvResult?.valid.length) return
