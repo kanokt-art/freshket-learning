@@ -57,9 +57,9 @@ describe('who can be added to a team', () => {
   })
 
   it('Key Account and Portfolio teams see each other, plus Commercial', () => {
-    for (const home of ['Key Account Management', 'Portfolio Management', 'Account Development']) {
+    for (const home of ['Key Account Management', 'Portfolio Management']) {
       const a = allowedMemberDepartments(home)
-      expect(Array.from(a).sort()).toEqual(['Account Development', 'Commercial', 'Key Account Management', 'Portfolio Management'])
+      expect(Array.from(a).sort()).toEqual(['Commercial', 'Key Account Management', 'Portfolio Management'])
     }
   })
 

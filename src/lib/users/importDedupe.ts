@@ -17,6 +17,8 @@ export interface ImportRow {
 export interface ResolvedImport {
   valid: UserProfile[]
   updated: string[]
+  /** People the file adds: not on file yet, and working (Active). */
+  added: UserProfile[]
   duplicates: string[]
   hidden: number
   /** Active on file but absent from the export — minus anyone the export does list. */
@@ -45,6 +47,7 @@ export function resolveImportRows(rows: ImportRow[], missing: UserProfile[]): Re
   return {
     valid: kept.map((r) => r.profile),
     updated: kept.filter((r) => r.matched).map((r) => r.profile.displayName),
+    added: kept.filter((r) => !r.matched && isActive(r.profile)).map((r) => r.profile),
     duplicates,
     hidden: kept.filter((r) => !isActive(r.profile)).length,
     // A person the file lists must never also be marked as having dropped out of it.

@@ -5,7 +5,7 @@ import { formatPersonName } from '@/lib/users/displayName'
 import { rankToRole } from '@/lib/users/rankToRole'
 import { resolveImportRows, type ImportRow } from '@/lib/users/importDedupe'
 import { isExcludedPosition } from '@/lib/users/excludedPositions'
-import { isTargetDepartment } from '@/lib/modules'
+import { isTargetDepartment, setTargetDepartments, TARGET_DEPARTMENTS_DOC } from '@/lib/modules'
 import { CopyableText, CopyIcon, StartDateCell } from '@/components/common/EmployeeCells'
 import { tenureLabel } from '@/lib/users/tenure'
 import { useState, useMemo, useRef, useEffect } from 'react'
@@ -1008,6 +1008,7 @@ export default function UsersPage() {
       {showAddEmployee && (
         <AddEmployeeModal
           users={users}
+          canEnableDepartments={isSuperAdmin && !DEMO_MODE}
           onClose={() => setShowAddEmployee(false)}
           onImport={(newUsers, updatedCount, skipped, hiddenCount, missingCount) => {
             if (DEMO_MODE) {
@@ -1647,6 +1648,7 @@ function parseCSVLine(line: string): string[] {
 function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
   valid: UserProfile[]
   updated: string[]
+  added: UserProfile[]
   duplicates: string[]
   hidden: number
   missing: UserProfile[]
@@ -1656,7 +1658,7 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
   outsideDepts: { name: string; count: number }[]
 } {
   const lines = text.replace(/^﻿/, '').replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean)
-  if (lines.length < 2) return { valid: [], updated: [], duplicates: [], hidden: 0, missing: [], outside: 0, outsideDepts: [] }
+  if (lines.length < 2) return { valid: [], updated: [], added: [], duplicates: [], hidden: 0, missing: [], outside: 0, outsideDepts: [] }
 
   // Look up existing records to carry over uid (upsert uses existing uid)
   const existingByEmpId = new Map(existingUsers.filter(u => u.employeeId).map(u => [u.employeeId!, u]))
@@ -1794,29 +1796,82 @@ function CopyBtn({ text }: { text: string }) {
 
 // ── Add Employee Modal ─────────────────────────────────────────────────────────
 
+// Name, position and department of each person in an import preview list.
+function PeopleTable({ people, tone }: { people: UserProfile[]; tone?: 'rose' }) {
+  const head = tone === 'rose' ? 'bg-rose-50 text-rose-600' : 'bg-gray-50 text-gray-500'
+  return (
+    <div className="border border-gray-100 rounded-xl overflow-hidden">
+      <div className="max-h-72 overflow-auto">
+        <table className="w-full text-xs">
+          <thead className="sticky top-0">
+            <tr className={head}>
+              <th className="text-left px-3 py-2 font-bold">ชื่อ-นามสกุล</th>
+              <th className="text-left px-3 py-2 font-bold">ตำแหน่ง</th>
+              <th className="text-left px-3 py-2 font-bold">แผนก</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {people.map((u, i) => (
+              <tr key={`${u.uid}-${i}`}>
+                <td className="px-3 py-1.5 text-gray-700">
+                  {u.displayName}{u.nickname && <span className="text-gray-400"> ({u.nickname})</span>}
+                </td>
+                <td className="px-3 py-1.5 text-gray-500">{u.position ?? '—'}</td>
+                <td className="px-3 py-1.5 text-gray-500">{u.department ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function AddEmployeeModal({
   users,
+  canEnableDepartments,
   onClose,
   onImport,
 }: {
   users: UserProfile[]
+  canEnableDepartments: boolean
   onClose: () => void
   onImport: (newUsers: UserProfile[], updatedCount: number, skipped: number, hiddenCount: number, missingCount: number) => void
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const missingCardRef = useRef<HTMLDivElement>(null)
-  const [csvResult, setCsvResult] = useState<{ valid: UserProfile[]; updated: string[]; duplicates: string[]; hidden: number; missing: UserProfile[]; outside: number; outsideDepts: { name: string; count: number }[] } | null>(null)
+  const [csvResult, setCsvResult] = useState<{ valid: UserProfile[]; updated: string[]; added: UserProfile[]; duplicates: string[]; hidden: number; missing: UserProfile[]; outside: number; outsideDepts: { name: string; count: number }[] } | null>(null)
+  const [csvText, setCsvText] = useState('')
+  const [enablingDept, setEnablingDept] = useState('')
+  const [previewTab, setPreviewTab] = useState<'added' | 'removed'>('added')
   const [confirmMissing, setConfirmMissing] = useState(false)
   const [csvFileName, setCsvFileName] = useState('')
+
+  // Switches a department on (the same setting as Module Settings) and reads the file again, so its people join this import.
+  async function enableDepartment(name: string) {
+    setEnablingDept(name)
+    try {
+      const next = Array.from(PHASE1_DEPARTMENTS).concat(name)
+      await patch('appConfig', TARGET_DEPARTMENTS_DOC, { departments: next })
+      setTargetDepartments(next)
+      setCsvResult(parseCsvToProfiles(csvText, users))
+    } catch {
+      alert('เปิดใช้งานแผนกไม่สำเร็จ ลองใหม่อีกครั้ง')
+    } finally {
+      setEnablingDept('')
+    }
+  }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     setCsvFileName(file.name)
     setConfirmMissing(false)
+    setPreviewTab('added')
     const reader = new FileReader()
     reader.onload = (ev) => {
       const text = ev.target?.result as string
+      setCsvText(text)
       setCsvResult(parseCsvToProfiles(text, users))
     }
     reader.readAsText(file, 'utf-8')
@@ -1906,7 +1961,6 @@ function AddEmployeeModal({
                   <div>
                     <p className="text-xs font-bold text-freshket-700">พร้อมนำเข้า <span className="text-base">{csvResult.valid.length}</span> คน{csvResult.updated.length > 0 && <span className="font-normal text-amber-600"> (อัปเดต {csvResult.updated.length} คน)</span>}</p>
                     {csvResult.duplicates.length > 0 && <p className="text-xs text-amber-600 mt-0.5">ข้ามซ้ำในไฟล์ {csvResult.duplicates.length} คน</p>}
-                    {csvResult.outside > 0 && <p className="text-xs text-gray-500 mt-0.5">ไม่นำเข้า {csvResult.outside} คน เพราะแผนกยังไม่เปิดใช้งาน: {csvResult.outsideDepts.map(d => `${d.name} (${d.count})`).join(', ')} — เปิดได้ที่ Module Settings (พิมพ์เพิ่มชื่อแผนกได้ถ้ายังไม่อยู่ในรายการ) แล้วนำเข้าใหม่</p>}
                   </div>
                 </div>
                 {csvResult.duplicates.length > 0 && (
@@ -1917,72 +1971,54 @@ function AddEmployeeModal({
                     </ul>
                   </div>
                 )}
-                {csvResult.missing.length > 0 && (
-                  <div ref={missingCardRef} className="p-3 bg-rose-50 border border-rose-200 rounded-xl">
-                    <p className="text-xs font-bold text-rose-700 mb-1.5">
-                      พบพนักงานหายไป {csvResult.missing.length} คน (มีในระบบ แต่ไม่มีในไฟล์นี้)
-                    </p>
-                    <p className="text-xs text-rose-600 mb-2">จะถูกตั้งสถานะเป็น &quot;Resigned&quot; และซ่อนจากรายชื่อ — ประวัติการอบรมยังอยู่ครบ ไม่ถูกลบถาวร</p>
-                    <ul className="space-y-1 max-h-40 overflow-y-auto mb-2">
-                      {csvResult.missing.map((u, i) => (
-                        <li key={i} className="text-xs text-rose-600 leading-snug">
-                          <span className="font-bold">{u.displayName}</span>
-                          {u.nickname && <span> ({u.nickname})</span>}
-                          {(u.department || u.position) && (
-                            <span className="block text-rose-400">
-                              {[u.department, u.position].filter(Boolean).join(' · ')}
-                            </span>
-                          )}
-                        </li>
+                {canEnableDepartments && csvResult.outsideDepts.some(d => d.name !== '(ไม่ระบุแผนก)') && (
+                  <details className="border border-gray-100 rounded-xl">
+                    <summary className="px-3 py-2 text-xs font-bold text-gray-600 cursor-pointer">เปิดใช้งานแผนกที่ยังไม่อยู่ในระบบ</summary>
+                    <div className="px-3 pb-3 flex flex-wrap gap-1.5">
+                      {csvResult.outsideDepts.filter(d => d.name !== '(ไม่ระบุแผนก)').map(d => (
+                        <button key={d.name} type="button" disabled={!!enablingDept} onClick={() => void enableDepartment(d.name)}
+                          className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full border border-freshket-200 bg-freshket-50 text-freshket-700 hover:bg-freshket-100 transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed">
+                          {enablingDept === d.name ? 'กำลังเปิด...' : `+ ${d.name}`}
+                        </button>
                       ))}
-                    </ul>
-                    <label className="flex items-center gap-2 text-xs font-bold text-rose-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={confirmMissing}
-                        onChange={e => setConfirmMissing(e.target.checked)}
-                        className="rounded border-rose-300 text-rose-600 focus:ring-rose-300"
-                      />
-                      ยืนยันว่าพนักงานเหล่านี้ลาออก/พ้นสภาพแล้ว
-                    </label>
-                  </div>
+                    </div>
+                  </details>
                 )}
-                {csvResult.valid.length > 0 && (
-                  <div className="overflow-x-auto border border-gray-100 rounded-xl">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-gray-50 border-b border-gray-100">
-                          <th className="text-left px-3 py-2 font-bold text-gray-500">Name</th>
-                          <th className="text-left px-3 py-2 font-bold text-gray-500">Nickname</th>
-                          <th className="text-left px-3 py-2 font-bold text-gray-500">Emp.ID</th>
-                          <th className="text-left px-3 py-2 font-bold text-gray-500">Department</th>
-                          <th className="text-left px-3 py-2 font-bold text-gray-500">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-50">
-                        {csvResult.valid.slice(0, 10).map((u, i) => (
-                          <tr key={i}>
-                            <td className="px-3 py-1.5 text-gray-700">{u.displayName}</td>
-                            <td className="px-3 py-1.5 text-gray-500">{u.nickname ?? '—'}</td>
-                            <td className="px-3 py-1.5 font-mono text-gray-500">{u.employeeId ?? '—'}</td>
-                            <td className="px-3 py-1.5 text-gray-500 truncate max-w-24">{u.department ?? '—'}</td>
-                            <td className="px-3 py-1.5">
-                              {u.employmentStatus && u.employmentStatus !== 'Active' ? (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-600">
-                                  {u.employmentStatus} · จะซ่อนจากรายชื่อ
-                                </span>
-                              ) : (
-                                <span className="text-gray-400">Active</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                        {csvResult.valid.length > 10 && (
-                          <tr><td colSpan={5} className="px-3 py-1.5 text-center text-gray-400">... และอีก {csvResult.valid.length - 10} คน</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                  <button type="button" onClick={() => setPreviewTab('added')} className={`flex-1 py-1.5 text-sm rounded-lg transition-all ${previewTab === 'added' ? 'bg-white text-gray-900 shadow-sm font-bold' : 'text-gray-500 hover:text-gray-700'}`}>
+                    เพิ่มใหม่ ({csvResult.added.length})
+                  </button>
+                  <button type="button" onClick={() => setPreviewTab('removed')} className={`flex-1 py-1.5 text-sm rounded-lg transition-all ${previewTab === 'removed' ? 'bg-white text-gray-900 shadow-sm font-bold' : 'text-gray-500 hover:text-gray-700'}`}>
+                    ถูกลบออก ({csvResult.missing.length})
+                  </button>
+                </div>
+
+                {previewTab === 'added' && (
+                  csvResult.added.length === 0 ? (
+                    <p className="p-6 text-center text-gray-400 text-sm">ไม่มีพนักงานใหม่ในไฟล์นี้</p>
+                  ) : (
+                    <PeopleTable people={csvResult.added} />
+                  )
+                )}
+
+                {previewTab === 'removed' && (
+                  csvResult.missing.length === 0 ? (
+                    <p className="p-6 text-center text-gray-400 text-sm">ไม่มีพนักงานที่ถูกลบออก</p>
+                  ) : (
+                    <div ref={missingCardRef} className="space-y-3">
+                      <p className="text-xs text-rose-600">มีในระบบ แต่ไม่มีในไฟล์นี้ จะถูกตั้งสถานะเป็น &quot;Resigned&quot; และซ่อนจากรายชื่อ — ประวัติการอบรมยังอยู่ครบ ไม่ถูกลบถาวร</p>
+                      <PeopleTable people={csvResult.missing} tone="rose" />
+                      <label className="flex items-center gap-2 text-xs font-bold text-rose-700 cursor-pointer p-3 bg-rose-50 border border-rose-200 rounded-xl">
+                        <input
+                          type="checkbox"
+                          checked={confirmMissing}
+                          onChange={e => setConfirmMissing(e.target.checked)}
+                          className="rounded border-rose-300 text-rose-600 focus:ring-rose-300"
+                        />
+                        ยืนยันว่าพนักงานเหล่านี้ลาออก/พ้นสภาพแล้ว
+                      </label>
+                    </div>
+                  )
                 )}
                 {csvResult.valid.length === 0 && (
                   <div className="p-6 text-center text-gray-400 text-sm">ไม่พบพนักงานที่มีสถานะ Active</div>
@@ -2002,6 +2038,7 @@ function AddEmployeeModal({
             <button
               type="button"
               onClick={() => {
+                setPreviewTab('removed')
                 const el = missingCardRef.current
                 if (!el) return
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' })
