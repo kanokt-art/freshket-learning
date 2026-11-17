@@ -71,8 +71,23 @@ export default function ModuleSettingsPage() {
   const departments = useMemo(() => {
     const depts = new Set<string>()
     allUsers.forEach(u => { if (u.department && isActiveEmployee(u)) depts.add(u.department) })
+    // A department that is switched on always stays in the list, even before anyone from it has been imported,
+    // so it can be switched off again.
+    targets.forEach(t => depts.add(t))
     return Array.from(depts).sort((a, b) => Number(targets.includes(b)) - Number(targets.includes(a)) || a.localeCompare(b))
   }, [allUsers, targets])
+
+  // A department nobody has been imported into yet cannot appear in the list (the list comes from people), and the
+  // HR import skips departments that are not switched on, so it is typed in here and switched on first.
+  const [newDept, setNewDept] = useState('')
+  function addDepartment() {
+    const name = newDept.trim().replace(/\s+/g, ' ')
+    if (!name) return
+    setTargets(prev => (prev.includes(name) ? prev : [...prev, name]))
+    setNewDept('')
+    setSaved(false)
+    setDirty(true)
+  }
 
   function toggleTarget(dept: string) {
     setTargets(prev => (prev.includes(dept) ? prev.filter(d => d !== dept) : [...prev, dept]))
@@ -273,6 +288,22 @@ export default function ModuleSettingsPage() {
                 onToggle={(m) => toggleModule('default', m)}
               />
             </div>
+          </div>
+
+          {/* Switch on a department that has no one in the system yet */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-6 py-4">
+            <h3 className="text-sm font-bold text-gray-900">เพิ่มแผนกที่ยังไม่มีพนักงานในระบบ</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              พิมพ์ชื่อแผนกให้ตรงกับคอลัมน์ Department ในไฟล์ HR (เช่น Account Development) แล้วกดบันทึกด้านล่าง จากนั้นนำเข้าไฟล์ HR ใหม่ พนักงานแผนกนี้จึงจะเข้ามา
+            </p>
+            <form className="flex gap-2 mt-3" onSubmit={(e) => { e.preventDefault(); addDepartment() }}>
+              <input type="text" value={newDept} onChange={(e) => setNewDept(e.target.value)} placeholder="ชื่อแผนก" disabled={isDemo || !targetsLoaded}
+                className="flex-1 min-w-0 px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-freshket-300 placeholder:text-gray-300 disabled:opacity-60" />
+              <button type="submit" disabled={isDemo || !targetsLoaded || !newDept.trim()}
+                className="px-4 py-2 text-sm font-bold rounded-xl bg-freshket-500 text-white hover:bg-freshket-600 transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed">
+                เพิ่มแผนก
+              </button>
+            </form>
           </div>
 
           {/* Per-department table */}

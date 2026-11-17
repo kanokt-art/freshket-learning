@@ -1655,9 +1655,11 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
   missing: UserProfile[]
   /** People left out because their department is not switched on. */
   outside: number
+  /** Which departments those people are in, with how many each. */
+  outsideDepts: { name: string; count: number }[]
 } {
   const lines = text.replace(/^﻿/, '').replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean)
-  if (lines.length < 2) return { valid: [], updated: [], duplicates: [], hidden: 0, missing: [], outside: 0 }
+  if (lines.length < 2) return { valid: [], updated: [], duplicates: [], hidden: 0, missing: [], outside: 0, outsideDepts: [] }
 
   // Look up existing records to carry over uid (upsert uses existing uid)
   const existingByEmpId = new Map(existingUsers.filter(u => u.employeeId).map(u => [u.employeeId!, u]))
@@ -1675,6 +1677,7 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
   // Every usable line; people who appear more than once are reduced afterwards (resolveImportRows).
   const rows: ImportRow[] = []
   let outside = 0
+  const outsideByDept = new Map<string, number>()
 
   for (const line of lines.slice(1)) {
     const cols = parseCSVLine(line)
@@ -1704,7 +1707,7 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
     // Maids and masseuses are not target: left out of the import altogether.
     if (isExcludedPosition(position)) continue
     // A department a super_admin has not switched on is not synced in at all (Module Settings).
-    if (!isTargetDepartment(dept)) { outside++; continue }
+    if (!isTargetDepartment(dept)) { outside++; outsideByDept.set(dept || '(ไม่ระบุแผนก)', (outsideByDept.get(dept || '(ไม่ระบุแผนก)') ?? 0) + 1); continue }
 
     // Reuse existing uid so saveLocalImportedUsers can upsert by uid.
     // UID is deterministic: csv-{empId} — same employee always gets same UID
@@ -1749,7 +1752,10 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
     updatedAt: new Date(),
   }))
 
-  return { ...resolveImportRows(rows, missing), outside }
+  return {
+    ...resolveImportRows(rows, missing), outside,
+    outsideDepts: Array.from(outsideByDept, ([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+  }
 }
 
 
@@ -1800,7 +1806,7 @@ function AddEmployeeModal({
     department: '', position: '', role: 'sale' as UserRole, startDate: '',
   })
   const [manualError, setManualError] = useState('')
-  const [csvResult, setCsvResult] = useState<{ valid: UserProfile[]; updated: string[]; duplicates: string[]; hidden: number; missing: UserProfile[]; outside: number } | null>(null)
+  const [csvResult, setCsvResult] = useState<{ valid: UserProfile[]; updated: string[]; duplicates: string[]; hidden: number; missing: UserProfile[]; outside: number; outsideDepts: { name: string; count: number }[] } | null>(null)
   const [confirmMissing, setConfirmMissing] = useState(false)
   const [csvFileName, setCsvFileName] = useState('')
 
@@ -1982,7 +1988,7 @@ function AddEmployeeModal({
                   <div>
                     <p className="text-xs font-bold text-freshket-700">พร้อมนำเข้า <span className="text-base">{csvResult.valid.length}</span> คน{csvResult.updated.length > 0 && <span className="font-normal text-amber-600"> (อัปเดต {csvResult.updated.length} คน)</span>}</p>
                     {csvResult.duplicates.length > 0 && <p className="text-xs text-amber-600 mt-0.5">ข้ามซ้ำในไฟล์ {csvResult.duplicates.length} คน</p>}
-                    {csvResult.outside > 0 && <p className="text-xs text-gray-500 mt-0.5">ไม่นำเข้า {csvResult.outside} คน เพราะแผนกยังไม่เปิดใช้งาน (เปิดได้ที่ Module Settings)</p>}
+                    {csvResult.outside > 0 && <p className="text-xs text-gray-500 mt-0.5">ไม่นำเข้า {csvResult.outside} คน เพราะแผนกยังไม่เปิดใช้งาน: {csvResult.outsideDepts.map(d => `${d.name} (${d.count})`).join(', ')} — เปิดได้ที่ Module Settings (พิมพ์เพิ่มชื่อแผนกได้ถ้ายังไม่อยู่ในรายการ) แล้วนำเข้าใหม่</p>}
                   </div>
                 </div>
                 {csvResult.duplicates.length > 0 && (
