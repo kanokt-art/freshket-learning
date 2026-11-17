@@ -41,6 +41,7 @@ export const DEFAULT_TARGET_DEPARTMENTS = [
   'Sales Management',
   'Key Account Management',
   'Portfolio Management',
+  'Account Development', // Portfolio Management's new name
   'Commercial',
   'People Experience',
 ]

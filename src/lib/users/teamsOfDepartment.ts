@@ -7,10 +7,13 @@ export function deptId(name: string) {
 }
 
 /** The Commercial org chart: Sales, Key Account, Portfolio and Commercial itself. */
-export const COMMERCIAL_FAMILY = ['Sales Management', 'Key Account Management', 'Portfolio Management', 'Commercial']
+export const COMMERCIAL_FAMILY = ['Sales Management', 'Key Account Management', 'Portfolio Management', 'Account Development', 'Commercial']
 
 /** The two departments that used to share one card; their teams carry the first one's id. */
 const FORMER_MERGE = ['Key Account Management', 'Portfolio Management']
+
+// Portfolio Management was renamed Account Development: people may carry either name.
+const MERGE_DEPARTMENTS = [...FORMER_MERGE, 'Account Development']
 
 /**
  * Which of the former merged departments a team really belongs to, judged by who is in it
@@ -21,7 +24,7 @@ function formerMergeHome(team: Team, users: UserProfile[]): string | undefined {
   const ids = new Set<string>([...getTeamLeadIds(team), ...getTeamManagerIds(team)])
   const tally = new Map<string, number>()
   for (const u of users) {
-    if (!u.department || !FORMER_MERGE.includes(u.department)) continue
+    if (!u.department || !MERGE_DEPARTMENTS.includes(u.department)) continue
     if (u.teamId === team.id || ids.has(u.uid)) tally.set(u.department, (tally.get(u.department) ?? 0) + 1)
   }
   const ranked = Array.from(tally.entries()).sort((a, b) => b[1] - a[1])
@@ -63,8 +66,8 @@ export function teamHomeDepartment(team: Team, users: UserProfile[], fallback: s
  */
 export function allowedMemberDepartments(home: string): Set<string> {
   if (home === 'Commercial') return new Set(COMMERCIAL_FAMILY)
-  if (home === 'Key Account Management' || home === 'Portfolio Management') {
-    return new Set(['Key Account Management', 'Portfolio Management', 'Commercial'])
+  if (home === 'Key Account Management' || home === 'Portfolio Management' || home === 'Account Development') {
+    return new Set(['Key Account Management', 'Portfolio Management', 'Account Development', 'Commercial'])
   }
   if (home === 'Sales Management') return new Set(['Sales Management', 'Commercial'])
   return new Set([home])

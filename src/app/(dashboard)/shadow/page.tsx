@@ -32,11 +32,12 @@ const DEMO_MODE = getDemoMode()
 // People Experience, …) because it had no department filter at all. "Sale"
 // specifically means Sales Management here (not the broader "Sales" department),
 // per how the department is actually used elsewhere in HR data.
-const MENTOR_DEPARTMENTS = new Set(['Sales Management', 'Key Account Management', 'Portfolio Management'])
+const MENTOR_DEPARTMENTS = new Set(['Sales Management', 'Key Account Management', 'Portfolio Management', 'Account Development'])
 const MENTOR_DEPARTMENT_LABELS: Record<string, string> = {
   'Sales Management': 'Sale',
   'Key Account Management': 'Key Account',
   'Portfolio Management': 'Portfolio Management',
+  'Account Development': 'Account Development',
 }
 
 const SEGMENTS: ShadowSegment[] = ['Mini Chain', 'Stand alone', 'Chain']
