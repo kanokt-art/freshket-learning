@@ -143,16 +143,6 @@ export default function UsersPage() {
   const [teamDeptFilter, setTeamDeptFilter] = useState<string[]>([])
   const [showTeamDeptFilter, setShowTeamDeptFilter] = useState(false)
 
-  const deptOptions = useMemo(() => {
-    // Phase 1 rollout — only these departments are onboarded so far; keep the
-    // filter dropdown decluttered to match. Remove PHASE1_DEPARTMENTS once
-    // other departments go live (see the same allowlist in OrgBoard.tsx).
-    const set = new Set(
-      users.map(u => u.department).filter((d): d is string => !!d && PHASE1_DEPARTMENTS.has(d)),
-    )
-    return Array.from(set).sort()
-  }, [users])
-
   // Org board (team structure) shows only active employees — a resigned/exited
   // person shouldn't keep sitting in a team card or "Unassigned" indefinitely.
   // This is display-only: their teamId in Firestore is untouched, so they
@@ -164,29 +154,36 @@ export default function UsersPage() {
     [users],
   )
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase().trim()
-    // Resigned / No-show employees are hidden from this list only — their
-    // training history, team membership, and org-board presence are untouched;
-    // this is purely a roster-view filter, not a data deletion.
-    // Also drop non-numeric employee IDs (e.g. "FTE" placeholder codes) — same
-    // rule as the /sale roster: this list is meant for real, numbered employees.
-    // Only departments in the current rollout (PHASE1_DEPARTMENTS — the same list the
-    // department filter, org board and learner picker use): Tech, Logistics and the rest
-    // are left out of the list until they are onboarded.
-    const active = users.filter(u =>
+  // Resigned / No-show employees are hidden from this list only — their
+  // training history, team membership, and org-board presence are untouched;
+  // this is purely a roster-view filter, not a data deletion.
+  // Also drop non-numeric employee IDs (e.g. "FTE" placeholder codes) — same
+  // rule as the /sale roster: this list is meant for real, numbered employees.
+  // Only departments in the current rollout (PHASE1_DEPARTMENTS — the same list the
+  // department filter, org board and learner picker use): Tech, Logistics and the rest
+  // are left out of the list until they are onboarded.
+  const rosterBase = useMemo(() => users.filter(u =>
       (!u.employmentStatus || u.employmentStatus === 'Active') &&
       !!u.employeeId && /^\d+$/.test(u.employeeId) &&
       !!u.department && PHASE1_DEPARTMENTS.has(u.department),
-    )
+    ), [users])
+
+  // The department filter offers exactly the departments present in the rows listed below.
+  const deptOptions = useMemo(
+    () => Array.from(new Set(rosterBase.map(u => u.department!))).sort(),
+    [rosterBase],
+  )
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim()
     let list = q
-      ? active.filter((u) =>
+      ? rosterBase.filter((u) =>
           u.displayName.toLowerCase().includes(q) ||
           (u.displayNameEN?.toLowerCase() ?? '').includes(q) ||
           (u.nickname?.toLowerCase() ?? '').includes(q) ||
           (u.employeeId?.toLowerCase() ?? '').includes(q)
         )
-      : [...active]
+      : [...rosterBase]
     if (deptFilter) list = list.filter(u => u.department === deptFilter)
     if (isSuperAdmin && slackFilter === 'missing') list = list.filter(u => !u.slackUserId)
     if (isSuperAdmin && slackFilter === 'has') list = list.filter(u => !!u.slackUserId)
@@ -212,7 +209,7 @@ export default function UsersPage() {
       }
       return sortDir === 'asc' ? cmp : -cmp
     })
-  }, [users, search, deptFilter, slackFilter, isSuperAdmin, sortField, sortDir])
+  }, [rosterBase, search, deptFilter, slackFilter, isSuperAdmin, sortField, sortDir])
 
   // List view renders one page at a time — the active roster can run well into
   // the thousands (a recent CSV import alone was ~2600 rows), and rendering
