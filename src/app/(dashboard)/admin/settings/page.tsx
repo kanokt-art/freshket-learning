@@ -68,13 +68,24 @@ export default function ModuleSettingsPage() {
   // Only departments that still have someone working in them (Active). A department whose people
   // have all resigned is closed and is not listed, switched on or not (its saved settings are kept).
   // Switched-on ones first.
-  const departments = useMemo(() => {
+  // Every department anyone is filed under is listed, so a department whose people are not marked 'Active'
+  // (Pending, an unusual HR status) can still be found and switched on; `noActive` tags those rows.
+  const { activeDepts, departments } = useMemo(() => {
+    const active = new Set<string>()
     const depts = new Set<string>()
-    allUsers.forEach(u => { if (u.department && isActiveEmployee(u)) depts.add(u.department) })
+    allUsers.forEach(u => {
+      const d = u.department?.trim()
+      if (!d) return
+      depts.add(d)
+      if (isActiveEmployee(u)) active.add(d)
+    })
     // A department that is switched on always stays in the list, even before anyone from it has been imported,
     // so it can be switched off again.
     targets.forEach(t => depts.add(t))
-    return Array.from(depts).sort((a, b) => Number(targets.includes(b)) - Number(targets.includes(a)) || a.localeCompare(b))
+    return {
+      activeDepts: active,
+      departments: Array.from(depts).sort((a, b) => Number(targets.includes(b)) - Number(targets.includes(a)) || a.localeCompare(b)),
+    }
   }, [allUsers, targets])
 
   // A department nobody has been imported into yet cannot appear in the list (the list comes from people), and the
@@ -351,6 +362,11 @@ export default function ModuleSettingsPage() {
                           <td className="px-6 py-3">
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-bold text-gray-800">{dept}</span>
+                              {!activeDepts.has(dept) && (
+                                <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 font-bold border border-amber-100">
+                                  ไม่มีพนักงาน Active
+                                </span>
+                              )}
                               {hasOverride ? (
                                 <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-500 font-bold border border-blue-100">
                                   custom
