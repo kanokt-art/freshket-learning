@@ -1707,7 +1707,15 @@ function parseCsvToProfiles(text: string, existingUsers: UserProfile[]): {
     // Maids and masseuses are not target: left out of the import altogether.
     if (isExcludedPosition(position)) continue
     // A department a super_admin has not switched on is not synced in at all (Module Settings).
-    if (!isTargetDepartment(dept)) { outside++; outsideByDept.set(dept || '(ไม่ระบุแผนก)', (outsideByDept.get(dept || '(ไม่ระบุแผนก)') ?? 0) + 1); continue }
+    if (!isTargetDepartment(dept)) {
+      outside++; outsideByDept.set(dept || '(ไม่ระบุแผนก)', (outsideByDept.get(dept || '(ไม่ระบุแผนก)') ?? 0) + 1)
+      // Still in the file, just in a department that is not switched on (e.g. renamed): not "gone", so never
+      // flagged as Resigned. Their record is left as it is until the department is switched on.
+      if (empId) unaccountedFor.delete(empId)
+      const byMail = email ? existingByEmail.get(email.toLowerCase()) : undefined
+      if (byMail?.employeeId) unaccountedFor.delete(byMail.employeeId)
+      continue
+    }
 
     // Reuse existing uid so saveLocalImportedUsers can upsert by uid.
     // UID is deterministic: csv-{empId} — same employee always gets same UID
