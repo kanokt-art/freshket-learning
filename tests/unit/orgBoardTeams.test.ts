@@ -86,3 +86,18 @@ describe('the Commercial tab', () => {
     expect(ids).toEqual(['c', 'k', 's'])
   })
 })
+
+describe('Account Development (renamed from Portfolio Management)', () => {
+  const team = (id: string) => ({ id, name: id, departmentId: 'dept-portfolio-management', teamLeadIds: ['lead'] }) as unknown as Parameters<typeof teamsOfDepartment>[0][number]
+  const user = (uid: string, department: string, teamId?: string) => ({ uid, department, teamId }) as unknown as Parameters<typeof teamsOfDepartment>[1][number]
+  const users = [
+    user('lead', 'Portfolio Management'),
+    user('a', 'Account Development', 't-ad'), user('b', 'Account Development', 't-ad'), user('c', 'Account Development', 't-ad'),
+    user('d', 'Portfolio Management', 't-pm'), user('e', 'Portfolio Management', 't-pm'),
+  ]
+  it('a team filed under Portfolio but staffed by Account Development people shows under Account Development only', () => {
+    const teams = [team('t-ad'), team('t-pm')]
+    expect(teamsOfDepartment(teams, users, ['Account Development']).map(t => t.id)).toEqual(['t-ad'])
+    expect(teamsOfDepartment(teams, users, ['Portfolio Management']).map(t => t.id)).toEqual(['t-pm'])
+  })
+})
