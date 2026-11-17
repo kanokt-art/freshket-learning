@@ -101,3 +101,9 @@ describe('Account Development (renamed from Portfolio Management)', () => {
     expect(teamsOfDepartment(teams, users, ['Portfolio Management']).map(t => t.id)).toEqual(['t-pm'])
   })
 })
+
+describe('allowedMemberDepartments for Account Development', () => {
+  it('takes Portfolio Management people (the old name) and sits under Commercial', () => {
+    expect(Array.from(allowedMemberDepartments('Account Development')).sort()).toEqual(['Account Development', 'Commercial', 'Portfolio Management'])
+  })
+})

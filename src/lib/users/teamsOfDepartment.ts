@@ -70,6 +70,9 @@ export function allowedMemberDepartments(home: string): Set<string> {
   if (home === 'Key Account Management' || home === 'Portfolio Management') {
     return new Set(['Key Account Management', 'Portfolio Management', 'Commercial'])
   }
-  if (home === 'Sales Management' || home === 'Account Development') return new Set([home, 'Commercial'])
+  // Account Development is Portfolio Management under its new name, so its team can still be led by
+  // (and take) Portfolio people, and sits under the Commercial head like the other Commercial teams.
+  if (home === 'Account Development') return new Set(['Account Development', 'Portfolio Management', 'Commercial'])
+  if (home === 'Sales Management') return new Set(['Sales Management', 'Commercial'])
   return new Set([home])
 }
