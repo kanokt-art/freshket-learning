@@ -113,6 +113,10 @@ export default function UsersPage() {
   const { user } = useAuth()
   const router = useRouter()
   const { data: users, loading } = useAllUsers()
+  // The import must see everyone on file, including people not listed here: someone who signed in before HR
+  // imported them has a row with no department, and matching by email is what keeps that row (and its login)
+  // instead of adding a second one.
+  const { data: everyoneOnFile } = useAllUsers(true, { includeAll: true })
   const { data: teams } = useTeams()
   const { data: departments } = useDepartments()
   const [search, setSearch] = useState('')
@@ -1007,7 +1011,7 @@ export default function UsersPage() {
       {/* Modals */}
       {showAddEmployee && (
         <AddEmployeeModal
-          users={users}
+          users={everyoneOnFile}
           canEnableDepartments={isSuperAdmin && !DEMO_MODE}
           onClose={() => setShowAddEmployee(false)}
           onImport={(newUsers, updatedCount, skipped, hiddenCount, missingCount) => {
