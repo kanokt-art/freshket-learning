@@ -1975,7 +1975,7 @@ function AddEmployeeModal({
                   <details className="border border-gray-100 rounded-xl">
                     <summary className="px-3 py-2 text-xs font-bold text-gray-600 cursor-pointer">เปิดใช้งานแผนกที่ยังไม่อยู่ในระบบ</summary>
                     <div className="px-3 pb-3 flex flex-wrap gap-1.5">
-                      {csvResult.outsideDepts.filter(d => d.name !== '(ไม่ระบุแผนก)').map(d => (
+                      {csvResult.outsideDepts.filter(d => d.name !== '(ไม่ระบุแผนก)').sort((x, y) => x.name.localeCompare(y.name, 'en', { sensitivity: 'base' })).map(d => (
                         <button key={d.name} type="button" disabled={!!enablingDept} onClick={() => void enableDepartment(d.name)}
                           className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full border border-freshket-200 bg-freshket-50 text-freshket-700 hover:bg-freshket-100 transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed">
                           {enablingDept === d.name ? 'กำลังเปิด...' : `+ ${d.name}`}
